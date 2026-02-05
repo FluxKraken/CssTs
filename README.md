@@ -34,6 +34,44 @@ export default defineConfig({
 });
 ```
 
+## SvelteKit setup tool
+
+This package ships a setup tool that can update a SvelteKit project to match the
+recommended configuration.
+
+### Deno + Vite + SvelteKit
+
+1. Install:
+
+```bash
+deno add npm:@jsr/kt-tools__css-ts
+```
+
+2. Run the tool:
+
+```bash
+deno run -A jsr:@kt-tools/css-ts/tool sveltekit --deno
+```
+
+This will update `deno.json` and `vite.config.*` to include the CSS-TS import map
+entry, Vite alias, and plugin.
+
+### NPM + Vite + SvelteKit
+
+1. Install:
+
+```bash
+npm i @kt-tools/css-ts
+```
+
+2. Run the tool:
+
+```bash
+npx css-ts sveltekit --npm
+```
+
+This will update `vite.config.*` to add the CSS-TS Vite plugin.
+
 ---
 
 ### Deno + Vite configuration (no package.json)

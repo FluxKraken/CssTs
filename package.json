@@ -11,10 +11,17 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./tool": {
+      "types": "./dist/tool.d.ts",
+      "import": "./dist/tool.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
     }
+  },
+  "bin": {
+    "css-ts": "./dist/tool.js"
   },
   "files": [
     "dist"
