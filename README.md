@@ -153,7 +153,7 @@ export default config;
     },
     navItem: {
       before: {
-        content: "\"- \"",
+        content: "- ",
       },
     },
   });
@@ -177,8 +177,8 @@ const styles = ct({
     ":active": { opacity: 0.7 },
   },
   item: {
-    before: { content: "\"- \"" },
-    "::after": { content: "\"\"" },
+    before: { content: "- " },
+    "::after": { content: "." },
   },
 });
 ```
