@@ -1,0 +1,58 @@
+import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { cssTsPlugin } from "./src/vite.ts";
+
+const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+
+function asHook(
+  hook: unknown,
+): (...args: any[]) => unknown {
+  if (typeof hook === "function") {
+    return hook as (...args: any[]) => unknown;
+  }
+  if (hook && typeof hook === "object" && "handler" in hook) {
+    return (hook as { handler: (...args: any[]) => unknown }).handler;
+  }
+  throw new Error("Expected plugin hook");
+}
+
+Deno.test("injects component CSS for direct ct usage in svelte", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source = `<script lang="ts">\nimport ct from "css-ts";\nconst styles = ct({ card: { display: "grid", gap: "1rem" } });\n</script>\n\n<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, "/app/src/routes/+page.svelte");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes('import "virtual:css-ts/styles.css";'));
+  assert(code.includes("<style>"));
+  assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source = `<script lang="ts">\nimport { styles } from "./styles.ts";\n</script>\n\n<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, "/app/src/routes/+page.svelte");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes('<script lang="ts">\nimport "virtual:css-ts/styles.css";'));
+});
+
+Deno.test("extracts css from ts module and serves it through the virtual stylesheet", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct from "css-ts";\nexport const styles = ct({ card: { display: "grid", gap: "1rem" } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/styles.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});

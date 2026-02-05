@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "build": "deno run --node-modules-dir=auto -A npm:typescript/bin/tsc -p tsconfig.json",
+    "test": "deno test --node-modules-dir=auto -A vite_test.ts"
+  }
+}
