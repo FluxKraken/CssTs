@@ -14,8 +14,12 @@ type CompiledBundle<T extends StyleSheet> = {
   base: CompiledMap<T>;
   variants?: VariantClassMap<T>;
 };
-type Accessor<T extends StyleSheet> = { [K in keyof T]: () => string };
-type VariantAccessors<T extends StyleSheet> = Record<string, Record<string, Partial<Accessor<T>>>>;
+type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
+  ? { [G in keyof V]?: keyof V[G] }
+  : Record<string, string>;
+type Accessor<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
+  [K in keyof T]: (variants?: VariantSelection<V>) => string;
+};
 
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
 const injectedRules = new Set<string>();
@@ -75,11 +79,14 @@ function assertVariantKeys<T extends StyleSheet>(
   }
 }
 
-export default function ct<T extends StyleSheet>(
+export default function ct<
+  T extends StyleSheet,
+  V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+>(
   styles: T,
-  variantsOrCompiled?: VariantSheet<T> | CompiledBundle<T> | CompiledMap<T>,
+  variantsOrCompiled?: V | CompiledBundle<T> | CompiledMap<T>,
   compiledMaybe?: CompiledBundle<T> | CompiledMap<T>,
-): () => Accessor<T> & { variants: VariantAccessors<T> } {
+): () => Accessor<T, V> {
   let variants: VariantSheet<T> | undefined;
   let compiled: CompiledBundle<T> | CompiledMap<T> | undefined;
 
@@ -94,8 +101,8 @@ export default function ct<T extends StyleSheet>(
     variants = variantsOrCompiled as VariantSheet<T> | undefined;
   }
 
-  const accessors = {} as Accessor<T>;
-  const variantAccessors: VariantAccessors<T> = {};
+  const accessors = {} as Accessor<T, V>;
+  const variantClassMap: VariantClassMap<T> = {};
   const compiledBase = isCompiledBundle<T>(compiled) ? compiled.base : compiled;
 
   for (const [key, declaration] of Object.entries(styles) as [keyof T, T[keyof T]][]) {
@@ -106,7 +113,26 @@ export default function ct<T extends StyleSheet>(
       injectRule(toCssRule(className, declaration));
     }
 
-    accessors[key] = () => className;
+    accessors[key] = (selection) => {
+      if (!selection) {
+        return className;
+      }
+
+      const classNames = [className];
+
+      for (const [group, variantName] of Object.entries(selection)) {
+        if (!variantName) {
+          continue;
+        }
+
+        const variantClass = variantClassMap[group]?.[variantName as string]?.[key];
+        if (variantClass) {
+          classNames.push(variantClass);
+        }
+      }
+
+      return classNames.join(" ");
+    };
   }
 
   if (variants) {
@@ -114,11 +140,11 @@ export default function ct<T extends StyleSheet>(
     const compiledVariants = isCompiledBundle<T>(compiled) ? compiled.variants : undefined;
 
     for (const [group, groupVariants] of Object.entries(variants)) {
-      const groupAccessors: Record<string, Partial<Accessor<T>>> = {};
+      const groupMap: Record<string, Partial<Record<keyof T, string>>> = {};
       const compiledGroup = compiledVariants?.[group];
 
       for (const [variantName, declarations] of Object.entries(groupVariants)) {
-        const variantAccessor: Partial<Accessor<T>> = {};
+        const variantMap: Partial<Record<keyof T, string>> = {};
         const compiledVariant = compiledGroup?.[variantName];
 
         for (const [key, declaration] of Object.entries(declarations) as [
@@ -133,17 +159,17 @@ export default function ct<T extends StyleSheet>(
             injectRule(toCssRule(className, declaration));
           }
 
-          variantAccessor[key] = () => className;
+          variantMap[key] = className;
         }
 
-        groupAccessors[variantName] = variantAccessor;
+        groupMap[variantName] = variantMap;
       }
 
-      variantAccessors[group] = groupAccessors;
+      variantClassMap[group] = groupMap;
     }
   }
 
-  return () => ({ ...accessors, variants: variantAccessors });
+  return () => accessors;
 }
 
 export type { StyleSheet, StyleDeclaration, StyleValue } from "./shared.js";
