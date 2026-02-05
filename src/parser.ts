@@ -1,9 +1,11 @@
-import { cv, isCssVarRef, type StyleSheet } from "./shared.js";
+import { cv, isCssVarRef, type StyleDeclaration, type StyleSheet } from "./shared.js";
 
 interface ParseResult {
-  value: StyleSheet;
+  value: Record<string, unknown>;
   end: number;
 }
+
+type VariantSheet = Record<string, Record<string, StyleSheet>>;
 
 function isIdentifierStart(char: string): boolean {
   return /[A-Za-z_$]/.test(char);
@@ -154,7 +156,7 @@ function parseObject(input: string, index: number): ParseResult {
   while (index < input.length) {
     index = skipWhitespace(input, index);
     if (input[index] === "}") {
-      return { value: value as StyleSheet, end: index + 1 };
+      return { value, end: index + 1 };
     }
 
     const [key, keyEnd] = parseKey(input, index);
@@ -174,7 +176,7 @@ function parseObject(input: string, index: number): ParseResult {
     }
 
     if (input[index] === "}") {
-      return { value: value as StyleSheet, end: index + 1 };
+      return { value, end: index + 1 };
     }
 
     throw new Error(`Expected ',' or '}' at ${index}`);
@@ -183,35 +185,105 @@ function parseObject(input: string, index: number): ParseResult {
   throw new Error("Unterminated object literal");
 }
 
-export function parseStyleObjectLiteral(source: string): StyleSheet | null {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStyleDeclaration(value: unknown): value is StyleDeclaration {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  for (const declarationValue of Object.values(value)) {
+    if (
+      typeof declarationValue !== "string" &&
+      typeof declarationValue !== "number" &&
+      !isCssVarRef(declarationValue)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isStyleSheet(value: unknown): value is StyleSheet {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  for (const declaration of Object.values(value)) {
+    if (!isStyleDeclaration(declaration)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isVariantSheet(value: unknown, baseKeys: Set<string>): value is VariantSheet {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  for (const group of Object.values(value)) {
+    if (!isPlainObject(group)) {
+      return false;
+    }
+
+    for (const variant of Object.values(group)) {
+      if (!isStyleSheet(variant)) {
+        return false;
+      }
+      for (const classKey of Object.keys(variant)) {
+        if (!baseKeys.has(classKey)) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+export function parseCtCallArguments(
+  source: string,
+): { base: StyleSheet; variants?: VariantSheet } | null {
   try {
     const index = skipWhitespace(source, 0);
     if (source[index] !== "{") {
       return null;
     }
 
-    const parsed = parseObject(source, index);
-    const trailing = skipWhitespace(source, parsed.end);
-    if (trailing !== source.length) {
+    const baseParsed = parseObject(source, index);
+    if (!isStyleSheet(baseParsed.value)) {
       return null;
     }
 
-    for (const value of Object.values(parsed.value)) {
-      if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return null;
-      }
-      for (const declarationValue of Object.values(value)) {
-        if (
-          typeof declarationValue !== "string" &&
-          typeof declarationValue !== "number" &&
-          !isCssVarRef(declarationValue)
-        ) {
-          return null;
-        }
-      }
+    let cursor = skipWhitespace(source, baseParsed.end);
+    if (cursor === source.length) {
+      return { base: baseParsed.value };
     }
 
-    return parsed.value;
+    if (source[cursor] !== ",") {
+      return null;
+    }
+
+    cursor = skipWhitespace(source, cursor + 1);
+    if (source[cursor] !== "{") {
+      return null;
+    }
+
+    const variantParsed = parseObject(source, cursor);
+    cursor = skipWhitespace(source, variantParsed.end);
+    if (cursor !== source.length) {
+      return null;
+    }
+
+    const baseKeys = new Set(Object.keys(baseParsed.value));
+    if (!isVariantSheet(variantParsed.value, baseKeys)) {
+      return null;
+    }
+
+    return { base: baseParsed.value, variants: variantParsed.value };
   } catch {
     return null;
   }
@@ -234,7 +306,7 @@ export function findCtCalls(code: string): Array<{ start: number; end: number; a
       continue;
     }
 
-    let depth = 0;
+    let parenDepth = 1;
     let inString = "";
     let escaped = false;
 
@@ -261,22 +333,18 @@ export function findCtCalls(code: string): Array<{ start: number; end: number; a
         continue;
       }
 
-      if (char === "{") {
-        depth += 1;
+      if (char === "(") {
+        parenDepth += 1;
         continue;
       }
 
-      if (char === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          const argEnd = index + 1;
-          let close = skipWhitespace(code, argEnd);
-          if (code[close] !== ")") {
-            break;
-          }
+      if (char === ")") {
+        parenDepth -= 1;
+        if (parenDepth === 0) {
+          const argEnd = index;
           calls.push({
             start: callStart,
-            end: close + 1,
+            end: argEnd + 1,
             arg: code.slice(match[0].length + callStart, argEnd),
           });
           break;

@@ -1,5 +1,5 @@
 import type { Plugin, ViteDevServer } from "vite";
-import { findCtCalls, parseStyleObjectLiteral } from "./parser.js";
+import { findCtCalls, parseCtCallArguments } from "./parser.js";
 import { createClassName, toCssRule } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
@@ -155,20 +155,48 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       const rules = new Set<string>();
 
       for (const call of calls) {
-        const parsed = parseStyleObjectLiteral(call.arg);
+        const parsed = parseCtCallArguments(call.arg);
         if (!parsed) {
           continue;
         }
 
         const classMap: Record<string, string> = {};
+        const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
 
-        for (const [key, declaration] of Object.entries(parsed)) {
+        for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
           rules.add(toCssRule(className, declaration));
         }
 
-        const replacement = `ct(${call.arg}, ${JSON.stringify(classMap)})`;
+        if (parsed.variants) {
+          for (const [group, variants] of Object.entries(parsed.variants)) {
+            const groupMap: Record<string, Partial<Record<string, string>>> = {};
+            for (const [variantName, declarations] of Object.entries(variants)) {
+              const variantMap: Partial<Record<string, string>> = {};
+              for (const [key, declaration] of Object.entries(declarations)) {
+                const className = createClassName(
+                  `${group}:${variantName}:${key}`,
+                  declaration,
+                  normalizedId,
+                );
+                variantMap[key] = className;
+                rules.add(toCssRule(className, declaration));
+              }
+              groupMap[variantName] = variantMap;
+            }
+            variantClassMap[group] = groupMap;
+          }
+        }
+
+        const compiledMap = parsed.variants
+          ? {
+              base: classMap,
+              variants: variantClassMap,
+            }
+          : classMap;
+
+        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledMap)})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
       }
 

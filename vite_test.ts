@@ -108,3 +108,31 @@ Deno.test("extracts cv() numeric fallback with property-aware units", () => {
     /\.ct_[a-z0-9]+\{padding:var\(--space, 8px\);font-weight:var\(--weight, 600\)\}/,
   );
 });
+
+Deno.test("extracts variant styles and compiles variant class maps", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  headerText: { display: "grid" },\n` +
+    `  mainHeader: {},\n` +
+    `}, {\n` +
+    `  variant: {\n` +
+    `    red: { headerText: { backgroundColor: "red" } },\n` +
+    `  },\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/variants.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assertMatch(code, /variants/);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  const css = loaded as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{background-color:red\}/);
+});
