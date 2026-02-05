@@ -55,7 +55,8 @@ export default defineConfig({
 
 ## Variant usage
 
-`ct` accepts an optional second argument for variants:
+`ct` accepts an optional second argument for variants, which you select by passing a variant object
+when you call a class accessor:
 
 ```ts
 import ct from "css-ts";
@@ -99,8 +100,9 @@ styles().button();
 styles().label();
 
 // variant classes
-styles().variants.intent.primary.button?.();
-styles().variants.size.lg.label?.();
+styles().button({ intent: "primary" });
+styles().label({ size: "lg" });
+styles().button({ intent: "secondary", size: "sm" });
 ```
 
 Notes:
