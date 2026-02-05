@@ -51,3 +51,15 @@ export function toCssRule(className: string, declaration: StyleDeclaration): str
   }
   return `.${className}{${parts.join(";")}}`;
 }
+
+export function cv(name: string, fallback?: StyleValue): string {
+  if (!name.startsWith("--")) {
+    throw new Error(`Expected a CSS variable name like "--token", got "${name}"`);
+  }
+
+  if (fallback === undefined) {
+    return `var(${name})`;
+  }
+
+  return `var(${name}, ${String(fallback)})`;
+}

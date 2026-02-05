@@ -26,7 +26,7 @@ export default defineConfig({
 
 ```svelte
 <script lang="ts">
-  import ct from "css-ts";
+  import ct, { cv } from "css-ts";
 
   const styles = ct({
     mainHeader: {
@@ -40,6 +40,9 @@ export default defineConfig({
       fontSize: "3rem",
       fontWeight: 600,
       textAlign: "center",
+    },
+    mainContainer: {
+      backgroundColor: cv("--background"),
     },
   });
 </script>
@@ -60,7 +63,7 @@ export default defineConfig({
 The build-time extractor currently supports `ct({...})` object literals with:
 
 - style keys as identifiers/quoted keys
-- property values as strings or numbers
+- property values as strings, numbers, or `cv("--token")`
 - simple nested objects (per style block)
 
 It skips dynamic expressions, spreads, variables, and function calls.

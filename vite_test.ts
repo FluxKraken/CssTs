@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
+import { cv } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 
@@ -30,6 +31,11 @@ Deno.test("injects component CSS for direct ct usage in svelte", () => {
   assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid;gap:1rem\}/);
 });
 
+Deno.test("cv() formats css variable references", () => {
+  assertEquals(cv("--background"), "var(--background)");
+  assertEquals(cv("--background", "#111"), "var(--background, #111)");
+});
+
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -55,4 +61,20 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("extracts cv() CSS variable usage at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct, { cv } from "css-ts";\n` +
+    `export const styles = ct({ card: { backgroundColor: cv("--background") } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/vars.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{background-color:var\(--background\)\}/);
 });

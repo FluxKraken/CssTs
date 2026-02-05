@@ -1,4 +1,4 @@
-import type { StyleSheet } from "./shared.js";
+import { cv, type StyleSheet } from "./shared.js";
 
 interface ParseResult {
   value: StyleSheet;
@@ -103,6 +103,41 @@ function parseValue(input: string, index: number): [unknown, number] {
 
   if (char === "-" || /\d/.test(char)) {
     return parseNumber(input, index);
+  }
+
+  if (isIdentifierStart(char)) {
+    const [identifier, identifierEnd] = parseIdentifier(input, index);
+    if (identifier !== "cv") {
+      throw new Error(`Unsupported value function '${identifier}'`);
+    }
+
+    let cursor = skipWhitespace(input, identifierEnd);
+    if (input[cursor] !== "(") {
+      throw new Error(`Expected '(' after ${identifier}`);
+    }
+    cursor = skipWhitespace(input, cursor + 1);
+
+    if (input[cursor] !== '"' && input[cursor] !== "'") {
+      throw new Error("cv() expects a string variable name");
+    }
+    const [variableName, variableEnd] = parseString(input, cursor);
+    cursor = skipWhitespace(input, variableEnd);
+
+    let fallback: string | number | undefined;
+    if (input[cursor] === ",") {
+      const [fallbackValue, fallbackEnd] = parseValue(input, cursor + 1);
+      if (typeof fallbackValue !== "string" && typeof fallbackValue !== "number") {
+        throw new Error("cv() fallback must be a string or number");
+      }
+      fallback = fallbackValue;
+      cursor = skipWhitespace(input, fallbackEnd);
+    }
+
+    if (input[cursor] !== ")") {
+      throw new Error("Expected ')' after cv() call");
+    }
+
+    return [cv(variableName, fallback), cursor + 1];
   }
 
   throw new Error(`Unsupported value at ${index}`);
