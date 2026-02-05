@@ -14,8 +14,8 @@ const DENO_IMPORT_TARGET = "npm:@jsr/kt-tools__css-ts@^0.1.3";
 
 const deno = (globalThis as { Deno?: DenoGlobal }).Deno;
 const isDeno = typeof deno !== "undefined";
-const args = isDeno ? deno.args : process.argv.slice(2);
-const cwd = isDeno ? deno.cwd() : process.cwd();
+const args: string[] = isDeno ? deno.args : process.argv.slice(2);
+const cwd: string = isDeno ? deno.cwd() : process.cwd();
 
 function exit(code: number): never {
   if (isDeno) {
@@ -259,7 +259,7 @@ async function run() {
   }
 
   const [command, ...rest] = args;
-  const flags = new Set(rest);
+  const flags = new Set<string>(rest);
   if (command !== "sveltekit") {
     logError(`Unknown command: ${command}`);
     usage();
@@ -289,7 +289,10 @@ async function run() {
   await updateViteConfig(mode);
 }
 
-if (import.meta.main) {
+const importMeta = import.meta as ImportMeta & { main?: boolean };
+const shouldRun = isDeno ? importMeta.main === true : true;
+
+if (shouldRun) {
   run().catch((error) => {
     logError(error instanceof Error ? error.message : String(error));
     exit(1);
