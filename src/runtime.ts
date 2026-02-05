@@ -1,7 +1,7 @@
 import {
   createClassName,
   StyleSheet,
-  toCssRule,
+  toCssRules,
 } from "./shared.js";
 
 type CompiledMap<T extends StyleSheet> = Partial<Record<keyof T, string>>;
@@ -110,7 +110,9 @@ export default function ct<
       compiledBase?.[key] ?? createClassName(String(key), declaration, "runtime");
 
     if (!compiledBase?.[key]) {
-      injectRule(toCssRule(className, declaration));
+      for (const rule of toCssRules(className, declaration)) {
+        injectRule(rule);
+      }
     }
 
     accessors[key] = (selection) => {
@@ -156,7 +158,9 @@ export default function ct<
             createClassName(`${group}:${variantName}:${String(key)}`, declaration, "runtime");
 
           if (!compiledVariant?.[key]) {
-            injectRule(toCssRule(className, declaration));
+            for (const rule of toCssRules(className, declaration)) {
+              injectRule(rule);
+            }
           }
 
           variantMap[key] = className;

@@ -189,7 +189,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStyleDeclaration(value: unknown): value is StyleDeclaration {
+function isPseudoStyleDeclaration(value: unknown): value is Record<string, unknown> {
   if (!isPlainObject(value)) {
     return false;
   }
@@ -199,6 +199,24 @@ function isStyleDeclaration(value: unknown): value is StyleDeclaration {
       typeof declarationValue !== "string" &&
       typeof declarationValue !== "number" &&
       !isCssVarRef(declarationValue)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isStyleDeclaration(value: unknown): value is StyleDeclaration {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  for (const declarationValue of Object.values(value)) {
+    if (
+      typeof declarationValue !== "string" &&
+      typeof declarationValue !== "number" &&
+      !isCssVarRef(declarationValue) &&
+      !isPseudoStyleDeclaration(declarationValue)
     ) {
       return false;
     }

@@ -5,7 +5,8 @@ export interface CssVarRef {
   fallback?: PrimitiveStyleValue;
 }
 export type StyleValue = PrimitiveStyleValue | CssVarRef;
-export type StyleDeclaration = Record<string, StyleValue>;
+export type PseudoStyleDeclaration = Record<string, StyleValue>;
+export type StyleDeclaration = Record<string, StyleValue | PseudoStyleDeclaration>;
 export type StyleSheet = Record<string, StyleDeclaration>;
 
 const UNITLESS_PROPERTIES = new Set([
@@ -47,12 +48,71 @@ export function toCssDeclaration(name: string, value: StyleValue): string {
   return `${property}:${formatStyleValue(property, value)}`;
 }
 
-export function toCssRule(className: string, declaration: StyleDeclaration): string {
+const PSEUDO_ELEMENT_KEYS = new Set([
+  "before",
+  "after",
+  "firstLine",
+  "firstLetter",
+  "selection",
+  "placeholder",
+  "marker",
+  "backdrop",
+  "fileSelectorButton",
+]);
+
+function isPseudoStyleDeclaration(value: StyleValue | PseudoStyleDeclaration): value is PseudoStyleDeclaration {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !isCssVarRef(value)
+  );
+}
+
+function toPseudoSelector(key: string): string {
+  if (key.startsWith("::") || key.startsWith(":")) {
+    return key;
+  }
+  if (PSEUDO_ELEMENT_KEYS.has(key)) {
+    return `::${camelToKebab(key)}`;
+  }
+  return `:${camelToKebab(key)}`;
+}
+
+function toCssRule(selector: string, declaration: PseudoStyleDeclaration): string {
   const parts: string[] = [];
   for (const [name, value] of Object.entries(declaration)) {
     parts.push(toCssDeclaration(name, value));
   }
-  return `.${className}{${parts.join(";")}}`;
+  return `${selector}{${parts.join(";")}}`;
+}
+
+export function toCssRules(className: string, declaration: StyleDeclaration): string[] {
+  const base: PseudoStyleDeclaration = {};
+  const pseudos: Array<{ selector: string; declaration: PseudoStyleDeclaration }> = [];
+
+  for (const [name, value] of Object.entries(declaration)) {
+    if (isPseudoStyleDeclaration(value)) {
+      pseudos.push({
+        selector: `.${className}${toPseudoSelector(name)}`,
+        declaration: value,
+      });
+    } else {
+      base[name] = value;
+    }
+  }
+
+  const rules: string[] = [];
+  if (Object.keys(base).length > 0) {
+    rules.push(toCssRule(`.${className}`, base));
+  }
+  for (const pseudo of pseudos) {
+    if (Object.keys(pseudo.declaration).length > 0) {
+      rules.push(toCssRule(pseudo.selector, pseudo.declaration));
+    }
+  }
+
+  return rules;
 }
 
 export function cv(name: string, fallback?: PrimitiveStyleValue): CssVarRef {

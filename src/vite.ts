@@ -1,6 +1,6 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { findCtCalls, parseCtCallArguments } from "./parser.js";
-import { createClassName, toCssRule } from "./shared.js";
+import { createClassName, toCssRules } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -13,8 +13,8 @@ function supportsTransform(id: string): boolean {
   return /\.(?:[jt]sx?|svelte)$/.test(cleanId(id));
 }
 
-function hasModuleContext(attrs: string): boolean {
-  return /\bcontext\s*=\s*["']module["']/.test(attrs);
+function isVirtualSubRequest(id: string): boolean {
+  return id.includes("?");
 }
 
 function toSvelteGlobalRule(rule: string): string {
@@ -37,32 +37,30 @@ function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
   return `${code}\n<style>\n${css}\n</style>\n`;
 }
 
-function addVirtualImport(code: string, id: string): string {
+function addVirtualImport(code: string): string {
   if (code.includes(PUBLIC_VIRTUAL_ID)) {
     return code;
   }
 
-  if (id.endsWith(".svelte")) {
-    const scriptTag = /<script\b([^>]*)>/gi;
-    let match = scriptTag.exec(code);
+  return `import "${PUBLIC_VIRTUAL_ID}";\n${code}`;
+}
 
-    while (match) {
-      const attrs = match[1] ?? "";
-      if (!hasModuleContext(attrs)) {
-        const insertAt = match.index + match[0].length;
-        return (
-          code.slice(0, insertAt) +
-          `\nimport "${PUBLIC_VIRTUAL_ID}";` +
-          code.slice(insertAt)
-        );
-      }
-      match = scriptTag.exec(code);
-    }
+function addVirtualImportToSvelte(code: string): string {
+  if (code.includes(PUBLIC_VIRTUAL_ID)) {
+    return code;
+  }
 
+  const match = code.match(/<script\b[^>]*>/);
+  if (!match || match.index === undefined) {
     return `<script>\nimport "${PUBLIC_VIRTUAL_ID}";\n</script>\n${code}`;
   }
 
-  return `import "${PUBLIC_VIRTUAL_ID}";\n${code}`;
+  const insertAt = match.index + match[0].length;
+  return (
+    code.slice(0, insertAt) +
+    `\nimport "${PUBLIC_VIRTUAL_ID}";` +
+    code.slice(insertAt)
+  );
 }
 
 function mergeCss(rules: Iterable<string>): string {
@@ -99,20 +97,25 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
     },
 
     resolveId(id) {
-      if (id === PUBLIC_VIRTUAL_ID) {
-        return RESOLVED_VIRTUAL_ID;
+      if (cleanId(id) === PUBLIC_VIRTUAL_ID) {
+        const suffix = id.slice(PUBLIC_VIRTUAL_ID.length);
+        return `${RESOLVED_VIRTUAL_ID}${suffix}`;
       }
       return null;
     },
 
     load(id) {
-      if (id === RESOLVED_VIRTUAL_ID) {
+      if (cleanId(id) === RESOLVED_VIRTUAL_ID) {
         return combinedCss();
       }
       return null;
     },
 
     transform(code, id) {
+      if (isVirtualSubRequest(id)) {
+        return null;
+      }
+
       const normalizedId = cleanId(id);
       if (!supportsTransform(normalizedId)) {
         return null;
@@ -122,33 +125,29 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       }
       const isSvelte = normalizedId.endsWith(".svelte");
       let nextCode = code;
-      let touched = false;
 
-      if (isSvelte) {
-        const withVirtualImport = addVirtualImport(nextCode, normalizedId);
-        if (withVirtualImport !== nextCode) {
-          nextCode = withVirtualImport;
-          touched = true;
-        }
-      }
-
-      if (!code.includes("from \"css-ts\"") && !code.includes("from 'css-ts'")) {
-        return touched
-          ? {
-              code: nextCode,
-              map: null,
-            }
-          : null;
+      const hasCssTsImport =
+        code.includes("from \"css-ts\"") || code.includes("from 'css-ts'");
+      if (!isSvelte && !hasCssTsImport) {
+        return null;
       }
 
       const calls = findCtCalls(nextCode);
       if (calls.length === 0) {
-        return touched
-          ? {
-              code: nextCode,
-              map: null,
-            }
-          : null;
+        if (!isSvelte) {
+          return null;
+        }
+
+        const usesStylesCall = /\bstyles\s*\(\s*\)/.test(nextCode);
+        if (!usesStylesCall) {
+          return null;
+        }
+
+        nextCode = addVirtualImportToSvelte(nextCode);
+        return {
+          code: nextCode,
+          map: null,
+        };
       }
 
       const replacements: Array<{ start: number; end: number; text: string }> = [];
@@ -166,7 +165,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
-          rules.add(toCssRule(className, declaration));
+          for (const rule of toCssRules(className, declaration)) {
+            rules.add(rule);
+          }
         }
 
         if (parsed.variants) {
@@ -181,7 +182,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
                   normalizedId,
                 );
                 variantMap[key] = className;
-                rules.add(toCssRule(className, declaration));
+                for (const rule of toCssRules(className, declaration)) {
+                  rules.add(rule);
+                }
               }
               groupMap[variantName] = variantMap;
             }
@@ -214,10 +217,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       }
 
       if (isSvelte) {
+        nextCode = addVirtualImportToSvelte(nextCode);
         nextCode = addSvelteStyleBlock(nextCode, rules);
         moduleCss.delete(normalizedId);
       } else {
-        nextCode = addVirtualImport(nextCode, normalizedId);
+        nextCode = addVirtualImport(nextCode);
         moduleCss.set(normalizedId, mergeCss(rules));
       }
       invalidateVirtualModule();
