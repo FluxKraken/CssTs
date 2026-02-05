@@ -5,7 +5,7 @@ A TypeScript-first CSS object API with a Vite plugin that extracts styles to rea
 ## Install
 
 ```bash
-deno add @kt-tools/css-ts
+deno add npm:@jsr/kt-tools__css-ts
 ```
 
 ```bash
@@ -18,6 +18,95 @@ pnpm add @kt-tools/css-ts
 
 ```bash
 yarn add @kt-tools/css-ts
+```
+
+### Deno + Vite configuration
+
+Vite does not read `deno.json` import maps. If you are using Deno with Vite (including SvelteKit + Deno),
+you must map the JSR package to its npm shim and add a Vite alias.
+
+1. Add the import map entry:
+
+```json
+// deno.json
+{
+  "imports": {
+    "@kt-tools/css-ts": "npm:@jsr/kt-tools__css-ts@^0.1.1"
+  }
+}
+```
+
+2. Add the Vite alias:
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import ct from "@kt-tools/css-ts";
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@kt-tools/css-ts": "@jsr/kt-tools__css-ts",
+    },
+  },
+  plugins: [ct.vite()],
+});
+```
+
+### SvelteKit + Deno example
+
+This example assumes `nodeModulesDir` is enabled in `deno.json` and you are using the Deno adapter.
+
+1. Install:
+
+```bash
+deno add npm:@jsr/kt-tools__css-ts
+```
+
+2. `deno.json`:
+
+```json
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@kt-tools/css-ts": "npm:@jsr/kt-tools__css-ts@^0.1.1",
+    "@sveltejs/kit": "npm:@sveltejs/kit@^2.50.2",
+    "@sveltejs/vite-plugin-svelte": "npm:@sveltejs/vite-plugin-svelte@^6.2.4",
+    "svelte": "npm:svelte@^5.49.2",
+    "vite": "npm:vite@^7.3.1"
+  }
+}
+```
+
+3. `vite.config.ts`:
+
+```ts
+import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from "vite";
+import ct from "@kt-tools/css-ts";
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@kt-tools/css-ts": "@jsr/kt-tools__css-ts",
+    },
+  },
+  plugins: [ct.vite(), sveltekit()],
+});
+```
+
+4. `svelte.config.js`:
+
+```js
+import adapter from "@deno/svelte-adapter";
+
+const config = {
+  kit: {
+    adapter: adapter(),
+  },
+};
+
+export default config;
 ```
 
 ## Vite setup
