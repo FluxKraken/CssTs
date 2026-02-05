@@ -1,0 +1,12 @@
+# dependencies/cache
+node_modules/
+
+# build output
+dist/
+
+# local tooling
+.codex/
+.jj/
+
+# macOS
+.DS_Store
