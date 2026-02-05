@@ -20,10 +20,26 @@ pnpm add @kt-tools/css-ts
 yarn add @kt-tools/css-ts
 ```
 
-### Deno + Vite configuration
+## Vite setup
 
-Vite does not read `deno.json` import maps. If you are using Deno with Vite (including SvelteKit + Deno),
-you must map the JSR package to its npm shim and add a Vite alias.
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import ct from "@kt-tools/css-ts";
+
+export default defineConfig({
+  plugins: [
+    ct.vite(),
+  ],
+});
+```
+
+---
+
+### Deno + Vite configuration (no package.json)
+
+Only needed if you install via Deno and do not use a `package.json`. Vite does not read `deno.json`
+import maps, so you must map the JSR package to its npm shim and add a Vite alias.
 
 1. Add the import map entry:
 
@@ -53,7 +69,7 @@ export default defineConfig({
 });
 ```
 
-### SvelteKit + Deno example
+### SvelteKit + Deno example (no package.json)
 
 This example assumes `nodeModulesDir` is enabled in `deno.json` and you are using the Deno adapter.
 
@@ -107,20 +123,6 @@ const config = {
 };
 
 export default config;
-```
-
-## Vite setup
-
-```ts
-// vite.config.ts
-import { defineConfig } from "vite";
-import ct from "@kt-tools/css-ts";
-
-export default defineConfig({
-  plugins: [
-    ct.vite(),
-  ],
-});
 ```
 
 ## Svelte usage
