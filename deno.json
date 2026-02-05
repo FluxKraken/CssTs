@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "license": "MIT",
   "exports": "./mod.ts",
+  "types": "./mod.d.ts",
+  "publish": {
+    "include": [
+      "README.md",
+      "mod.ts",
+      "mod.d.ts",
+      "dist/**/*.js",
+      "dist/**/*.d.ts"
+    ],
+    "exclude": ["!dist/", "!dist/**"]
+  },
   "tasks": {
     "build": "deno run --node-modules-dir=auto -A npm:typescript/bin/tsc -p tsconfig.json",
     "test": "deno test --node-modules-dir=auto -A vite_test.ts"
