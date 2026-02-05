@@ -25,20 +25,34 @@ type Accessor<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: (variants?: VariantSelection<V>) => string;
 };
 
-export type { CssTsPluginOptions, StyleDeclaration, StyleSheet, StyleValue };
+/** Re-exported Vite plugin options. */
+export type { CssTsPluginOptions };
+/** Re-exported style declaration type. */
+export type { StyleDeclaration };
+/** Re-exported style sheet type. */
+export type { StyleSheet };
+/** Re-exported style value type. */
+export type { StyleValue };
 
+/** Combined CSS-TS runtime API. */
 export interface Ct {
   <T extends StyleSheet, V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined>(
     styles: T,
     variantsOrCompiled?: V | CompiledBundle<T> | CompiledMap<T>,
     compiledMaybe?: CompiledBundle<T> | CompiledMap<T>,
   ): () => Accessor<T, V>;
+  /** Vite plugin entry point. */
   vite: (options?: CssTsPluginOptions) => Plugin;
+  /** Create a CSS variable reference. */
   cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
+  /** Alias for {@link Ct.cv}. */
   var: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
 }
 
+/** Default export for the CSS-TS runtime API. */
 declare const ct: Ct;
 export default ct;
+/** Named export for the Vite plugin. */
 export const vite: (options?: CssTsPluginOptions) => Plugin;
+/** Named export for creating CSS variable references. */
 export const cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;

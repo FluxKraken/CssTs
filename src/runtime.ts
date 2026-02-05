@@ -79,6 +79,11 @@ function assertVariantKeys<T extends StyleSheet>(
   }
 }
 
+/**
+ * Runtime stylesheet helper that generates class names and injects CSS rules.
+ *
+ * Use this in browsers when you want styles created and applied at runtime.
+ */
 export default function ct<
   T extends StyleSheet,
   V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
@@ -176,4 +181,5 @@ export default function ct<
   return () => accessors;
 }
 
+/** Re-exported style types for convenience. */
 export type { StyleSheet, StyleDeclaration, StyleValue } from "./shared.js";

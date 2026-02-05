@@ -262,6 +262,10 @@ function isVariantSheet(value: unknown, baseKeys: Set<string>): value is Variant
   return true;
 }
 
+/**
+ * Parse a `ct({ ... }, { ... })` argument string into style objects.
+ * Returns `null` when the input cannot be parsed or validated.
+ */
 export function parseCtCallArguments(
   source: string,
 ): { base: StyleSheet; variants?: VariantSheet } | null {
@@ -307,6 +311,9 @@ export function parseCtCallArguments(
   }
 }
 
+/**
+ * Find `ct(...)` calls in source code and return their locations plus raw arguments.
+ */
 export function findCtCalls(code: string): Array<{ start: number; end: number; arg: string }> {
   const calls: Array<{ start: number; end: number; arg: string }> = [];
   const matcher = /\bct\s*\(/g;

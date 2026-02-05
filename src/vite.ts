@@ -67,10 +67,15 @@ function mergeCss(rules: Iterable<string>): string {
   return Array.from(rules).join("\n");
 }
 
+/** Options for {@link cssTsPlugin}. */
 export interface CssTsPluginOptions {
+  /** Limit transforms to ids that match this regex. */
   include?: RegExp;
 }
 
+/**
+ * Vite plugin that extracts `ct()` usage and emits a virtual stylesheet.
+ */
 export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
   const moduleCss = new Map<string, string>();
   let server: ViteDevServer | undefined;
@@ -241,4 +246,5 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
   };
 }
 
+/** Default export for {@link cssTsPlugin}. */
 export default cssTsPlugin;
