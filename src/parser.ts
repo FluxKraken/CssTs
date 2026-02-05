@@ -1,4 +1,4 @@
-import { cv, type StyleSheet } from "./shared.js";
+import { cv, isCssVarRef, type StyleSheet } from "./shared.js";
 
 interface ParseResult {
   value: StyleSheet;
@@ -201,7 +201,11 @@ export function parseStyleObjectLiteral(source: string): StyleSheet | null {
         return null;
       }
       for (const declarationValue of Object.values(value)) {
-        if (typeof declarationValue !== "string" && typeof declarationValue !== "number") {
+        if (
+          typeof declarationValue !== "string" &&
+          typeof declarationValue !== "number" &&
+          !isCssVarRef(declarationValue)
+        ) {
           return null;
         }
       }

@@ -43,6 +43,7 @@ export default defineConfig({
     },
     mainContainer: {
       backgroundColor: cv("--background"),
+      padding: cv("--space", 8),
     },
   });
 </script>

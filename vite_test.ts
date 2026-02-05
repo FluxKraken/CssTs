@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
-import { cv } from "./src/shared.ts";
+import { cv, toCssDeclaration } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 
@@ -32,8 +32,19 @@ Deno.test("injects component CSS for direct ct usage in svelte", () => {
 });
 
 Deno.test("cv() formats css variable references", () => {
-  assertEquals(cv("--background"), "var(--background)");
-  assertEquals(cv("--background", "#111"), "var(--background, #111)");
+  assertEquals(toCssDeclaration("backgroundColor", cv("--background")), "background-color:var(--background)");
+  assertEquals(
+    toCssDeclaration("backgroundColor", cv("--background", "#111")),
+    "background-color:var(--background, #111)",
+  );
+  assertEquals(
+    toCssDeclaration("padding", cv("--space", 8)),
+    "padding:var(--space, 8px)",
+  );
+  assertEquals(
+    toCssDeclaration("fontWeight", cv("--weight", 600)),
+    "font-weight:var(--weight, 600)",
+  );
 });
 
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
@@ -77,4 +88,23 @@ Deno.test("extracts cv() CSS variable usage at build time", () => {
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{background-color:var\(--background\)\}/);
+});
+
+Deno.test("extracts cv() numeric fallback with property-aware units", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct, { cv } from "css-ts";\n` +
+    `export const styles = ct({ card: { padding: cv("--space", 8), fontWeight: cv("--weight", 600) } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/vars-fallback.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(
+    loaded as string,
+    /\.ct_[a-z0-9]+\{padding:var\(--space, 8px\);font-weight:var\(--weight, 600\)\}/,
+  );
 });
