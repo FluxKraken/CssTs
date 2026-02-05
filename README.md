@@ -5,7 +5,19 @@ A TypeScript-first CSS object API with a Vite plugin that extracts styles to rea
 ## Install
 
 ```bash
-npm i css-ts
+deno add @kt-tools/css-ts
+```
+
+```bash
+npm i @kt-tools/css-ts
+```
+
+```bash
+pnpm add @kt-tools/css-ts
+```
+
+```bash
+yarn add @kt-tools/css-ts
 ```
 
 ## Vite setup
@@ -13,7 +25,7 @@ npm i css-ts
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import ct from "css-ts";
+import ct from "@kt-tools/css-ts";
 
 export default defineConfig({
   plugins: [
@@ -26,7 +38,7 @@ export default defineConfig({
 
 ```svelte
 <script lang="ts">
-  import ct, { cv } from "css-ts";
+  import ct, { cv } from "@kt-tools/css-ts";
 
   const styles = ct({
     mainHeader: {
@@ -86,7 +98,7 @@ const styles = ct({
 when you call a class accessor:
 
 ```ts
-import ct from "css-ts";
+import ct from "@kt-tools/css-ts";
 
 const styles = ct(
   {
