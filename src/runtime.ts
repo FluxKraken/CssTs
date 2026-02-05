@@ -24,19 +24,32 @@ type Accessor<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
 const injectedRules = new Set<string>();
 
+type StyleTag = {
+  id: string;
+  appendChild(node: unknown): void;
+};
+
+type DocumentLike = {
+  getElementById(id: string): StyleTag | null;
+  createElement(tag: "style"): StyleTag;
+  createTextNode(text: string): unknown;
+  head: { appendChild(node: unknown): void };
+};
+
 function injectRule(rule: string): void {
-  if (typeof document === "undefined" || injectedRules.has(rule)) {
+  const doc = (globalThis as unknown as { document?: DocumentLike }).document;
+  if (!doc || injectedRules.has(rule)) {
     return;
   }
 
-  let tag = document.getElementById(RUNTIME_STYLE_TAG_ID) as HTMLStyleElement | null;
+  let tag = doc.getElementById(RUNTIME_STYLE_TAG_ID);
   if (!tag) {
-    tag = document.createElement("style");
+    tag = doc.createElement("style");
     tag.id = RUNTIME_STYLE_TAG_ID;
-    document.head.appendChild(tag);
+    doc.head.appendChild(tag);
   }
 
-  tag.appendChild(document.createTextNode(rule));
+  tag.appendChild(doc.createTextNode(rule));
   injectedRules.add(rule);
 }
 

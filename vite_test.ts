@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
+import ct from "./src/runtime.ts";
 import { cv, toCssDeclaration } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -135,4 +136,24 @@ Deno.test("extracts variant styles and compiles variant class maps", () => {
   const css = loaded as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{background-color:red\}/);
+});
+
+Deno.test("runtime works without a document global", () => {
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  if (originalDocument !== undefined) {
+    delete globals.document;
+  }
+
+  try {
+    const styles = ct({ card: { display: "grid", gap: "1rem" } });
+    const className = styles().card();
+    assertMatch(className, /^ct_[a-z0-9]+$/);
+  } finally {
+    if (originalDocument !== undefined) {
+      globals.document = originalDocument;
+    } else {
+      delete globals.document;
+    }
+  }
 });

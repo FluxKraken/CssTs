@@ -9,6 +9,7 @@
       "README.md",
       "mod.ts",
       "mod.d.ts",
+      "src/**/*.ts",
       "dist/**/*.js",
       "dist/**/*.d.ts"
     ],
