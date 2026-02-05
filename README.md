@@ -45,12 +45,39 @@ export default defineConfig({
       backgroundColor: cv("--background"),
       padding: cv("--space", 8),
     },
+    navLink: {
+      hover: { textDecoration: "underline" },
+    },
+    navItem: {
+      before: {
+        content: "\"- \"",
+      },
+    },
   });
 </script>
 
 <header class={styles().mainHeader()}>
   <h1 class={styles().headerText()}>Hello World</h1>
 </header>
+```
+
+### Pseudo selectors
+
+You can nest pseudo-classes/elements inside a style block. Keys are camel-cased (e.g. `focusVisible`)
+or explicit selectors (e.g. `":hover"`, `"::after"`). Known pseudo-elements map to `::` automatically.
+
+```ts
+const styles = ct({
+  link: {
+    hover: { textDecoration: "underline" },
+    focusVisible: { outline: "2px solid #111" },
+    ":active": { opacity: 0.7 },
+  },
+  item: {
+    before: { content: "\"- \"" },
+    "::after": { content: "\"\"" },
+  },
+});
 ```
 
 ## Variant usage
@@ -115,6 +142,7 @@ Notes:
 - In dev, the Vite plugin rewrites static `ct(...)` calls (base styles and optional variants) and serves a virtual CSS module.
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
+- Svelte files automatically import the virtual CSS module when static styles are detected.
 
 ## Current parser limitations
 
@@ -122,7 +150,7 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
-- simple nested objects (per style block)
+- simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
 - optional variants via `ct(baseStyles, variantStyles)` when both arguments are object literals
 
 It skips dynamic expressions, spreads, variables, and function calls.
