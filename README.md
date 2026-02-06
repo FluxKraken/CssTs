@@ -162,28 +162,30 @@ export default config;
   import ct, { cv } from "@kt-tools/css-ts";
 
   const styles = ct({
-    mainHeader: {
-      display: "grid",
-      placeItems: "center",
-      gap: "1rem",
-      padding: "1rem",
-    },
-    headerText: {
-      fontFamily: "ui-monospace, monospace",
-      fontSize: "3rem",
-      fontWeight: 600,
-      textAlign: "center",
-    },
-    mainContainer: {
-      backgroundColor: cv("--background"),
-      padding: cv("--space", 8),
-    },
-    navLink: {
-      hover: { textDecoration: "underline" },
-    },
-    navItem: {
-      before: {
-        content: "- ",
+    base: {
+      mainHeader: {
+        display: "grid",
+        placeItems: "center",
+        gap: "1rem",
+        padding: "1rem",
+      },
+      headerText: {
+        fontFamily: "ui-monospace, monospace",
+        fontSize: "3rem",
+        fontWeight: 600,
+        textAlign: "center",
+      },
+      mainContainer: {
+        backgroundColor: cv("--background"),
+        padding: cv("--space", 8),
+      },
+      navLink: {
+        hover: { textDecoration: "underline" },
+      },
+      navItem: {
+        before: {
+          content: "- ",
+        },
       },
     },
   });
@@ -201,14 +203,16 @@ or explicit selectors (e.g. `":hover"`, `"::after"`). Known pseudo-elements map 
 
 ```ts
 const styles = ct({
-  link: {
-    hover: { textDecoration: "underline" },
-    focusVisible: { outline: "2px solid #111" },
-    ":active": { opacity: 0.7 },
-  },
-  item: {
-    before: { content: "- " },
-    "::after": { content: "." },
+  base: {
+    link: {
+      hover: { textDecoration: "underline" },
+      focusVisible: { outline: "2px solid #111" },
+      ":active": { opacity: 0.7 },
+    },
+    item: {
+      before: { content: "- " },
+      "::after": { content: "." },
+    },
   },
 });
 ```
@@ -219,22 +223,24 @@ Quoted keys are treated as nested selectors, and nested `@media` / `@container` 
 
 ```ts
 const styles = ct({
-  mainNavigation: {
-    fontSize: "1.25rem",
-    "ul": {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "0.5rem",
-      "@media (width < 20rem)": {
-        "ul": { display: "grid" },
+  base: {
+    mainNavigation: {
+      fontSize: "1.25rem",
+      "ul": {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.5rem",
+        "@media (width < 20rem)": {
+          "ul": { display: "grid" },
+        },
+        "@container nav (inline-size > 30rem)": {
+          "a:hover": { textDecoration: "underline" },
+        },
       },
-      "@container nav (inline-size > 30rem)": {
-        "a:hover": { textDecoration: "underline" },
+      "a:hover": {
+        textDecoration: "underline",
+        textUnderlineOffset: "6px",
       },
-    },
-    "a:hover": {
-      textDecoration: "underline",
-      textUnderlineOffset: "6px",
     },
   },
 });
@@ -242,21 +248,25 @@ const styles = ct({
 
 ## Variant usage
 
-`ct` accepts an optional second argument for variants, which you select by passing a variant object
-when you call a class accessor:
+`ct` accepts a single config object with optional `global`, `base`, and `variant` sections:
 
 ```ts
 import ct from "@kt-tools/css-ts";
 
-const styles = ct(
-  {
+const styles = ct({
+  global: {
+    "@layer reset": {
+      "html": { scrollBehavior: "smooth" },
+    },
+  },
+  base: {
     button: {
       padding: "0.75rem 1rem",
       borderRadius: 8,
     },
     label: {},
   },
-  {
+  variant: {
     intent: {
       primary: {
         button: {
@@ -280,7 +290,7 @@ const styles = ct(
       },
     },
   },
-);
+});
 
 // base classes
 styles().button();
@@ -299,7 +309,7 @@ Notes:
 
 ## How it works
 
-- In dev, the Vite plugin rewrites static `ct(...)` calls (base styles and optional variants) and serves a virtual CSS module.
+- In dev, the Vite plugin rewrites static `ct({ ... })` calls (`global`, `base`, and `variant`) and serves a virtual CSS module.
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
 - Svelte files automatically import the virtual CSS module when static styles are detected.
@@ -311,6 +321,6 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
-- optional variants via `ct(baseStyles, variantStyles)` when both arguments are object literals
+- optional `global`, `base`, and `variant` sections via `ct({ ... })` when the argument is an object literal
 
 It skips dynamic expressions, spreads, variables, and function calls.

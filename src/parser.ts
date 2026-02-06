@@ -6,6 +6,11 @@ interface ParseResult {
 }
 
 type VariantSheet = Record<string, Record<string, StyleSheet>>;
+type CtConfig = {
+  global?: StyleSheet;
+  base: StyleSheet;
+  variant?: VariantSheet;
+};
 
 function isIdentifierStart(char: string): boolean {
   return /[A-Za-z_$]/.test(char);
@@ -244,50 +249,69 @@ function isVariantSheet(value: unknown, baseKeys: Set<string>): value is Variant
   return true;
 }
 
+function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
+  const allowed = new Set(["global", "base", "variant"]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      return null;
+    }
+  }
+
+  let global: StyleSheet | undefined;
+  let base: StyleSheet = {};
+  let variant: VariantSheet | undefined;
+
+  if ("global" in value) {
+    if (!isStyleSheet(value.global)) {
+      return null;
+    }
+    global = value.global;
+  }
+
+  if ("base" in value) {
+    if (!isStyleSheet(value.base)) {
+      return null;
+    }
+    base = value.base;
+  }
+
+  if ("variant" in value) {
+    const baseKeys = new Set(Object.keys(base));
+    if (!isVariantSheet(value.variant, baseKeys)) {
+      return null;
+    }
+    variant = value.variant;
+  }
+
+  return {
+    global,
+    base,
+    variant,
+  };
+}
+
 /**
- * Parse a `ct({ ... }, { ... })` argument string into style objects.
+ * Parse a `ct({ global?, base?, variant? })` argument string into style objects.
  * Returns `null` when the input cannot be parsed or validated.
  */
-export function parseCtCallArguments(
-  source: string,
-): { base: StyleSheet; variants?: VariantSheet } | null {
+export function parseCtCallArguments(source: string): CtConfig | null {
   try {
     const index = skipWhitespace(source, 0);
     if (source[index] !== "{") {
       return null;
     }
 
-    const baseParsed = parseObject(source, index);
-    if (!isStyleSheet(baseParsed.value)) {
-      return null;
-    }
-
-    let cursor = skipWhitespace(source, baseParsed.end);
-    if (cursor === source.length) {
-      return { base: baseParsed.value };
-    }
-
-    if (source[cursor] !== ",") {
-      return null;
-    }
-
-    cursor = skipWhitespace(source, cursor + 1);
-    if (source[cursor] !== "{") {
-      return null;
-    }
-
-    const variantParsed = parseObject(source, cursor);
-    cursor = skipWhitespace(source, variantParsed.end);
+    const configParsed = parseObject(source, index);
+    const cursor = skipWhitespace(source, configParsed.end);
     if (cursor !== source.length) {
       return null;
     }
 
-    const baseKeys = new Set(Object.keys(baseParsed.value));
-    if (!isVariantSheet(variantParsed.value, baseKeys)) {
+    if (!isPlainObject(configParsed.value)) {
       return null;
     }
 
-    return { base: baseParsed.value, variants: variantParsed.value };
+    return parseCtConfig(configParsed.value);
   } catch {
     return null;
   }

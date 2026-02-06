@@ -1,6 +1,6 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { findCtCalls, parseCtCallArguments } from "./parser.js";
-import { createClassName, toCssRules } from "./shared.js";
+import { createClassName, toCssGlobalRules, toCssRules } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -198,6 +198,14 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
 
         const classMap: Record<string, string> = {};
         const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
+        const compiledConfig: Record<string, unknown> = {};
+
+        if (parsed.global) {
+          for (const rule of toCssGlobalRules(parsed.global)) {
+            rules.add(rule);
+          }
+          compiledConfig.global = true;
+        }
 
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
@@ -206,9 +214,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
             rules.add(rule);
           }
         }
+        compiledConfig.base = classMap;
 
-        if (parsed.variants) {
-          for (const [group, variants] of Object.entries(parsed.variants)) {
+        if (parsed.variant) {
+          for (const [group, variants] of Object.entries(parsed.variant)) {
             const groupMap: Record<string, Partial<Record<string, string>>> = {};
             for (const [variantName, declarations] of Object.entries(variants)) {
               const variantMap: Partial<Record<string, string>> = {};
@@ -227,16 +236,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
             }
             variantClassMap[group] = groupMap;
           }
+          compiledConfig.variant = variantClassMap;
         }
 
-        const compiledMap = parsed.variants
-          ? {
-              base: classMap,
-              variants: variantClassMap,
-            }
-          : classMap;
-
-        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledMap)})`;
+        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
       }
 

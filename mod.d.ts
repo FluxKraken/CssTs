@@ -14,9 +14,15 @@ type VariantClassMap<T extends StyleSheet> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
-type CompiledBundle<T extends StyleSheet> = {
-  base: CompiledMap<T>;
-  variants?: VariantClassMap<T>;
+type CtConfig<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
+  global?: StyleSheet;
+  base?: T;
+  variant?: V;
+};
+type CompiledConfig<T extends StyleSheet> = {
+  global?: true;
+  base?: CompiledMap<T>;
+  variant?: VariantClassMap<T>;
 };
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
   ? { [G in keyof V]?: keyof V[G] }
@@ -36,10 +42,9 @@ export type { StyleValue };
 
 /** Combined CSS-TS runtime API. */
 export interface Ct {
-  <T extends StyleSheet, V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined>(
-    styles: T,
-    variantsOrCompiled?: V | CompiledBundle<T> | CompiledMap<T>,
-    compiledMaybe?: CompiledBundle<T> | CompiledMap<T>,
+  <T extends StyleSheet = StyleSheet, V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined>(
+    config: CtConfig<T, V>,
+    compiled?: CompiledConfig<T>,
   ): () => Accessor<T, V>;
   /** Vite plugin entry point. */
   vite: (options?: CssTsPluginOptions) => Plugin;

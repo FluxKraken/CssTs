@@ -1,6 +1,7 @@
 import {
   createClassName,
   StyleSheet,
+  toCssGlobalRules,
   toCssRules,
 } from "./shared.js";
 
@@ -10,9 +11,15 @@ type VariantClassMap<T extends StyleSheet> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
-type CompiledBundle<T extends StyleSheet> = {
-  base: CompiledMap<T>;
-  variants?: VariantClassMap<T>;
+type CtConfig<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
+  global?: StyleSheet;
+  base?: T;
+  variant?: V;
+};
+type CompiledConfig<T extends StyleSheet> = {
+  global?: true;
+  base?: CompiledMap<T>;
+  variant?: VariantClassMap<T>;
 };
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
   ? { [G in keyof V]?: keyof V[G] }
@@ -53,26 +60,6 @@ function injectRule(rule: string): void {
   injectedRules.add(rule);
 }
 
-function isCompiledBundle<T extends StyleSheet>(value: unknown): value is CompiledBundle<T> {
-  return typeof value === "object" && value !== null && "base" in value;
-}
-
-function isClassMapForStyles<T extends StyleSheet>(
-  value: unknown,
-  styles: T,
-): value is CompiledMap<T> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return Object.keys(styles).length === 0;
-  }
-  return entries.every(
-    ([key, entryValue]) => key in styles && typeof entryValue === "string",
-  );
-}
-
 function assertVariantKeys<T extends StyleSheet>(
   styles: T,
   variants: VariantSheet<T>,
@@ -98,30 +85,25 @@ function assertVariantKeys<T extends StyleSheet>(
  * Use this in browsers when you want styles created and applied at runtime.
  */
 export default function ct<
-  T extends StyleSheet,
+  T extends StyleSheet = StyleSheet,
   V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
 >(
-  styles: T,
-  variantsOrCompiled?: V | CompiledBundle<T> | CompiledMap<T>,
-  compiledMaybe?: CompiledBundle<T> | CompiledMap<T>,
+  config: CtConfig<T, V>,
+  compiled?: CompiledConfig<T>,
 ): () => Accessor<T, V> {
-  let variants: VariantSheet<T> | undefined;
-  let compiled: CompiledBundle<T> | CompiledMap<T> | undefined;
+  const globalStyles = config.global;
+  const styles = (config.base ?? {}) as T;
+  const variants = config.variant as VariantSheet<T> | undefined;
 
-  if (compiledMaybe !== undefined) {
-    variants = variantsOrCompiled as VariantSheet<T>;
-    compiled = compiledMaybe;
-  } else if (isCompiledBundle<T>(variantsOrCompiled)) {
-    compiled = variantsOrCompiled;
-  } else if (isClassMapForStyles(variantsOrCompiled, styles)) {
-    compiled = variantsOrCompiled;
-  } else {
-    variants = variantsOrCompiled as VariantSheet<T> | undefined;
+  if (globalStyles && !compiled?.global) {
+    for (const rule of toCssGlobalRules(globalStyles)) {
+      injectRule(rule);
+    }
   }
 
   const accessors = {} as Accessor<T, V>;
   const variantClassMap: VariantClassMap<T> = {};
-  const compiledBase = isCompiledBundle<T>(compiled) ? compiled.base : compiled;
+  const compiledBase = compiled?.base;
 
   for (const [key, declaration] of Object.entries(styles) as [keyof T, T[keyof T]][]) {
     const className =
@@ -157,7 +139,7 @@ export default function ct<
 
   if (variants) {
     assertVariantKeys(styles, variants);
-    const compiledVariants = isCompiledBundle<T>(compiled) ? compiled.variants : undefined;
+    const compiledVariants = compiled?.variant;
 
     for (const [group, groupVariants] of Object.entries(variants)) {
       const groupMap: Record<string, Partial<Record<keyof T, string>>> = {};

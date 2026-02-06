@@ -22,7 +22,10 @@ Deno.test("injects component CSS for direct ct usage in svelte", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
 
-  const source = `<script lang="ts">\nimport ct from "css-ts";\nconst styles = ct({ card: { display: "grid", gap: "1rem" } });\n</script>\n\n<div class={styles().card()}>hi</div>`;
+  const source =
+    `<script lang="ts">\nimport ct from "css-ts";\n` +
+    `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
+    `</script>\n\n<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/routes/+page.svelte");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
@@ -41,12 +44,14 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
     `<script lang="ts">\n` +
     `import ct from "css-ts";\n` +
     `const styles = ct({\n` +
-    `  container: {\n` +
-    `    display: "grid",\n` +
-    `    "@media (width < 70rem)": {\n` +
-    `      gap: 0,\n` +
+    `  base: {\n` +
+    `    container: {\n` +
+    `      display: "grid",\n` +
+    `      "@media (width < 70rem)": {\n` +
+    `        gap: 0,\n` +
+    `      },\n` +
     `    },\n` +
-    `  },\n` +
+    `  }\n` +
     `});\n` +
     `</script>\n\n` +
     `<main class={styles().container()}></main>`;
@@ -110,15 +115,17 @@ Deno.test("toCssRules supports nested selectors and nested @media/@container blo
 
 Deno.test("parser accepts quoted nested selectors and nested @media/@container", () => {
   const parsed = parseCtCallArguments(`{
-    mainNavigation: {
-      fontSize: "1.25rem",
-      "ul": {
-        display: "flex",
-        "@media (width < 20rem)": {
-          "ul": { display: "grid" }
-        },
-        "@container nav (inline-size > 30rem)": {
-          "a:hover": { textDecoration: "underline" }
+    base: {
+      mainNavigation: {
+        fontSize: "1.25rem",
+        "ul": {
+          display: "flex",
+          "@media (width < 20rem)": {
+            "ul": { display: "grid" }
+          },
+          "@container nav (inline-size > 30rem)": {
+            "a:hover": { textDecoration: "underline" }
+          }
         }
       }
     }
@@ -149,7 +156,9 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode = `import ct from "css-ts";\nexport const styles = ct({ card: { display: "grid", gap: "1rem" } });`;
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/styles.ts");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
 
@@ -166,15 +175,17 @@ Deno.test("extracts quoted nested selectors and nested @media/@container at buil
   const moduleCode =
     `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
-    `  mainNavigation: {\n` +
-    `    fontSize: "1.25rem",\n` +
-    `    "ul": {\n` +
-    `      display: "flex",\n` +
-    `      "@media (width < 20rem)": {\n` +
-    `        "ul": { display: "grid" }\n` +
-    `      },\n` +
-    `      "@container nav (inline-size > 30rem)": {\n` +
-    `        "a:hover": { textDecoration: "underline" }\n` +
+    `  base: {\n` +
+    `    mainNavigation: {\n` +
+    `      fontSize: "1.25rem",\n` +
+    `      "ul": {\n` +
+    `        display: "flex",\n` +
+    `        "@media (width < 20rem)": {\n` +
+    `          "ul": { display: "grid" }\n` +
+    `        },\n` +
+    `        "@container nav (inline-size > 30rem)": {\n` +
+    `          "a:hover": { textDecoration: "underline" }\n` +
+    `        }\n` +
     `      }\n` +
     `    }\n` +
     `  }\n` +
@@ -213,7 +224,8 @@ Deno.test("does not trigger a websocket full-reload during transform", () => {
     },
   });
 
-  const moduleCode = `import ct from "css-ts";\nexport const styles = ct({ card: { display: "grid" } });`;
+  const moduleCode =
+    `import ct from "css-ts";\nexport const styles = ct({ base: { card: { display: "grid" } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/no-reload.ts");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
 });
@@ -225,7 +237,7 @@ Deno.test("extracts cv() CSS variable usage at build time", () => {
 
   const moduleCode =
     `import ct, { cv } from "css-ts";\n` +
-    `export const styles = ct({ card: { backgroundColor: cv("--background") } });`;
+    `export const styles = ct({ base: { card: { backgroundColor: cv("--background") } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/vars.ts");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
 
@@ -241,7 +253,11 @@ Deno.test("extracts cv() numeric fallback with property-aware units", () => {
 
   const moduleCode =
     `import ct, { cv } from "css-ts";\n` +
-    `export const styles = ct({ card: { padding: cv("--space", 8), fontWeight: cv("--weight", 600) } });`;
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    card: { padding: cv("--space", 8), fontWeight: cv("--weight", 600) }\n` +
+    `  }\n` +
+    `});`;
   const transformed = transform(moduleCode, "/app/src/lib/vars-fallback.ts");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
 
@@ -261,18 +277,21 @@ Deno.test("extracts variant styles and compiles variant class maps", () => {
   const moduleCode =
     `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
-    `  headerText: { display: "grid" },\n` +
-    `  mainHeader: {},\n` +
-    `}, {\n` +
+    `  base: {\n` +
+    `    headerText: { display: "grid" },\n` +
+    `    mainHeader: {},\n` +
+    `  },\n` +
     `  variant: {\n` +
-    `    red: { headerText: { backgroundColor: "red" } },\n` +
+    `    theme: {\n` +
+    `      red: { headerText: { backgroundColor: "red" } },\n` +
+    `    },\n` +
     `  },\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/variants.ts");
   assert(transformed && typeof transformed === "object" && "code" in transformed);
 
   const code = transformed.code as string;
-  assertMatch(code, /variants/);
+  assertMatch(code, /variant/);
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
@@ -289,7 +308,7 @@ Deno.test("runtime works without a document global", () => {
   }
 
   try {
-    const styles = ct({ card: { display: "grid", gap: "1rem" } });
+    const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });
     const className = styles().card();
     assertMatch(className, /^ct_[a-z0-9]+$/);
   } finally {
@@ -299,4 +318,29 @@ Deno.test("runtime works without a document global", () => {
       delete globals.document;
     }
   }
+});
+
+Deno.test("extracts global section rules at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  global: {\n` +
+    `    "@layer reset": {\n` +
+    `      "html": { scrollBehavior: "smooth" }\n` +
+    `    }\n` +
+    `  },\n` +
+    `  base: {\n` +
+    `    card: { display: "grid" }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/global.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
 });

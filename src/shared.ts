@@ -199,7 +199,7 @@ function wrapInAtRules(rule: string, atRules: readonly string[]): string {
 }
 
 function isSupportedAtRule(key: string): boolean {
-  return key.startsWith("@media") || key.startsWith("@container");
+  return key.startsWith("@");
 }
 
 function collectCssRules(
@@ -237,6 +237,47 @@ function collectCssRules(
 export function toCssRules(className: string, declaration: StyleDeclaration): string[] {
   const rules: string[] = [];
   collectCssRules(`.${className}`, declaration, [], rules);
+  return rules;
+}
+
+function collectGlobalCssRules(
+  selectorOrAtRule: string,
+  declaration: StyleDeclaration,
+  atRules: readonly string[],
+  rules: string[],
+): void {
+  if (isSupportedAtRule(selectorOrAtRule)) {
+    const nestedAtRules = [...atRules, selectorOrAtRule];
+    const nestedDeclarations: PseudoStyleDeclaration = {};
+
+    for (const [name, value] of Object.entries(declaration)) {
+      if (!isNestedStyleDeclaration(value)) {
+        nestedDeclarations[name] = value;
+        continue;
+      }
+
+      collectGlobalCssRules(name, value, nestedAtRules, rules);
+    }
+
+    if (Object.keys(nestedDeclarations).length > 0) {
+      rules.push(wrapInAtRules(toCssRule(selectorOrAtRule, nestedDeclarations), atRules));
+    }
+
+    return;
+  }
+
+  collectCssRules(selectorOrAtRule, declaration, atRules, rules);
+}
+
+/**
+ * Build CSS rules for global selectors/at-rules without generating class names.
+ * @param styles Selector/at-rule map to serialize.
+ */
+export function toCssGlobalRules(styles: StyleSheet): string[] {
+  const rules: string[] = [];
+  for (const [selectorOrAtRule, declaration] of Object.entries(styles)) {
+    collectGlobalCssRules(selectorOrAtRule, declaration, [], rules);
+  }
   return rules;
 }
 
