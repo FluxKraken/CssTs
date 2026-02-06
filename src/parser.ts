@@ -14,7 +14,7 @@ type CtConfig = {
 
 type IdentifierReference = {
   kind: "identifier-ref";
-  name: string;
+  path: string[];
 };
 
 interface ParsedObject {
@@ -31,7 +31,7 @@ type ParsedValue =
   | ParsedObject
   | ParsedArray;
 
-export type IdentifierResolver = (name: string) => unknown | undefined;
+export type IdentifierResolver = (path: readonly string[]) => unknown | undefined;
 
 function isIdentifierStart(char: string): boolean {
   return /[A-Za-z_$]/.test(char);
@@ -116,6 +116,29 @@ function parseKey(input: string, index: number): [string, number] {
   return parseIdentifier(input, index);
 }
 
+function parseIdentifierReference(
+  input: string,
+  identifier: string,
+  identifierEnd: number,
+): [IdentifierReference, number] {
+  const path = [identifier];
+  let cursor = identifierEnd;
+
+  while (cursor < input.length) {
+    cursor = skipWhitespace(input, cursor);
+    if (input[cursor] !== ".") {
+      break;
+    }
+
+    cursor = skipWhitespace(input, cursor + 1);
+    const [segment, segmentEnd] = parseIdentifier(input, cursor);
+    path.push(segment);
+    cursor = segmentEnd;
+  }
+
+  return [{ kind: "identifier-ref", path }, cursor];
+}
+
 function parseArray(input: string, index: number): [ParsedArray, number] {
   if (input[index] !== "[") {
     throw new Error(`Expected '[' at ${index}`);
@@ -174,12 +197,12 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
     if (identifier !== "cv") {
-      return [{ kind: "identifier-ref", name: identifier }, identifierEnd];
+      return parseIdentifierReference(input, identifier, identifierEnd);
     }
 
     let cursor = skipWhitespace(input, identifierEnd);
     if (input[cursor] !== "(") {
-      throw new Error(`Expected '(' after ${identifier}`);
+      return parseIdentifierReference(input, identifier, identifierEnd);
     }
     cursor = skipWhitespace(input, cursor + 1);
 
@@ -254,7 +277,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isIdentifierReference(value: unknown): value is IdentifierReference {
-  return isPlainObject(value) && value.kind === "identifier-ref" && typeof value.name === "string";
+  return (
+    isPlainObject(value) &&
+    value.kind === "identifier-ref" &&
+    Array.isArray(value.path) &&
+    value.path.every((part) => typeof part === "string")
+  );
 }
 
 function isStyleLeaf(value: unknown): boolean {
@@ -408,7 +436,7 @@ const UNRESOLVED = Symbol("ct-parser-unresolved");
 
 function resolveParsedValue(value: ParsedValue, resolveIdentifier: IdentifierResolver): unknown | typeof UNRESOLVED {
   if (isIdentifierReference(value)) {
-    const resolved = resolveIdentifier(value.name);
+    const resolved = resolveIdentifier(value.path);
     return resolved === undefined ? UNRESOLVED : resolved;
   }
 

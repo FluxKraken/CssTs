@@ -13,10 +13,20 @@ const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 const STATIC_STYLE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 
-type ImportBinding = {
-  source: string;
-  imported: string;
-};
+type ImportBinding =
+  | {
+    source: string;
+    kind: "named";
+    imported: string;
+  }
+  | {
+    source: string;
+    kind: "namespace";
+  }
+  | {
+    source: string;
+    kind: "default";
+  };
 
 type ModuleStaticInfo = {
   imports: Map<string, ImportBinding>;
@@ -274,12 +284,22 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   const constInitializers = new Map<string, string>();
   const exportedConsts = new Map<string, string>();
 
+  const namespaceImportMatcher =
+    /import\s*\*\s*as\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*from\s*["']([^"']+)["']/g;
+  for (let match = namespaceImportMatcher.exec(code); match; match = namespaceImportMatcher.exec(code)) {
+    imports.set(match[1], {
+      source: match[2],
+      kind: "namespace",
+    });
+  }
+
   const importMatcher = /import\s*{([\s\S]*?)}\s*from\s*["']([^"']+)["']/g;
   for (let match = importMatcher.exec(code); match; match = importMatcher.exec(code)) {
     const source = match[2];
     for (const binding of parseBindingList(match[1])) {
       imports.set(binding.local, {
         source,
+        kind: "named",
         imported: binding.imported,
       });
     }
@@ -459,6 +479,21 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       const constValueCache = new Map<string, unknown | null>();
       const resolving = new Set<string>();
 
+      function readMemberPath(value: unknown, members: readonly string[]): unknown | null {
+        let current: unknown = value;
+        for (const member of members) {
+          if (typeof current !== "object" || current === null || Array.isArray(current)) {
+            return null;
+          }
+          const record = current as Record<string, unknown>;
+          if (!(member in record)) {
+            return null;
+          }
+          current = record[member];
+        }
+        return current;
+      }
+
       function getModuleCode(moduleId: string): string | null {
         if (moduleId === normalizedId) {
           return code;
@@ -484,8 +519,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
         return parsed;
       }
 
-      function resolveIdentifierInModule(name: string, moduleId: string): unknown | null {
-        const cacheKey = `${moduleId}::${name}`;
+      function resolveIdentifierInModule(identifierPath: readonly string[], moduleId: string): unknown | null {
+        if (identifierPath.length === 0) {
+          return null;
+        }
+
+        const cacheKey = `${moduleId}::${identifierPath.join(".")}`;
         if (constValueCache.has(cacheKey)) {
           return constValueCache.get(cacheKey) ?? null;
         }
@@ -495,29 +534,52 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
 
         resolving.add(cacheKey);
         let resolved: unknown | null = null;
+        const [head, ...tail] = identifierPath;
 
         const moduleInfo = getModuleInfo(moduleId);
         if (moduleInfo) {
-          const initializer = moduleInfo.constInitializers.get(name);
+          const initializer = moduleInfo.constInitializers.get(head);
           if (initializer !== undefined) {
-            const value = parseStaticExpression(initializer, (identifier) => {
-              const nested = resolveIdentifierInModule(identifier, moduleId);
+            const value = parseStaticExpression(initializer, (nestedPath) => {
+              const nested = resolveIdentifierInModule(nestedPath, moduleId);
               return nested === null ? undefined : nested;
             });
 
             if (value !== null) {
-              resolved = value;
+              resolved = tail.length > 0 ? readMemberPath(value, tail) : value;
             }
           } else {
-            const binding = moduleInfo.imports.get(name);
+            const binding = moduleInfo.imports.get(head);
             if (binding) {
               const resolvedImportFile = resolveImportToFile(moduleId, binding.source);
               if (resolvedImportFile) {
                 const importedModuleInfo = getModuleInfo(resolvedImportFile);
                 if (importedModuleInfo) {
-                  const exportedLocalName =
-                    importedModuleInfo.exportedConsts.get(binding.imported) ?? binding.imported;
-                  resolved = resolveIdentifierInModule(exportedLocalName, resolvedImportFile);
+                  if (binding.kind === "namespace") {
+                    if (tail.length > 0) {
+                      const [namespaceExport, ...namespaceTail] = tail;
+                      const exportedLocalName =
+                        importedModuleInfo.exportedConsts.get(namespaceExport) ?? namespaceExport;
+                      const namespaceValue = resolveIdentifierInModule(
+                        [exportedLocalName],
+                        resolvedImportFile,
+                      );
+                      resolved = namespaceTail.length > 0
+                        ? readMemberPath(namespaceValue, namespaceTail)
+                        : namespaceValue;
+                    }
+                  } else {
+                    const importedName = binding.kind === "default" ? "default" : binding.imported;
+                    const exportedLocalName =
+                      importedModuleInfo.exportedConsts.get(importedName) ?? importedName;
+                    const importedValue = resolveIdentifierInModule(
+                      [exportedLocalName],
+                      resolvedImportFile,
+                    );
+                    resolved = tail.length > 0
+                      ? readMemberPath(importedValue, tail)
+                      : importedValue;
+                  }
                 }
               }
             }
@@ -533,7 +595,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
         const parsed = parseCtCallArguments(call.arg) ??
           parseCtCallArgumentsWithResolver(
             call.arg,
-            (identifier) => resolveIdentifierInModule(identifier, normalizedId) ?? undefined,
+            (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
           );
         if (!parsed) {
           continue;

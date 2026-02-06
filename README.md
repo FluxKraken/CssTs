@@ -342,5 +342,6 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 - optional `global`, `base`, and `variant` sections via `ct({ ... })`
 - identifier references to `const` objects/arrays in the same module
 - named imports of `const` style objects from relative paths and SvelteKit `$lib/...` paths
+- namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)
 
 It still skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls.

@@ -256,6 +256,53 @@ Deno.test("resolves imported style objects and precompiles them", () => {
   }
 });
 
+Deno.test("resolves namespace-imported style objects and precompiles them", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/styles.ts`,
+      `export const darkBar = {\n` +
+        `  backgroundColor: "oklch(from #00aaff 20% c h)",\n` +
+        `  color: "white",\n` +
+        `};\n` +
+        `export const lightBar = {\n` +
+        `  backgroundColor: "black",\n` +
+        `  color: "white",\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import * as S from "$lib/styles";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    mainHeader: { display: "grid" }\n` +
+      `  },\n` +
+      `  variant: {\n` +
+      `    theme: {\n` +
+      `      dark: { mainHeader: [S.darkBar] },\n` +
+      `      light: { mainHeader: [S.lightBar] }\n` +
+      `    }\n` +
+      `  }\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/Header.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:oklch\(from #00aaff 20% c h\);color:white\}/);
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:black;color:white\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
