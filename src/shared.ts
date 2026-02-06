@@ -12,10 +12,14 @@ export interface CssVarRef {
 }
 /** CSS value accepted by style declarations. */
 export type StyleValue = PrimitiveStyleValue | CssVarRef;
-/** Style object for a pseudo selector (`:hover`, `::before`, etc.). */
+/** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
+/** Recursive style object supporting nested selectors and at-rules. */
+export interface NestedStyleDeclaration {
+  [key: string]: StyleValue | NestedStyleDeclaration;
+}
 /** Style object for a single class name. */
-export type StyleDeclaration = Record<string, StyleValue | PseudoStyleDeclaration>;
+export type StyleDeclaration = NestedStyleDeclaration;
 /** Map of class keys to their style declarations. */
 export type StyleSheet = Record<string, StyleDeclaration>;
 
@@ -83,7 +87,48 @@ const PSEUDO_ELEMENT_KEYS = new Set([
   "fileSelectorButton",
 ]);
 
-function isPseudoStyleDeclaration(value: StyleValue | PseudoStyleDeclaration): value is PseudoStyleDeclaration {
+const PSEUDO_CLASS_KEYS = new Set([
+  "active",
+  "checked",
+  "default",
+  "disabled",
+  "empty",
+  "enabled",
+  "first-child",
+  "first-of-type",
+  "focus",
+  "focus-visible",
+  "focus-within",
+  "has",
+  "hover",
+  "in-range",
+  "indeterminate",
+  "invalid",
+  "is",
+  "last-child",
+  "last-of-type",
+  "link",
+  "not",
+  "nth-child",
+  "nth-last-child",
+  "nth-last-of-type",
+  "nth-of-type",
+  "only-child",
+  "only-of-type",
+  "optional",
+  "out-of-range",
+  "placeholder-shown",
+  "read-only",
+  "read-write",
+  "required",
+  "root",
+  "target",
+  "valid",
+  "visited",
+  "where",
+]);
+
+function isNestedStyleDeclaration(value: StyleValue | NestedStyleDeclaration): value is NestedStyleDeclaration {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -92,14 +137,15 @@ function isPseudoStyleDeclaration(value: StyleValue | PseudoStyleDeclaration): v
   );
 }
 
-function toPseudoSelector(key: string): string {
-  if (key.startsWith("::") || key.startsWith(":")) {
-    return key;
-  }
+function toPseudoSelectorIfShorthand(key: string): string | null {
   if (PSEUDO_ELEMENT_KEYS.has(key)) {
     return `::${camelToKebab(key)}`;
   }
-  return `:${camelToKebab(key)}`;
+  const pseudoClass = camelToKebab(key);
+  if (PSEUDO_CLASS_KEYS.has(pseudoClass)) {
+    return `:${pseudoClass}`;
+  }
+  return null;
 }
 
 function toCssRule(selector: string, declaration: PseudoStyleDeclaration): string {
@@ -110,36 +156,87 @@ function toCssRule(selector: string, declaration: PseudoStyleDeclaration): strin
   return `${selector}{${parts.join(";")}}`;
 }
 
+function splitSelectors(value: string): string[] {
+  return value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function nestSelector(parentSelector: string, childSelector: string): string {
+  const parents = splitSelectors(parentSelector);
+  const children = splitSelectors(childSelector);
+
+  if (childSelector.includes("&")) {
+    const expanded: string[] = [];
+    for (const parent of parents) {
+      for (const child of children) {
+        expanded.push(child.replace(/&/g, parent));
+      }
+    }
+    return expanded.join(", ");
+  }
+
+  const pseudoSelector = childSelector.startsWith(":") || childSelector.startsWith("::")
+    ? childSelector
+    : toPseudoSelectorIfShorthand(childSelector);
+  if (pseudoSelector) {
+    return parents.map((parent) => `${parent}${pseudoSelector}`).join(", ");
+  }
+
+  const expanded: string[] = [];
+  for (const parent of parents) {
+    for (const child of children) {
+      expanded.push(`${parent} ${child}`);
+    }
+  }
+  return expanded.join(", ");
+}
+
+function wrapInAtRules(rule: string, atRules: readonly string[]): string {
+  let wrapped = rule;
+  for (let i = atRules.length - 1; i >= 0; i -= 1) {
+    wrapped = `${atRules[i]}{${wrapped}}`;
+  }
+  return wrapped;
+}
+
+function isSupportedAtRule(key: string): boolean {
+  return key.startsWith("@media") || key.startsWith("@container");
+}
+
+function collectCssRules(
+  selector: string,
+  declaration: StyleDeclaration,
+  atRules: readonly string[],
+  rules: string[],
+): void {
+  const base: PseudoStyleDeclaration = {};
+
+  for (const [name, value] of Object.entries(declaration)) {
+    if (!isNestedStyleDeclaration(value)) {
+      base[name] = value;
+      continue;
+    }
+
+    if (isSupportedAtRule(name)) {
+      collectCssRules(selector, value, [...atRules, name], rules);
+      continue;
+    }
+
+    collectCssRules(nestSelector(selector, name), value, atRules, rules);
+  }
+
+  if (Object.keys(base).length > 0) {
+    rules.push(wrapInAtRules(toCssRule(selector, base), atRules));
+  }
+}
+
 /**
- * Build CSS rules for a class name, including pseudo selectors.
+ * Build CSS rules for a class name, including nested selectors and at-rules.
  * @param className Class name without the leading dot.
  * @param declaration Style declaration to serialize.
  */
 export function toCssRules(className: string, declaration: StyleDeclaration): string[] {
-  const base: PseudoStyleDeclaration = {};
-  const pseudos: Array<{ selector: string; declaration: PseudoStyleDeclaration }> = [];
-
-  for (const [name, value] of Object.entries(declaration)) {
-    if (isPseudoStyleDeclaration(value)) {
-      pseudos.push({
-        selector: `.${className}${toPseudoSelector(name)}`,
-        declaration: value,
-      });
-    } else {
-      base[name] = value;
-    }
-  }
-
   const rules: string[] = [];
-  if (Object.keys(base).length > 0) {
-    rules.push(toCssRule(`.${className}`, base));
-  }
-  for (const pseudo of pseudos) {
-    if (Object.keys(pseudo.declaration).length > 0) {
-      rules.push(toCssRule(pseudo.selector, pseudo.declaration));
-    }
-  }
-
+  collectCssRules(`.${className}`, declaration, [], rules);
   return rules;
 }
 

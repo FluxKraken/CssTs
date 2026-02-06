@@ -213,6 +213,33 @@ const styles = ct({
 });
 ```
 
+### Nested selectors, media, and container queries
+
+Quoted keys are treated as nested selectors, and nested `@media` / `@container` blocks are supported.
+
+```ts
+const styles = ct({
+  mainNavigation: {
+    fontSize: "1.25rem",
+    "ul": {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: "0.5rem",
+      "@media (width < 20rem)": {
+        "ul": { display: "grid" },
+      },
+      "@container nav (inline-size > 30rem)": {
+        "a:hover": { textDecoration: "underline" },
+      },
+    },
+    "a:hover": {
+      textDecoration: "underline",
+      textUnderlineOffset: "6px",
+    },
+  },
+});
+```
+
 ## Variant usage
 
 `ct` accepts an optional second argument for variants, which you select by passing a variant object

@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
-import { cv, toCssDeclaration } from "./src/shared.ts";
+import { parseCtCallArguments } from "./src/parser.ts";
+import { cv, toCssDeclaration, toCssRules } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 
@@ -48,6 +49,59 @@ Deno.test("cv() formats css variable references", () => {
   );
 });
 
+Deno.test("toCssRules supports nested selectors and nested @media/@container blocks", () => {
+  const rules = toCssRules("test", {
+    fontSize: "1.25rem",
+    ul: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: "0.5rem",
+      "@media (width < 20rem)": {
+        ul: { display: "grid" },
+      },
+      "@container nav (inline-size > 30rem)": {
+        "a:hover": { textDecoration: "underline" },
+      },
+    },
+    li: {
+      flex: 1,
+    },
+    hover: {
+      opacity: 0.8,
+    },
+  });
+
+  assert(rules.includes(".test{font-size:1.25rem}"));
+  assert(rules.includes(".test ul{display:flex;flex-wrap:wrap;gap:0.5rem}"));
+  assert(rules.includes("@media (width < 20rem){.test ul ul{display:grid}}"));
+  assert(rules.includes("@container nav (inline-size > 30rem){.test ul a:hover{text-decoration:underline}}"));
+  assert(rules.includes(".test li{flex:1}"));
+  assert(rules.includes(".test:hover{opacity:0.8}"));
+});
+
+Deno.test("parser accepts quoted nested selectors and nested @media/@container", () => {
+  const parsed = parseCtCallArguments(`{
+    mainNavigation: {
+      fontSize: "1.25rem",
+      "ul": {
+        display: "flex",
+        "@media (width < 20rem)": {
+          "ul": { display: "grid" }
+        },
+        "@container nav (inline-size > 30rem)": {
+          "a:hover": { textDecoration: "underline" }
+        }
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(
+    (parsed.base.mainNavigation as Record<string, unknown>).fontSize,
+    "1.25rem",
+  );
+});
+
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -73,6 +127,42 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  mainNavigation: {\n` +
+    `    fontSize: "1.25rem",\n` +
+    `    "ul": {\n` +
+    `      display: "flex",\n` +
+    `      "@media (width < 20rem)": {\n` +
+    `        "ul": { display: "grid" }\n` +
+    `      },\n` +
+    `      "@container nav (inline-size > 30rem)": {\n` +
+    `        "a:hover": { textDecoration: "underline" }\n` +
+    `      }\n` +
+    `    }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/nested.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  const css = loaded as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{font-size:1\.25rem\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+ ul\{display:flex\}/);
+  assertMatch(css, /@media \(width < 20rem\)\{\.ct_[a-z0-9]+ ul ul\{display:grid\}\}/);
+  assertMatch(
+    css,
+    /@container nav \(inline-size > 30rem\)\{\.ct_[a-z0-9]+ ul a:hover\{text-decoration:underline\}\}/,
+  );
 });
 
 Deno.test("does not trigger a websocket full-reload during transform", () => {
