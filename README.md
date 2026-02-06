@@ -34,26 +34,35 @@ export default defineConfig({
 });
 ```
 
-## SvelteKit setup workflow
+## SvelteKit setup workflow (Python + uv)
 
-The setup CLI is now a separate package: `@kt-tools/css-ts-cli`.
+This repo includes a local setup CLI built with Python (`click` + `rich`).
 
-### NPM + Vite + SvelteKit
-
-```bash
-npx jsr add -D @kt-tools/css-ts-cli
-npm exec css-ts-cli -- --npm
-```
-
-This updates `vite.config.*` and installs `@kt-tools/css-ts` via `jsr add`.
-
-### Deno + Vite + SvelteKit
+1. Install the tool from this monorepo:
 
 ```bash
-deno run -A jsr:@kt-tools/css-ts-cli --deno
+uv tool install --editable .
 ```
 
-This updates `deno.json` and `vite.config.*` and installs `@kt-tools/css-ts`.
+2. Run it against your project:
+
+```bash
+css-ts-setup --npm --cwd /path/to/project
+```
+
+or for Deno projects:
+
+```bash
+css-ts-setup --deno --cwd /path/to/project
+```
+
+If you prefer not to install globally:
+
+```bash
+uv run css-ts-setup --npm --cwd /path/to/project
+```
+
+This updates `vite.config.*`, plus `package.json` (npm mode) or `deno.json` (deno mode), and installs `@kt-tools/css-ts`.
 
 ---
 
