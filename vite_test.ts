@@ -75,6 +75,30 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
 });
 
+Deno.test("does not trigger a websocket full-reload during transform", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const configureServer = asHook(plugin.configureServer);
+
+  configureServer({
+    moduleGraph: {
+      getModuleById: () => ({}),
+      invalidateModule: () => {},
+    },
+    ws: {
+      send: (payload: { type?: string }) => {
+        if (payload?.type === "full-reload") {
+          throw new Error("unexpected full reload");
+        }
+      },
+    },
+  });
+
+  const moduleCode = `import ct from "css-ts";\nexport const styles = ct({ card: { display: "grid" } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/no-reload.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+});
+
 Deno.test("extracts cv() CSS variable usage at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

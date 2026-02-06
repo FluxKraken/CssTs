@@ -89,7 +89,6 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
     const module = server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
     if (module) {
       server.moduleGraph.invalidateModule(module);
-      server.ws.send({ type: "full-reload" });
     }
   }
 
@@ -221,15 +220,24 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
           nextCode.slice(replacement.end);
       }
 
+      let didVirtualCssChange = false;
+
       if (isSvelte) {
         nextCode = addVirtualImportToSvelte(nextCode);
         nextCode = addSvelteStyleBlock(nextCode, rules);
         moduleCss.delete(normalizedId);
       } else {
         nextCode = addVirtualImport(nextCode);
-        moduleCss.set(normalizedId, mergeCss(rules));
+        const nextCss = mergeCss(rules);
+        const prevCss = moduleCss.get(normalizedId);
+        if (prevCss !== nextCss) {
+          moduleCss.set(normalizedId, nextCss);
+          didVirtualCssChange = true;
+        }
       }
-      invalidateVirtualModule();
+      if (didVirtualCssChange) {
+        invalidateVirtualModule();
+      }
 
       return {
         code: nextCode,
@@ -241,6 +249,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       const normalizedId = cleanId(ctx.file);
       if (moduleCss.has(normalizedId)) {
         moduleCss.delete(normalizedId);
+        invalidateVirtualModule();
       }
     },
   };
