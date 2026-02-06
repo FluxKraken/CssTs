@@ -33,6 +33,35 @@ Deno.test("injects component CSS for direct ct usage in svelte", () => {
   assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid;gap:1rem\}/);
 });
 
+Deno.test("svelte style block keeps @media outside :global wrappers", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source =
+    `<script lang="ts">\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = ct({\n` +
+    `  container: {\n` +
+    `    display: "grid",\n` +
+    `    "@media (width < 70rem)": {\n` +
+    `      gap: 0,\n` +
+    `    },\n` +
+    `  },\n` +
+    `});\n` +
+    `</script>\n\n` +
+    `<main class={styles().container()}></main>`;
+
+  const transformed = transform(source, "/app/src/lib/components/Container.svelte");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(!code.includes(":global(@media"));
+  assertMatch(
+    code,
+    /@media \(width < 70rem\)\{:global\(\.ct_[a-z0-9]+\)\{gap:0px\}\}/,
+  );
+});
+
 Deno.test("cv() formats css variable references", () => {
   assertEquals(toCssDeclaration("backgroundColor", cv("--background")), "background-color:var(--background)");
   assertEquals(

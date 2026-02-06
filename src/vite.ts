@@ -17,12 +17,45 @@ function isVirtualSubRequest(id: string): boolean {
   return id.includes("?");
 }
 
+function findMatchingBrace(input: string, openIndex: number): number {
+  let depth = 0;
+
+  for (let i = openIndex; i < input.length; i += 1) {
+    const char = input[i];
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
 function toSvelteGlobalRule(rule: string): string {
   const open = rule.indexOf("{");
   if (open === -1) return rule;
-  const selector = rule.slice(0, open).trim();
-  const body = rule.slice(open);
-  return `:global(${selector})${body}`;
+
+  const close = findMatchingBrace(rule, open);
+  if (close === -1) return rule;
+
+  const head = rule.slice(0, open).trim();
+  const body = rule.slice(open + 1, close);
+  const suffix = rule.slice(close + 1).trim();
+
+  const next = head.startsWith("@")
+    ? `${head}{${toSvelteGlobalRule(body)}}`
+    : `:global(${head}){${body}}`;
+
+  if (suffix.length === 0) {
+    return next;
+  }
+  return `${next}${suffix}`;
 }
 
 function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
