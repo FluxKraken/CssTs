@@ -41,7 +41,8 @@ The setup CLI is now a separate package: `@kt-tools/css-ts-cli`.
 ### NPM + Vite + SvelteKit
 
 ```bash
-npx @kt-tools/css-ts-cli --npm
+npx jsr add -D @kt-tools/css-ts-cli
+npm exec css-ts-cli -- --npm
 ```
 
 This updates `vite.config.*` and installs `@kt-tools/css-ts` via `jsr add`.
