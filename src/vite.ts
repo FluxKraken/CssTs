@@ -1,9 +1,28 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
-import { findCtCalls, parseCtCallArguments } from "./parser.js";
+import {
+  findCtCalls,
+  parseCtCallArguments,
+  parseCtCallArgumentsWithResolver,
+  parseStaticExpression,
+} from "./parser.js";
 import { createClassName, toCssGlobalRules, toCssRules } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+const STATIC_STYLE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+
+type ImportBinding = {
+  source: string;
+  imported: string;
+};
+
+type ModuleStaticInfo = {
+  imports: Map<string, ImportBinding>;
+  constInitializers: Map<string, string>;
+  exportedConsts: Map<string, string>;
+};
 
 function cleanId(id: string): string {
   return id.replace(/\?.*$/, "");
@@ -100,6 +119,253 @@ function mergeCss(rules: Iterable<string>): string {
   return Array.from(rules).join("\n");
 }
 
+function parseBindingList(specifierList: string): Array<{ local: string; imported: string }> {
+  const bindings: Array<{ local: string; imported: string }> = [];
+
+  for (const rawSpecifier of specifierList.split(",")) {
+    const specifier = rawSpecifier.replace(/\s+/g, " ").trim();
+    if (!specifier) {
+      continue;
+    }
+
+    const normalized = specifier.replace(/^type\s+/, "").trim();
+    if (!normalized) {
+      continue;
+    }
+
+    const asMatch = normalized.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/);
+    if (asMatch) {
+      bindings.push({
+        imported: asMatch[1],
+        local: asMatch[2],
+      });
+      continue;
+    }
+
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(normalized)) {
+      bindings.push({
+        imported: normalized,
+        local: normalized,
+      });
+    }
+  }
+
+  return bindings;
+}
+
+function findExpressionTerminator(input: string, start: number): number {
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = start; i < input.length; i += 1) {
+    const char = input[i];
+    const next = input[i + 1];
+
+    if (inLineComment) {
+      if (char === "\n") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      braceDepth -= 1;
+      continue;
+    }
+
+    if (char === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      bracketDepth -= 1;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (char === ")") {
+      parenDepth -= 1;
+      continue;
+    }
+
+    if (braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+      if (char === ";" || char === ",") {
+        return i;
+      }
+
+      if (char === "\n") {
+        const remaining = input.slice(i + 1).trimStart();
+        if (
+          remaining.startsWith("const ") ||
+          remaining.startsWith("export ") ||
+          remaining.startsWith("import ") ||
+          remaining.startsWith("function ") ||
+          remaining.startsWith("class ") ||
+          remaining.startsWith("let ") ||
+          remaining.startsWith("var ") ||
+          remaining.startsWith("</script>")
+        ) {
+          return i;
+        }
+      }
+    }
+  }
+
+  return input.length;
+}
+
+function parseModuleStaticInfo(code: string): ModuleStaticInfo {
+  const imports = new Map<string, ImportBinding>();
+  const constInitializers = new Map<string, string>();
+  const exportedConsts = new Map<string, string>();
+
+  const importMatcher = /import\s*{([\s\S]*?)}\s*from\s*["']([^"']+)["']/g;
+  for (let match = importMatcher.exec(code); match; match = importMatcher.exec(code)) {
+    const source = match[2];
+    for (const binding of parseBindingList(match[1])) {
+      imports.set(binding.local, {
+        source,
+        imported: binding.imported,
+      });
+    }
+  }
+
+  const exportListMatcher = /export\s*{([\s\S]*?)}\s*;?/g;
+  for (let match = exportListMatcher.exec(code); match; match = exportListMatcher.exec(code)) {
+    for (const binding of parseBindingList(match[1])) {
+      exportedConsts.set(binding.local, binding.imported);
+    }
+  }
+
+  const constMatcher = /\b(export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g;
+  for (let match = constMatcher.exec(code); match; match = constMatcher.exec(code)) {
+    const isExported = Boolean(match[1]);
+    const name = match[2];
+    const initializerStart = constMatcher.lastIndex;
+    const initializerEnd = findExpressionTerminator(code, initializerStart);
+    const initializer = code.slice(initializerStart, initializerEnd).trim();
+
+    if (initializer.length > 0) {
+      constInitializers.set(name, initializer);
+    }
+
+    if (isExported) {
+      exportedConsts.set(name, name);
+    }
+
+    constMatcher.lastIndex = initializerEnd < code.length && code[initializerEnd] === ";"
+      ? initializerEnd + 1
+      : initializerEnd;
+  }
+
+  return {
+    imports,
+    constInitializers,
+    exportedConsts,
+  };
+}
+
+function resolveFileFromBase(basePath: string): string | null {
+  const candidates: string[] = [];
+  if (path.extname(basePath)) {
+    candidates.push(basePath);
+  } else {
+    for (const extension of STATIC_STYLE_EXTENSIONS) {
+      candidates.push(`${basePath}${extension}`);
+      candidates.push(path.join(basePath, `index${extension}`));
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return path.normalize(candidate);
+    }
+  }
+
+  return null;
+}
+
+function resolveImportToFile(importerId: string, source: string): string | null {
+  if (source.startsWith(".")) {
+    const base = path.resolve(path.dirname(importerId), source);
+    return resolveFileFromBase(base);
+  }
+
+  if (source.startsWith("/")) {
+    return resolveFileFromBase(source);
+  }
+
+  if (source === "$lib" || source.startsWith("$lib/")) {
+    const marker = `${path.sep}src${path.sep}`;
+    const markerIndex = importerId.lastIndexOf(marker);
+    if (markerIndex === -1) {
+      return null;
+    }
+
+    const projectRoot = importerId.slice(0, markerIndex);
+    const suffix = source === "$lib" ? "" : source.slice("$lib/".length);
+    const base = path.join(projectRoot, "src", "lib", suffix);
+    return resolveFileFromBase(base);
+  }
+
+  return null;
+}
+
 /** Options for {@link cssTsPlugin}. */
 export interface CssTsPluginOptions {
   /** Limit transforms to ids that match this regex. */
@@ -189,9 +455,86 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
 
       const replacements: Array<{ start: number; end: number; text: string }> = [];
       const rules = new Set<string>();
+      const moduleInfoCache = new Map<string, ModuleStaticInfo>();
+      const constValueCache = new Map<string, unknown | null>();
+      const resolving = new Set<string>();
+
+      function getModuleCode(moduleId: string): string | null {
+        if (moduleId === normalizedId) {
+          return code;
+        }
+        try {
+          return fs.readFileSync(moduleId, "utf8");
+        } catch {
+          return null;
+        }
+      }
+
+      function getModuleInfo(moduleId: string): ModuleStaticInfo | null {
+        const cached = moduleInfoCache.get(moduleId);
+        if (cached) {
+          return cached;
+        }
+        const moduleCode = getModuleCode(moduleId);
+        if (!moduleCode) {
+          return null;
+        }
+        const parsed = parseModuleStaticInfo(moduleCode);
+        moduleInfoCache.set(moduleId, parsed);
+        return parsed;
+      }
+
+      function resolveIdentifierInModule(name: string, moduleId: string): unknown | null {
+        const cacheKey = `${moduleId}::${name}`;
+        if (constValueCache.has(cacheKey)) {
+          return constValueCache.get(cacheKey) ?? null;
+        }
+        if (resolving.has(cacheKey)) {
+          return null;
+        }
+
+        resolving.add(cacheKey);
+        let resolved: unknown | null = null;
+
+        const moduleInfo = getModuleInfo(moduleId);
+        if (moduleInfo) {
+          const initializer = moduleInfo.constInitializers.get(name);
+          if (initializer !== undefined) {
+            const value = parseStaticExpression(initializer, (identifier) => {
+              const nested = resolveIdentifierInModule(identifier, moduleId);
+              return nested === null ? undefined : nested;
+            });
+
+            if (value !== null) {
+              resolved = value;
+            }
+          } else {
+            const binding = moduleInfo.imports.get(name);
+            if (binding) {
+              const resolvedImportFile = resolveImportToFile(moduleId, binding.source);
+              if (resolvedImportFile) {
+                const importedModuleInfo = getModuleInfo(resolvedImportFile);
+                if (importedModuleInfo) {
+                  const exportedLocalName =
+                    importedModuleInfo.exportedConsts.get(binding.imported) ?? binding.imported;
+                  resolved = resolveIdentifierInModule(exportedLocalName, resolvedImportFile);
+                }
+              }
+            }
+          }
+        }
+
+        resolving.delete(cacheKey);
+        constValueCache.set(cacheKey, resolved);
+        return resolved;
+      }
 
       for (const call of calls) {
-        const parsed = parseCtCallArguments(call.arg);
+        const parsed = parseCtCallArguments(call.arg) ??
+          parseCtCallArgumentsWithResolver(
+            call.arg,
+            (identifier) => resolveIdentifierInModule(identifier, normalizedId) ?? undefined,
+          );
         if (!parsed) {
           continue;
         }

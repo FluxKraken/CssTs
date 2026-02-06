@@ -138,6 +138,23 @@ Deno.test("parser accepts quoted nested selectors and nested @media/@container",
   );
 });
 
+Deno.test("parser merges style declaration arrays in ct config", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      myButton: [
+        { fontSize: "1.25rem", padding: "1rem" },
+        { background: "black", color: "white", padding: "0.5rem" }
+      ]
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.base.myButton.fontSize, "1.25rem");
+  assertEquals(parsed.base.myButton.background, "black");
+  assertEquals(parsed.base.myButton.color, "white");
+  assertEquals(parsed.base.myButton.padding, "0.5rem");
+});
+
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -165,6 +182,78 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("extracts merged declaration arrays at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    myButton: [\n` +
+    `      { fontSize: "1.25rem", padding: "1rem" },\n` +
+    `      { background: "black", color: "white", padding: "0.5rem" },\n` +
+    `    ]\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/array-styles.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{font-size:1\.25rem;padding:0\.5rem;background:black;color:white\}/,
+  );
+});
+
+Deno.test("resolves imported style objects and precompiles them", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/styles.ts`,
+      `export const commonColors = {\n` +
+        `  background: "black",\n` +
+        `  color: "white",\n` +
+        `};\n` +
+        `export const buttonStyles = {\n` +
+        `  fontSize: "1.25rem",\n` +
+        `  fontWeight: 600,\n` +
+        `  padding: "1rem",\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { buttonStyles, commonColors } from "$lib/styles";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    myButton: [buttonStyles, commonColors]\n` +
+      `  },\n` +
+      `  variant: {\n` +
+      `    size: {\n` +
+      `      lg: { myButton: { fontSize: "2rem" } }\n` +
+      `    }\n` +
+      `  }\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{font-size:1\.25rem;font-weight:600;padding:1rem;background:black;color:white\}/);
+    assertMatch(css, /\.ct_[a-z0-9]+\{font-size:2rem\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
 });
 
 Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {

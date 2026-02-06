@@ -307,6 +307,23 @@ Notes:
 - Variant keys must exist in the base style object.
 - If a key is variant-only, define it in base as an empty object (for example `label: {}`).
 
+### Reusable style objects and declaration arrays
+
+You can compose declarations from reusable constants, including imported constants, and arrays are merged left-to-right:
+
+```ts
+import ct from "@kt-tools/css-ts";
+import { buttonStyles, commonColors } from "$lib/styles";
+
+const styles = ct({
+  base: {
+    myButton: [buttonStyles, commonColors],
+  },
+});
+```
+
+When these references resolve to static `const` objects at build time, the Vite plugin precompiles them into CSS.
+
 ## How it works
 
 - In dev, the Vite plugin rewrites static `ct({ ... })` calls (`global`, `base`, and `variant`) and serves a virtual CSS module.
@@ -320,7 +337,10 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
+- declaration arrays (merged left-to-right)
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
-- optional `global`, `base`, and `variant` sections via `ct({ ... })` when the argument is an object literal
+- optional `global`, `base`, and `variant` sections via `ct({ ... })`
+- identifier references to `const` objects/arrays in the same module
+- named imports of `const` style objects from relative paths and SvelteKit `$lib/...` paths
 
-It skips dynamic expressions, spreads, variables, and function calls.
+It still skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls.

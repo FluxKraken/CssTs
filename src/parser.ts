@@ -1,7 +1,7 @@
 import { cv, isCssVarRef, type StyleDeclaration, type StyleSheet } from "./shared.js";
 
 interface ParseResult {
-  value: Record<string, unknown>;
+  value: ParsedObject;
   end: number;
 }
 
@@ -11,6 +11,27 @@ type CtConfig = {
   base: StyleSheet;
   variant?: VariantSheet;
 };
+
+type IdentifierReference = {
+  kind: "identifier-ref";
+  name: string;
+};
+
+interface ParsedObject {
+  [key: string]: ParsedValue;
+}
+
+interface ParsedArray extends Array<ParsedValue> {}
+
+type ParsedValue =
+  | string
+  | number
+  | ReturnType<typeof cv>
+  | IdentifierReference
+  | ParsedObject
+  | ParsedArray;
+
+export type IdentifierResolver = (name: string) => unknown | undefined;
 
 function isIdentifierStart(char: string): boolean {
   return /[A-Za-z_$]/.test(char);
@@ -95,13 +116,51 @@ function parseKey(input: string, index: number): [string, number] {
   return parseIdentifier(input, index);
 }
 
-function parseValue(input: string, index: number): [unknown, number] {
+function parseArray(input: string, index: number): [ParsedArray, number] {
+  if (input[index] !== "[") {
+    throw new Error(`Expected '[' at ${index}`);
+  }
+
+  const values: ParsedArray = [];
+  index += 1;
+
+  while (index < input.length) {
+    index = skipWhitespace(input, index);
+
+    if (input[index] === "]") {
+      return [values, index + 1];
+    }
+
+    const [parsedValue, valueEnd] = parseValue(input, index);
+    values.push(parsedValue);
+    index = skipWhitespace(input, valueEnd);
+
+    if (input[index] === ",") {
+      index += 1;
+      continue;
+    }
+
+    if (input[index] === "]") {
+      return [values, index + 1];
+    }
+
+    throw new Error(`Expected ',' or ']' at ${index}`);
+  }
+
+  throw new Error("Unterminated array literal");
+}
+
+function parseValue(input: string, index: number): [ParsedValue, number] {
   index = skipWhitespace(input, index);
   const char = input[index];
 
   if (char === "{") {
     const result = parseObject(input, index);
     return [result.value, result.end];
+  }
+
+  if (char === "[") {
+    return parseArray(input, index);
   }
 
   if (char === '"' || char === "'") {
@@ -115,7 +174,7 @@ function parseValue(input: string, index: number): [unknown, number] {
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
     if (identifier !== "cv") {
-      throw new Error(`Unsupported value function '${identifier}'`);
+      return [{ kind: "identifier-ref", name: identifier }, identifierEnd];
     }
 
     let cursor = skipWhitespace(input, identifierEnd);
@@ -155,7 +214,7 @@ function parseObject(input: string, index: number): ParseResult {
     throw new Error(`Expected '{' at ${index}`);
   }
 
-  const value: Record<string, unknown> = {};
+  const value: ParsedObject = {};
   index += 1;
 
   while (index < input.length) {
@@ -194,59 +253,112 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isIdentifierReference(value: unknown): value is IdentifierReference {
+  return isPlainObject(value) && value.kind === "identifier-ref" && typeof value.name === "string";
+}
+
 function isStyleLeaf(value: unknown): boolean {
   return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
 }
 
-function isStyleDeclaration(value: unknown): value is StyleDeclaration {
-  if (!isPlainObject(value)) {
+function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
+  if (!isPlainObject(value) || isCssVarRef(value)) {
     return false;
   }
 
   for (const declarationValue of Object.values(value)) {
-    if (!isStyleLeaf(declarationValue) && !isStyleDeclaration(declarationValue)) {
+    if (!isStyleLeaf(declarationValue) && !isStyleDeclarationObject(declarationValue)) {
       return false;
     }
   }
   return true;
 }
 
-function isStyleSheet(value: unknown): value is StyleSheet {
-  if (!isPlainObject(value)) {
-    return false;
+function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration): StyleDeclaration {
+  const merged: Record<string, unknown> = { ...base };
+
+  for (const [key, nextValue] of Object.entries(next)) {
+    const previousValue = merged[key];
+    if (isStyleDeclarationObject(previousValue) && isStyleDeclarationObject(nextValue)) {
+      merged[key] = mergeStyleDeclarations(previousValue, nextValue);
+      continue;
+    }
+    merged[key] = nextValue;
   }
 
-  for (const declaration of Object.values(value)) {
-    if (!isStyleDeclaration(declaration)) {
-      return false;
-    }
-  }
-  return true;
+  return merged as StyleDeclaration;
 }
 
-function isVariantSheet(value: unknown, baseKeys: Set<string>): value is VariantSheet {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  for (const group of Object.values(value)) {
-    if (!isPlainObject(group)) {
-      return false;
-    }
-
-    for (const variant of Object.values(group)) {
-      if (!isStyleSheet(variant)) {
-        return false;
+function normalizeStyleDeclaration(value: unknown): StyleDeclaration | null {
+  if (Array.isArray(value)) {
+    let merged: StyleDeclaration = {};
+    for (const item of value) {
+      const declaration = normalizeStyleDeclaration(item);
+      if (!declaration) {
+        return null;
       }
-      for (const classKey of Object.keys(variant)) {
+      merged = mergeStyleDeclarations(merged, declaration);
+    }
+    return merged;
+  }
+
+  if (!isStyleDeclarationObject(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeStyleSheet(value: unknown): StyleSheet | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const sheet: StyleSheet = {};
+  for (const [key, declaration] of Object.entries(value)) {
+    const normalized = normalizeStyleDeclaration(declaration);
+    if (!normalized) {
+      return null;
+    }
+    sheet[key] = normalized;
+  }
+
+  return sheet;
+}
+
+function normalizeVariantSheet(value: unknown, baseKeys: Set<string>): VariantSheet | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const variantSheet: VariantSheet = {};
+
+  for (const [groupName, group] of Object.entries(value)) {
+    if (!isPlainObject(group)) {
+      return null;
+    }
+
+    const normalizedGroup: Record<string, StyleSheet> = {};
+
+    for (const [variantName, variant] of Object.entries(group)) {
+      const normalizedVariant = normalizeStyleSheet(variant);
+      if (!normalizedVariant) {
+        return null;
+      }
+
+      for (const classKey of Object.keys(normalizedVariant)) {
         if (!baseKeys.has(classKey)) {
-          return false;
+          return null;
         }
       }
+
+      normalizedGroup[variantName] = normalizedVariant;
     }
+
+    variantSheet[groupName] = normalizedGroup;
   }
 
-  return true;
+  return variantSheet;
 }
 
 function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
@@ -262,25 +374,27 @@ function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
   let variant: VariantSheet | undefined;
 
   if ("global" in value) {
-    if (!isStyleSheet(value.global)) {
+    const normalized = normalizeStyleSheet(value.global);
+    if (!normalized) {
       return null;
     }
-    global = value.global;
+    global = normalized;
   }
 
   if ("base" in value) {
-    if (!isStyleSheet(value.base)) {
+    const normalized = normalizeStyleSheet(value.base);
+    if (!normalized) {
       return null;
     }
-    base = value.base;
+    base = normalized;
   }
 
   if ("variant" in value) {
-    const baseKeys = new Set(Object.keys(base));
-    if (!isVariantSheet(value.variant, baseKeys)) {
+    const normalized = normalizeVariantSheet(value.variant, new Set(Object.keys(base)));
+    if (!normalized) {
       return null;
     }
-    variant = value.variant;
+    variant = normalized;
   }
 
   return {
@@ -290,31 +404,113 @@ function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
   };
 }
 
+const UNRESOLVED = Symbol("ct-parser-unresolved");
+
+function resolveParsedValue(value: ParsedValue, resolveIdentifier: IdentifierResolver): unknown | typeof UNRESOLVED {
+  if (isIdentifierReference(value)) {
+    const resolved = resolveIdentifier(value.name);
+    return resolved === undefined ? UNRESOLVED : resolved;
+  }
+
+  if (Array.isArray(value)) {
+    const resolvedArray: unknown[] = [];
+    for (const entry of value) {
+      const resolved = resolveParsedValue(entry, resolveIdentifier);
+      if (resolved === UNRESOLVED) {
+        return UNRESOLVED;
+      }
+      resolvedArray.push(resolved);
+    }
+    return resolvedArray;
+  }
+
+  if (isPlainObject(value)) {
+    const resolvedObject: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      const resolved = resolveParsedValue(nestedValue as ParsedValue, resolveIdentifier);
+      if (resolved === UNRESOLVED) {
+        return UNRESOLVED;
+      }
+      resolvedObject[key] = resolved;
+    }
+    return resolvedObject;
+  }
+
+  return value;
+}
+
+function parseExpression(source: string): ParsedValue | null {
+  try {
+    const index = skipWhitespace(source, 0);
+    const [parsed, end] = parseValue(source, index);
+    const cursor = skipWhitespace(source, end);
+    if (cursor !== source.length) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a limited static expression used by css-ts extraction:
+ * objects, arrays, strings, numbers, identifiers, and `cv(...)`.
+ */
+export function parseStaticExpression(
+  source: string,
+  resolveIdentifier?: IdentifierResolver,
+): unknown | null {
+  const parsed = parseExpression(source);
+  if (!parsed) {
+    return null;
+  }
+
+  if (!resolveIdentifier) {
+    const unresolved = resolveParsedValue(parsed, () => undefined);
+    return unresolved === UNRESOLVED ? null : unresolved;
+  }
+
+  const resolved = resolveParsedValue(parsed, resolveIdentifier);
+  if (resolved === UNRESOLVED) {
+    return null;
+  }
+  return resolved;
+}
+
+function parseCtCallArgumentsInternal(
+  source: string,
+  resolveIdentifier: IdentifierResolver,
+): CtConfig | null {
+  const parsed = parseExpression(source);
+  if (!parsed || !isPlainObject(parsed)) {
+    return null;
+  }
+
+  const resolved = resolveParsedValue(parsed, resolveIdentifier);
+  if (resolved === UNRESOLVED || !isPlainObject(resolved)) {
+    return null;
+  }
+
+  return parseCtConfig(resolved);
+}
+
 /**
  * Parse a `ct({ global?, base?, variant? })` argument string into style objects.
  * Returns `null` when the input cannot be parsed or validated.
  */
 export function parseCtCallArguments(source: string): CtConfig | null {
-  try {
-    const index = skipWhitespace(source, 0);
-    if (source[index] !== "{") {
-      return null;
-    }
+  return parseCtCallArgumentsInternal(source, () => undefined);
+}
 
-    const configParsed = parseObject(source, index);
-    const cursor = skipWhitespace(source, configParsed.end);
-    if (cursor !== source.length) {
-      return null;
-    }
-
-    if (!isPlainObject(configParsed.value)) {
-      return null;
-    }
-
-    return parseCtConfig(configParsed.value);
-  } catch {
-    return null;
-  }
+/**
+ * Parse `ct({ ... })` arguments and resolve identifier references through the provided callback.
+ */
+export function parseCtCallArgumentsWithResolver(
+  source: string,
+  resolveIdentifier: IdentifierResolver,
+): CtConfig | null {
+  return parseCtCallArgumentsInternal(source, resolveIdentifier);
 }
 
 /**

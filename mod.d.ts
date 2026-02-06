@@ -8,18 +8,20 @@ import type {
 } from "./dist/shared.d.ts";
 import type { CssTsPluginOptions } from "./dist/vite.d.ts";
 
-type CompiledMap<T extends StyleSheet> = Partial<Record<keyof T, string>>;
-type VariantSheet<T extends StyleSheet> = Record<string, Record<string, Partial<T>>>;
-type VariantClassMap<T extends StyleSheet> = Record<
+type StyleDeclarationInput = StyleDeclaration | readonly StyleDeclarationInput[];
+type StyleSheetInput = Record<string, StyleDeclarationInput>;
+type CompiledMap<T extends StyleSheetInput> = Partial<Record<keyof T, string>>;
+type VariantSheet<T extends StyleSheetInput> = Record<string, Record<string, Partial<T>>>;
+type VariantClassMap<T extends StyleSheetInput> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
-type CtConfig<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
-  global?: StyleSheet;
+type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+  global?: StyleSheetInput;
   base?: T;
   variant?: V;
 };
-type CompiledConfig<T extends StyleSheet> = {
+type CompiledConfig<T extends StyleSheetInput> = {
   global?: true;
   base?: CompiledMap<T>;
   variant?: VariantClassMap<T>;
@@ -27,7 +29,7 @@ type CompiledConfig<T extends StyleSheet> = {
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
   ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
-type Accessor<T extends StyleSheet, V extends VariantSheet<T> | undefined> = {
+type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: (variants?: VariantSelection<V>) => string;
 };
 
@@ -42,7 +44,10 @@ export type { StyleValue };
 
 /** Combined CSS-TS runtime API. */
 export interface Ct {
-  <T extends StyleSheet = StyleSheet, V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined>(
+  <
+    T extends StyleSheetInput = StyleSheetInput,
+    V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+  >(
     config: CtConfig<T, V>,
     compiled?: CompiledConfig<T>,
   ): () => Accessor<T, V>;
