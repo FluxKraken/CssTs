@@ -6,10 +6,12 @@ interface ParseResult {
 }
 
 type VariantSheet = Record<string, Record<string, StyleSheet>>;
+type VariantSelection = Record<string, string>;
 type CtConfig = {
   global?: StyleSheet;
   base: StyleSheet;
   variant?: VariantSheet;
+  defaults?: VariantSelection;
 };
 
 type IdentifierReference = {
@@ -389,8 +391,33 @@ function normalizeVariantSheet(value: unknown, baseKeys: Set<string>): VariantSh
   return variantSheet;
 }
 
+function normalizeVariantSelection(
+  value: unknown,
+  variants: VariantSheet | undefined,
+): VariantSelection | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const selection: VariantSelection = {};
+  for (const [groupName, variantName] of Object.entries(value)) {
+    if (typeof variantName !== "string") {
+      return null;
+    }
+    if (variants) {
+      const group = variants[groupName];
+      if (!group || !(variantName in group)) {
+        return null;
+      }
+    }
+    selection[groupName] = variantName;
+  }
+
+  return selection;
+}
+
 function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
-  const allowed = new Set(["global", "base", "variant"]);
+  const allowed = new Set(["global", "base", "variant", "defaults"]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
       return null;
@@ -400,6 +427,7 @@ function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
   let global: StyleSheet | undefined;
   let base: StyleSheet = {};
   let variant: VariantSheet | undefined;
+  let defaults: VariantSelection | undefined;
 
   if ("global" in value) {
     const normalized = normalizeStyleSheet(value.global);
@@ -425,10 +453,20 @@ function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
     variant = normalized;
   }
 
+  if ("defaults" in value) {
+    const normalizedDefaults = normalizeVariantSelection(value.defaults, variant);
+    if (!normalizedDefaults) {
+      return null;
+    }
+
+    defaults = normalizedDefaults;
+  }
+
   return {
     global,
     base,
     variant,
+    defaults,
   };
 }
 
@@ -524,7 +562,7 @@ function parseCtCallArgumentsInternal(
 }
 
 /**
- * Parse a `ct({ global?, base?, variant? })` argument string into style objects.
+ * Parse a `ct({ global?, base?, variant?, defaults? })` argument string into style objects.
  * Returns `null` when the input cannot be parsed or validated.
  */
 export function parseCtCallArguments(source: string): CtConfig | null {

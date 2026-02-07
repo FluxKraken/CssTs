@@ -155,6 +155,26 @@ Deno.test("parser merges style declaration arrays in ct config", () => {
   assertEquals(parsed.base.myButton.padding, "0.5rem");
 });
 
+Deno.test("parser accepts defaults variant selections", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      myButton: {}
+    },
+    variant: {
+      size: {
+        sm: { myButton: { fontSize: "0.8rem" } },
+        md: { myButton: { fontSize: "1rem" } }
+      }
+    },
+    defaults: {
+      size: "md"
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.defaults, { size: "md" });
+});
+
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -434,6 +454,61 @@ Deno.test("extracts variant styles and compiles variant class maps", () => {
   const css = loaded as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{background-color:red\}/);
+});
+
+Deno.test("extracts css when defaults are present in ct config", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    myButton: { padding: "1rem" }\n` +
+    `  },\n` +
+    `  variant: {\n` +
+    `    size: {\n` +
+    `      sm: { myButton: { fontSize: "0.8rem" } },\n` +
+    `      md: { myButton: { fontSize: "1rem" } }\n` +
+    `    }\n` +
+    `  },\n` +
+    `  defaults: {\n` +
+    `    size: "md"\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/default-variants.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assertMatch(code, /defaults/);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{padding:1rem\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{font-size:0\.8rem\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{font-size:1rem\}/);
+});
+
+Deno.test("runtime applies defaults to variant selection and allows overrides", () => {
+  const styles = ct({
+    base: {
+      myButton: { padding: "1rem", fontSize: "1rem" },
+    },
+    variant: {
+      size: {
+        sm: { myButton: { fontSize: "0.8rem" } },
+        md: { myButton: { fontSize: "1rem" } },
+      },
+    },
+    defaults: {
+      size: "md",
+    },
+  } as any);
+
+  const withDefaults = styles().myButton();
+  assertEquals(withDefaults, styles().myButton({}));
+  assertEquals(withDefaults, styles().myButton({ size: "md" }));
+  assert(withDefaults !== styles().myButton({ size: "sm" }));
 });
 
 Deno.test("runtime works without a document global", () => {

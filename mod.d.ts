@@ -20,6 +20,7 @@ type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> 
   global?: StyleSheetInput;
   base?: T;
   variant?: V;
+  defaults?: VariantSelection<V>;
 };
 type CompiledConfig<T extends StyleSheetInput> = {
   global?: true;

@@ -248,7 +248,7 @@ const styles = ct({
 
 ## Variant usage
 
-`ct` accepts a single config object with optional `global`, `base`, and `variant` sections:
+`ct` accepts a single config object with optional `global`, `base`, `variant`, and `defaults` sections:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -290,6 +290,9 @@ const styles = ct({
       },
     },
   },
+  defaults: {
+    size: "sm",
+  },
 });
 
 // base classes
@@ -300,6 +303,7 @@ styles().label();
 styles().button({ intent: "primary" });
 styles().label({ size: "lg" });
 styles().button({ intent: "secondary", size: "sm" });
+styles().label(); // applies defaults.size when available
 ```
 
 Notes:
@@ -326,7 +330,7 @@ When these references resolve to static `const` objects at build time, the Vite 
 
 ## How it works
 
-- In dev, the Vite plugin rewrites static `ct({ ... })` calls (`global`, `base`, and `variant`) and serves a virtual CSS module.
+- In dev, the Vite plugin rewrites static `ct({ ... })` calls (`global`, `base`, `variant`, and `defaults`) and serves a virtual CSS module.
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
 - Svelte files automatically import the virtual CSS module when static styles are detected.
@@ -339,7 +343,7 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 - property values as strings, numbers, or `cv("--token")`
 - declaration arrays (merged left-to-right)
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
-- optional `global`, `base`, and `variant` sections via `ct({ ... })`
+- optional `global`, `base`, `variant`, and `defaults` sections via `ct({ ... })`
 - identifier references to `const` objects/arrays in the same module
 - named imports of `const` style objects from relative paths and SvelteKit `$lib/...` paths
 - namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)

@@ -15,19 +15,20 @@ type VariantClassMap<T extends StyleSheetInput> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
+type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
+  ? { [G in keyof V]?: keyof V[G] }
+  : Record<string, string>;
 type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   global?: StyleSheetInput;
   base?: T;
   variant?: V;
+  defaults?: VariantSelection<V>;
 };
 type CompiledConfig<T extends StyleSheetInput> = {
   global?: true;
   base?: CompiledMap<T>;
   variant?: VariantClassMap<T>;
 };
-type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
-  ? { [G in keyof V]?: keyof V[G] }
-  : Record<string, string>;
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: (variants?: VariantSelection<V>) => string;
 };
@@ -184,6 +185,7 @@ export default function ct<
   const globalStyles = normalizeStyleSheetInput(config.global);
   const styles = normalizeStyleSheetInput(config.base);
   const variants = normalizeVariantSheetInput(config.variant as VariantSheet<T> | undefined);
+  const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
 
   if (Object.keys(globalStyles).length > 0 && !compiled?.global) {
     for (const rule of toCssGlobalRules(globalStyles)) {
@@ -206,18 +208,24 @@ export default function ct<
     }
 
     accessors[key] = (selection) => {
-      if (!selection) {
+      const resolvedSelection = selection
+        ? ({ ...defaultSelection, ...selection } as VariantSelection<V>)
+        : defaultSelection;
+
+      if (!resolvedSelection) {
         return className;
       }
 
       const classNames = [className];
 
-      for (const [group, variantName] of Object.entries(selection)) {
+      for (const [group, variantName] of Object.entries(
+        resolvedSelection as Record<string, string | number | symbol | undefined>,
+      )) {
         if (!variantName) {
           continue;
         }
 
-        const variantClass = variantClassMap[group]?.[variantName as string]?.[key];
+        const variantClass = variantClassMap[group]?.[String(variantName)]?.[key];
         if (variantClass) {
           classNames.push(variantClass);
         }
