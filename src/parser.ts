@@ -416,7 +416,7 @@ function normalizeVariantSelection(
   return selection;
 }
 
-function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
+export function parseCtConfig(value: Record<string, unknown>): CtConfig | null {
   const allowed = new Set(["global", "base", "variant", "defaults"]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
@@ -647,4 +647,183 @@ export function findCtCalls(code: string): Array<{ start: number; end: number; a
   }
 
   return calls;
+}
+
+/**
+ * Find the end of a JavaScript expression starting at `start` by tracking
+ * balanced braces, brackets, parentheses, string literals, and comments.
+ */
+export function findExpressionTerminator(input: string, start: number): number {
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = start; i < input.length; i += 1) {
+    const char = input[i];
+    const next = input[i + 1];
+
+    if (inLineComment) {
+      if (char === "\n") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      braceDepth -= 1;
+      continue;
+    }
+
+    if (char === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      bracketDepth -= 1;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (char === ")") {
+      parenDepth -= 1;
+      continue;
+    }
+
+    if (braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+      if (char === ";" || char === ",") {
+        return i;
+      }
+
+      if (char === "\n") {
+        const remaining = input.slice(i + 1).trimStart();
+        if (
+          remaining.startsWith("const ") ||
+          remaining.startsWith("export ") ||
+          remaining.startsWith("import ") ||
+          remaining.startsWith("function ") ||
+          remaining.startsWith("class ") ||
+          remaining.startsWith("let ") ||
+          remaining.startsWith("var ") ||
+          remaining.startsWith("</script>")
+        ) {
+          return i;
+        }
+      }
+    }
+  }
+
+  return input.length;
+}
+
+type NewCtAssignment = {
+  property: string;
+  start: number;
+  end: number;
+  valueSource: string;
+};
+
+type NewCtDeclaration = {
+  varName: string;
+  start: number;
+  end: number;
+  assignments: NewCtAssignment[];
+};
+
+/**
+ * Find `const x = new ct()` declarations and their subsequent property assignments
+ * (`x.base = ...`, `x.global = ...`, etc.) for static extraction.
+ */
+export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
+  const declarations: NewCtDeclaration[] = [];
+  const matcher = /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(\s*\)/g;
+
+  for (let match = matcher.exec(code); match; match = matcher.exec(code)) {
+    const varName = match[2];
+    const declStart = match.index;
+    const declEnd = matcher.lastIndex;
+
+    const assignments: NewCtAssignment[] = [];
+    const assignmentMatcher = new RegExp(
+      `\\b${varName}\\.(base|global|variant|defaults)\\s*=\\s*`,
+      "g",
+    );
+    assignmentMatcher.lastIndex = declEnd;
+
+    for (
+      let aMatch = assignmentMatcher.exec(code);
+      aMatch;
+      aMatch = assignmentMatcher.exec(code)
+    ) {
+      const property = aMatch[1];
+      const assignStart = aMatch.index;
+      const valueStart = aMatch.index + aMatch[0].length;
+      const valueEnd = findExpressionTerminator(code, valueStart);
+      const valueSource = code.slice(valueStart, valueEnd).trim();
+
+      const end = valueEnd < code.length && code[valueEnd] === ";"
+        ? valueEnd + 1
+        : valueEnd;
+
+      assignments.push({ property, start: assignStart, end, valueSource });
+      assignmentMatcher.lastIndex = end;
+    }
+
+    declarations.push({ varName, start: declStart, end: declEnd, assignments });
+  }
+
+  return declarations;
 }

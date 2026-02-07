@@ -3,10 +3,12 @@
  * @module
  */
 import runtimeCt from "./runtime.js";
+import type { CtBuilder } from "./runtime.js";
 import { cssTsPlugin } from "./vite.js";
 import { cv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
+  new (): CtBuilder;
   vite: typeof cssTsPlugin;
   cv: typeof cv;
   var: typeof cv;
@@ -31,5 +33,7 @@ export { cssTsPlugin as vite };
 export { cv };
 /** Re-exported Vite plugin options. */
 export type { CssTsPluginOptions } from "./vite.js";
+/** Re-exported builder type. */
+export type { CtBuilder } from "./runtime.js";
 /** Re-exported style types. */
 export type { StyleDeclaration, StyleSheet, StyleValue } from "./shared.js";

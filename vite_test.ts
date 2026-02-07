@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
-import { parseCtCallArguments } from "./src/parser.ts";
+import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
 import { cv, toCssDeclaration, toCssRules } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -554,4 +554,107 @@ Deno.test("extracts global section rules at build time", () => {
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+});
+
+// --- new ct() builder tests ---
+
+Deno.test("new ct() runtime with factory access pattern", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    myButton: {
+      backgroundColor: "black",
+      color: "white",
+      fontSize: "1.25rem",
+    },
+  };
+
+  const className = styles().myButton();
+  assertMatch(className, /^ct_[a-z0-9]+$/);
+});
+
+Deno.test("new ct() runtime with direct accessor access", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    myButton: {
+      backgroundColor: "black",
+      color: "white",
+    },
+  };
+
+  const viaFactory = styles().myButton();
+  const viaDirect = styles.myButton();
+  assertEquals(viaFactory, viaDirect);
+});
+
+Deno.test("new ct() runtime with variants and defaults", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    myButton: { padding: "1rem", fontSize: "1rem" },
+  };
+  styles.variant = {
+    size: {
+      sm: { myButton: { fontSize: "0.8rem" } },
+      md: { myButton: { fontSize: "1rem" } },
+    },
+  };
+  styles.defaults = { size: "md" };
+
+  const withDefaults = styles().myButton();
+  assertEquals(withDefaults, styles().myButton({}));
+  assertEquals(withDefaults, styles().myButton({ size: "md" }));
+  assert(withDefaults !== styles().myButton({ size: "sm" }));
+});
+
+Deno.test("parser findNewCtDeclarations detects new ct() pattern", () => {
+  const code = `import ct from "css-ts";
+const styles = new ct();
+styles.base = { myButton: { backgroundColor: "black" } };
+styles.global = { html: { margin: 0 } };`;
+
+  const decls = findNewCtDeclarations(code);
+  assertEquals(decls.length, 1);
+  assertEquals(decls[0].varName, "styles");
+  assertEquals(decls[0].assignments.length, 2);
+  assertEquals(decls[0].assignments[0].property, "base");
+  assertEquals(decls[0].assignments[1].property, "global");
+});
+
+Deno.test("vite extracts css from new ct() pattern", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { card: { display: "grid", gap: "1rem" } };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct()"));
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("vite extracts new ct() with variants and global", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.global = { "@layer reset": { "html": { scrollBehavior: "smooth" } } };\n` +
+    `styles.base = { card: { display: "grid" } };\n` +
+    `styles.variant = { theme: { dark: { card: { backgroundColor: "black" } } } };\n` +
+    `styles.defaults = { theme: "dark" };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-full.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{background-color:black\}/);
 });

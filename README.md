@@ -328,16 +328,72 @@ const styles = ct({
 
 When these references resolve to static `const` objects at build time, the Vite plugin precompiles them into CSS.
 
+## Builder pattern (`new ct()`)
+
+As an alternative to the config-object API, you can use the builder pattern to declare styles incrementally via property assignment:
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = new ct();
+
+styles.base = {
+  card: {
+    display: "grid",
+    gap: "1rem",
+    padding: "1rem",
+  },
+  title: {
+    fontSize: "1.5rem",
+    fontWeight: 600,
+  },
+};
+
+styles.global = {
+  "@layer reset": {
+    "html": { scrollBehavior: "smooth" },
+  },
+};
+
+styles.variant = {
+  theme: {
+    dark: { card: { backgroundColor: "#111", color: "#fff" } },
+    light: { card: { backgroundColor: "#fff", color: "#111" } },
+  },
+};
+
+styles.defaults = { theme: "light" };
+```
+
+The builder compiles lazily on first access and supports two access patterns:
+
+```ts
+// factory access — call styles() to get the accessor, then call a style key
+styles().card();
+styles().card({ theme: "dark" });
+
+// direct access — access style keys directly on the builder
+styles.card();
+styles.card({ theme: "dark" });
+```
+
+Both patterns return the same class names. The direct pattern is shorter, but the property names `base`, `global`, `variant`, and `defaults` are reserved for config — use the factory pattern to access style keys with those names.
+
+Setting a config property after the first access invalidates the cache and recompiles on the next access.
+
+The Vite plugin statically extracts `new ct()` declarations the same way it handles `ct({...})` calls. Module-level `const`/`let` declarations followed by property assignments (`styles.base = ...`, `styles.global = ...`, etc.) are detected, extracted to CSS, and rewritten to a precompiled `ct()` call at build time.
+
 ## How it works
 
-- In dev, the Vite plugin rewrites static `ct({ ... })` calls (`global`, `base`, `variant`, and `defaults`) and serves a virtual CSS module.
+- In dev, the Vite plugin rewrites static `ct({ ... })` calls and `new ct()` declarations (`global`, `base`, `variant`, and `defaults`) and serves a virtual CSS module.
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
 - Svelte files automatically import the virtual CSS module when static styles are detected.
+- `new ct()` declarations are rewritten to equivalent precompiled `ct()` calls, and the property assignments are blanked out.
 
 ## Current parser limitations
 
-The build-time extractor currently supports `ct(...)` with object literal arguments:
+The build-time extractor supports `ct(...)` calls and `new ct()` declarations with object literal arguments:
 
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
@@ -347,5 +403,6 @@ The build-time extractor currently supports `ct(...)` with object literal argume
 - identifier references to `const` objects/arrays in the same module
 - named imports of `const` style objects from relative paths and SvelteKit `$lib/...` paths
 - namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)
+- `new ct()` with subsequent `const`/`let`-scoped property assignments (`styles.base = ...`, etc.)
 
-It still skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls.
+It skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls. For `new ct()` patterns, only module-level assignments are extracted — assignments inside conditionals, loops, or functions fall back to runtime.

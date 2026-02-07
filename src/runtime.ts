@@ -170,14 +170,9 @@ function assertVariantKeys(
   }
 }
 
-/**
- * Runtime stylesheet helper that generates class names and injects CSS rules.
- *
- * Use this in browsers when you want styles created and applied at runtime.
- */
-export default function ct<
-  T extends StyleSheetInput = StyleSheetInput,
-  V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+function compileConfig<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
 >(
   config: CtConfig<T, V>,
   compiled?: CompiledConfig<T>,
@@ -270,6 +265,86 @@ export default function ct<
 
   return () => accessors;
 }
+
+const CONFIG_KEYS = new Set(["base", "global", "variant", "defaults"]);
+
+type CtBuilder<
+  T extends StyleSheetInput = StyleSheetInput,
+  V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+> = {
+  (): Accessor<T, V>;
+  base: T | undefined;
+  global: StyleSheetInput | undefined;
+  variant: V | undefined;
+  defaults: VariantSelection<V> | undefined;
+} & Accessor<T, V>;
+
+function createCtBuilder<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+>(compiled?: CompiledConfig<T>): CtBuilder<T, V> {
+  const config: Partial<CtConfig<T, V>> = {};
+  let cachedFactory: (() => Accessor<T, V>) | null = null;
+
+  function ensureCompiled(): () => Accessor<T, V> {
+    if (!cachedFactory) {
+      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled);
+    }
+    return cachedFactory;
+  }
+
+  const builder = function () {
+    return ensureCompiled()();
+  };
+
+  return new Proxy(builder, {
+    apply(_target, _thisArg, _args) {
+      return ensureCompiled()();
+    },
+    set(_target, prop, value) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        (config as Record<string, unknown>)[prop] = value;
+        cachedFactory = null;
+        return true;
+      }
+      return Reflect.set(_target, prop, value);
+    },
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        return (config as Record<string, unknown>)[prop];
+      }
+      if (typeof prop === "string" && !Reflect.has(target, prop)) {
+        const accessor = ensureCompiled()();
+        if (prop in accessor) {
+          return (accessor as Record<string, unknown>)[prop];
+        }
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as unknown as CtBuilder<T, V>;
+}
+
+/**
+ * Runtime stylesheet helper that generates class names and injects CSS rules.
+ *
+ * Call as `ct({ base, global, variant, defaults })` to compile styles immediately,
+ * or as `new ct()` to create a builder where properties can be set incrementally.
+ */
+export default function ct<
+  T extends StyleSheetInput = StyleSheetInput,
+  V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+>(
+  config?: CtConfig<T, V>,
+  compiled?: CompiledConfig<T>,
+): (() => Accessor<T, V>) | CtBuilder<T, V> {
+  if (new.target) {
+    return createCtBuilder<T, V>(compiled);
+  }
+  return compileConfig(config!, compiled);
+}
+
+/** Re-exported builder type. */
+export type { CtBuilder };
 
 /** Re-exported style types for convenience. */
 export type { StyleSheet, StyleDeclaration, StyleValue } from "./shared.js";

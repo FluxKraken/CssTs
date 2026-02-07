@@ -3,8 +3,11 @@ import path from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
 import {
   findCtCalls,
+  findExpressionTerminator,
+  findNewCtDeclarations,
   parseCtCallArguments,
   parseCtCallArgumentsWithResolver,
+  parseCtConfig,
   parseStaticExpression,
 } from "./parser.js";
 import { createClassName, toCssGlobalRules, toCssRules } from "./shared.js";
@@ -161,122 +164,6 @@ function parseBindingList(specifierList: string): Array<{ local: string; importe
   }
 
   return bindings;
-}
-
-function findExpressionTerminator(input: string, start: number): number {
-  let braceDepth = 0;
-  let bracketDepth = 0;
-  let parenDepth = 0;
-  let inString: "" | '"' | "'" | "`" = "";
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = start; i < input.length; i += 1) {
-    const char = input[i];
-    const next = input[i + 1];
-
-    if (inLineComment) {
-      if (char === "\n") {
-        inLineComment = false;
-      }
-      continue;
-    }
-
-    if (inBlockComment) {
-      if (char === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (char === inString) {
-        inString = "";
-      }
-      continue;
-    }
-
-    if (char === "/" && next === "/") {
-      inLineComment = true;
-      i += 1;
-      continue;
-    }
-
-    if (char === "/" && next === "*") {
-      inBlockComment = true;
-      i += 1;
-      continue;
-    }
-
-    if (char === '"' || char === "'" || char === "`") {
-      inString = char;
-      continue;
-    }
-
-    if (char === "{") {
-      braceDepth += 1;
-      continue;
-    }
-
-    if (char === "}") {
-      braceDepth -= 1;
-      continue;
-    }
-
-    if (char === "[") {
-      bracketDepth += 1;
-      continue;
-    }
-
-    if (char === "]") {
-      bracketDepth -= 1;
-      continue;
-    }
-
-    if (char === "(") {
-      parenDepth += 1;
-      continue;
-    }
-
-    if (char === ")") {
-      parenDepth -= 1;
-      continue;
-    }
-
-    if (braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
-      if (char === ";" || char === ",") {
-        return i;
-      }
-
-      if (char === "\n") {
-        const remaining = input.slice(i + 1).trimStart();
-        if (
-          remaining.startsWith("const ") ||
-          remaining.startsWith("export ") ||
-          remaining.startsWith("import ") ||
-          remaining.startsWith("function ") ||
-          remaining.startsWith("class ") ||
-          remaining.startsWith("let ") ||
-          remaining.startsWith("var ") ||
-          remaining.startsWith("</script>")
-        ) {
-          return i;
-        }
-      }
-    }
-  }
-
-  return input.length;
 }
 
 function parseModuleStaticInfo(code: string): ModuleStaticInfo {
@@ -456,7 +343,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       }
 
       const calls = findCtCalls(nextCode);
-      if (calls.length === 0) {
+      const newCtDecls = findNewCtDeclarations(nextCode);
+      if (calls.length === 0 && newCtDecls.length === 0) {
         if (!isSvelte) {
           return null;
         }
@@ -646,6 +534,88 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
 
         const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
+      }
+
+      for (const decl of newCtDecls) {
+        const configParts: Record<string, unknown> = {};
+        const rawParts: Record<string, string> = {};
+        let allParsed = true;
+
+        for (const assignment of decl.assignments) {
+          const value = parseStaticExpression(assignment.valueSource) ??
+            parseStaticExpression(
+              assignment.valueSource,
+              (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+            );
+          if (value === null) {
+            allParsed = false;
+            break;
+          }
+          configParts[assignment.property] = value;
+          rawParts[assignment.property] = assignment.valueSource;
+        }
+
+        if (!allParsed) {
+          continue;
+        }
+
+        const parsed = parseCtConfig(configParts);
+        if (!parsed) {
+          continue;
+        }
+
+        const classMap: Record<string, string> = {};
+        const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
+        const compiledConfig: Record<string, unknown> = {};
+
+        if (parsed.global) {
+          for (const rule of toCssGlobalRules(parsed.global)) {
+            rules.add(rule);
+          }
+          compiledConfig.global = true;
+        }
+
+        for (const [key, declaration] of Object.entries(parsed.base)) {
+          const className = createClassName(key, declaration, normalizedId);
+          classMap[key] = className;
+          for (const rule of toCssRules(className, declaration)) {
+            rules.add(rule);
+          }
+        }
+        compiledConfig.base = classMap;
+
+        if (parsed.variant) {
+          for (const [group, variants] of Object.entries(parsed.variant)) {
+            const groupMap: Record<string, Partial<Record<string, string>>> = {};
+            for (const [variantName, declarations] of Object.entries(variants)) {
+              const variantMap: Partial<Record<string, string>> = {};
+              for (const [key, declaration] of Object.entries(declarations)) {
+                const className = createClassName(
+                  `${group}:${variantName}:${key}`,
+                  declaration,
+                  normalizedId,
+                );
+                variantMap[key] = className;
+                for (const rule of toCssRules(className, declaration)) {
+                  rules.add(rule);
+                }
+              }
+              groupMap[variantName] = variantMap;
+            }
+            variantClassMap[group] = groupMap;
+          }
+          compiledConfig.variant = variantClassMap;
+        }
+
+        const configEntries = Object.entries(rawParts)
+          .map(([key, raw]) => `${key}: ${raw}`)
+          .join(", ");
+        const ctCall = `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)})`;
+        replacements.push({ start: decl.start, end: decl.end, text: `const ${decl.varName} = ${ctCall}` });
+
+        for (const assignment of decl.assignments) {
+          replacements.push({ start: assignment.start, end: assignment.end, text: "" });
+        }
       }
 
       if (replacements.length === 0) {
