@@ -323,6 +323,107 @@ Deno.test("resolves namespace-imported style objects and precompiles them", () =
   }
 });
 
+Deno.test("resolves imported constants through Vite resolve.alias", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const themeDir = `${root}/src/themes`;
+    Deno.mkdirSync(themeDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${themeDir}/colors.ts`,
+      `export const light = {\n` +
+        `  blue: "#00aaff",\n` +
+        `};\n`,
+    );
+
+    configResolved({
+      root,
+      resolve: {
+        alias: [
+          {
+            find: "@theme",
+            replacement: `${root}/src/themes`,
+          },
+        ],
+      },
+    });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { light } from "@theme/colors";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    myButton: {\n` +
+      `      backgroundColor: light.blue,\n` +
+      `      color: "white",\n` +
+      `    }\n` +
+      `  }\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolves imported constants through tsconfig paths aliases", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const themeDir = `${root}/src/custom-theme`;
+    Deno.mkdirSync(themeDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${themeDir}/colors.ts`,
+      `export const light = {\n` +
+        `  blue: "#00aaff",\n` +
+        `};\n`,
+    );
+    Deno.writeTextFileSync(
+      `${root}/tsconfig.json`,
+      `{\n` +
+        `  // comment to ensure JSONC parsing works\n` +
+        `  "compilerOptions": {\n` +
+        `    "baseUrl": ".",\n` +
+        `    "paths": {\n` +
+        `      "@theme/*": ["src/custom-theme/*",]\n` +
+        `    },\n` +
+        `  },\n` +
+        `}\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { light } from "@theme/colors";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    myButton: {\n` +
+      `      backgroundColor: light.blue,\n` +
+      `      color: "white",\n` +
+      `    }\n` +
+      `  }\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

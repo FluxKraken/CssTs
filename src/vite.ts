@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Plugin, ViteDevServer } from "vite";
+import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import {
   findCtCalls,
   findExpressionTerminator,
@@ -37,6 +37,29 @@ type ModuleStaticInfo = {
   exportedConsts: Map<string, string>;
 };
 
+type ViteAliasEntry = {
+  find: string | RegExp;
+  replacement: string;
+};
+
+type TsconfigPathMatcher = {
+  pattern: string;
+  prefix: string;
+  suffix: string;
+  hasWildcard: boolean;
+  targets: string[];
+};
+
+type TsconfigPathResolver = {
+  resolve: (source: string) => string | null;
+};
+
+type ImportResolverOptions = {
+  projectRoot: string;
+  viteAliases: readonly ViteAliasEntry[];
+  tsconfigResolver: TsconfigPathResolver | null;
+};
+
 function cleanId(id: string): string {
   return id.replace(/\?.*$/, "");
 }
@@ -47,6 +70,10 @@ function supportsTransform(id: string): boolean {
 
 function isVirtualSubRequest(id: string): boolean {
   return id.includes("?");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function findMatchingBrace(input: string, openIndex: number): number {
@@ -247,27 +274,414 @@ function resolveFileFromBase(basePath: string): string | null {
   return null;
 }
 
-function resolveImportToFile(importerId: string, source: string): string | null {
+function stripJsonComments(input: string): string {
+  let output = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    const next = i + 1 < input.length ? input[i + 1] : "";
+
+    if (inLineComment) {
+      if (char === "\n" || char === "\r") {
+        inLineComment = false;
+        output += char;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      output += char;
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function removeTrailingCommas(input: string): string {
+  let output = "";
+  let inString = false;
+  let isEscaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+
+    if (inString) {
+      output += char;
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === ",") {
+      let cursor = i + 1;
+      while (cursor < input.length && /\s/.test(input[cursor])) {
+        cursor += 1;
+      }
+      if (cursor < input.length && (input[cursor] === "}" || input[cursor] === "]")) {
+        continue;
+      }
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function parseJsonc(input: string): unknown | null {
+  const withoutComments = stripJsonComments(input);
+  const cleaned = removeTrailingCommas(withoutComments);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+}
+
+function parseJsoncFile(filePath: string): Record<string, unknown> | null {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = parseJsonc(raw);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTsconfigExtendsPath(configDir: string, extendsValue: string): string | null {
+  if (extendsValue.startsWith(".")) {
+    const withExtension = extendsValue.endsWith(".json") ? extendsValue : `${extendsValue}.json`;
+    return path.resolve(configDir, withExtension);
+  }
+
+  if (extendsValue.startsWith("/")) {
+    return extendsValue;
+  }
+
+  const candidate = path.resolve(configDir, "node_modules", extendsValue);
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+    return candidate;
+  }
+  if (fs.existsSync(`${candidate}.json`) && fs.statSync(`${candidate}.json`).isFile()) {
+    return `${candidate}.json`;
+  }
+  const nested = path.resolve(candidate, "tsconfig.json");
+  if (fs.existsSync(nested) && fs.statSync(nested).isFile()) {
+    return nested;
+  }
+
+  return null;
+}
+
+function loadTsconfigCompilerOptions(
+  tsconfigPath: string,
+  visited = new Set<string>(),
+): {
+  baseUrl?: string;
+  paths?: Record<string, string[]>;
+} | null {
+  const normalizedPath = path.normalize(tsconfigPath);
+  if (visited.has(normalizedPath)) {
+    return null;
+  }
+  visited.add(normalizedPath);
+
+  const config = parseJsoncFile(normalizedPath);
+  if (!config) {
+    return null;
+  }
+
+  const configDir = path.dirname(normalizedPath);
+  let mergedBaseUrl: string | undefined;
+  let mergedPaths: Record<string, string[]> = {};
+
+  const rawExtends = config.extends;
+  if (typeof rawExtends === "string") {
+    const parentPath = resolveTsconfigExtendsPath(configDir, rawExtends);
+    if (parentPath) {
+      const parent = loadTsconfigCompilerOptions(parentPath, visited);
+      if (parent?.baseUrl) {
+        mergedBaseUrl = path.resolve(path.dirname(parentPath), parent.baseUrl);
+      }
+      if (parent?.paths) {
+        mergedPaths = { ...parent.paths };
+      }
+    }
+  }
+
+  const rawCompilerOptions = config.compilerOptions;
+  if (isRecord(rawCompilerOptions)) {
+    const rawBaseUrl = rawCompilerOptions.baseUrl;
+    if (typeof rawBaseUrl === "string") {
+      mergedBaseUrl = path.resolve(configDir, rawBaseUrl);
+    }
+
+    const rawPaths = rawCompilerOptions.paths;
+    if (isRecord(rawPaths)) {
+      for (const [pattern, targetValue] of Object.entries(rawPaths)) {
+        if (!Array.isArray(targetValue)) {
+          continue;
+        }
+        const targets = targetValue.filter((entry): entry is string => typeof entry === "string");
+        if (targets.length > 0) {
+          mergedPaths[pattern] = targets;
+        }
+      }
+    }
+  }
+
+  return {
+    baseUrl: mergedBaseUrl ?? configDir,
+    paths: mergedPaths,
+  };
+}
+
+function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | null {
+  const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
+  if (!fs.existsSync(tsconfigPath) || !fs.statSync(tsconfigPath).isFile()) {
+    return null;
+  }
+
+  const compilerOptions = loadTsconfigCompilerOptions(tsconfigPath);
+  if (!compilerOptions?.paths) {
+    return null;
+  }
+
+  const baseUrl = compilerOptions.baseUrl ?? projectRoot;
+  const pathMatchers: TsconfigPathMatcher[] = [];
+
+  for (const [pattern, targets] of Object.entries(compilerOptions.paths)) {
+    const wildcardIndex = pattern.indexOf("*");
+    const hasWildcard = wildcardIndex !== -1;
+    const prefix = hasWildcard ? pattern.slice(0, wildcardIndex) : pattern;
+    const suffix = hasWildcard ? pattern.slice(wildcardIndex + 1) : "";
+
+    pathMatchers.push({
+      pattern,
+      prefix,
+      suffix,
+      hasWildcard,
+      targets,
+    });
+  }
+
+  pathMatchers.sort((a, b) => b.pattern.length - a.pattern.length);
+
+  return {
+    resolve(source: string): string | null {
+      for (const matcher of pathMatchers) {
+        let wildcardValue = "";
+
+        if (matcher.hasWildcard) {
+          if (!source.startsWith(matcher.prefix)) {
+            continue;
+          }
+          if (!source.endsWith(matcher.suffix)) {
+            continue;
+          }
+          const dynamicStart = matcher.prefix.length;
+          const dynamicEnd = source.length - matcher.suffix.length;
+          if (dynamicEnd < dynamicStart) {
+            continue;
+          }
+          wildcardValue = source.slice(dynamicStart, dynamicEnd);
+        } else if (source !== matcher.pattern) {
+          continue;
+        }
+
+        for (const target of matcher.targets) {
+          const resolvedTarget = matcher.hasWildcard ? target.replace(/\*/g, wildcardValue) : target;
+          const candidateBase = path.isAbsolute(resolvedTarget)
+            ? resolvedTarget
+            : path.resolve(baseUrl, resolvedTarget);
+          const resolvedFile = resolveFileFromBase(candidateBase);
+          if (resolvedFile) {
+            return resolvedFile;
+          }
+        }
+      }
+
+      const baseUrlFallback = resolveFileFromBase(path.resolve(baseUrl, source));
+      return baseUrlFallback;
+    },
+  };
+}
+
+function normalizeViteAliases(alias: unknown): ViteAliasEntry[] {
+  if (Array.isArray(alias)) {
+    return alias
+      .filter((entry): entry is ViteAliasEntry => {
+        if (!isRecord(entry)) {
+          return false;
+        }
+        const find = entry.find;
+        const replacement = entry.replacement;
+        if (typeof replacement !== "string") {
+          return false;
+        }
+        return typeof find === "string" || find instanceof RegExp;
+      })
+      .map((entry) => ({
+        find: entry.find,
+        replacement: entry.replacement,
+      }));
+  }
+
+  if (!isRecord(alias)) {
+    return [];
+  }
+
+  return Object.entries(alias)
+    .filter(([, replacement]) => typeof replacement === "string")
+    .map(([find, replacement]) => ({
+      find,
+      replacement: replacement as string,
+    }));
+}
+
+function applyViteAlias(source: string, alias: ViteAliasEntry): string | null {
+  if (typeof alias.find === "string") {
+    if (source === alias.find) {
+      return alias.replacement;
+    }
+    if (source.startsWith(`${alias.find}/`)) {
+      return `${alias.replacement}${source.slice(alias.find.length)}`;
+    }
+    return null;
+  }
+
+  alias.find.lastIndex = 0;
+  if (!alias.find.test(source)) {
+    return null;
+  }
+  alias.find.lastIndex = 0;
+  return source.replace(alias.find, alias.replacement);
+}
+
+function resolveAliasedPath(importerId: string, source: string, projectRoot: string): string | null {
+  if (source.startsWith(".")) {
+    return resolveFileFromBase(path.resolve(path.dirname(importerId), source));
+  }
+
+  if (path.isAbsolute(source)) {
+    const rootRelative = resolveFileFromBase(path.resolve(projectRoot, `.${source}`));
+    if (rootRelative) {
+      return rootRelative;
+    }
+    const resolved = resolveFileFromBase(source);
+    if (resolved) {
+      return resolved;
+    }
+    return null;
+  }
+
+  return resolveFileFromBase(path.resolve(projectRoot, source));
+}
+
+function inferProjectRootFromImporter(importerId: string): string | null {
+  const normalized = path.normalize(importerId);
+  const marker = `${path.sep}src${path.sep}`;
+  const markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex === -1) {
+    return null;
+  }
+  const inferred = normalized.slice(0, markerIndex);
+  return inferred || path.parse(normalized).root;
+}
+
+function resolveImportToFile(importerId: string, source: string, options: ImportResolverOptions): string | null {
   if (source.startsWith(".")) {
     const base = path.resolve(path.dirname(importerId), source);
     return resolveFileFromBase(base);
   }
 
   if (source.startsWith("/")) {
+    const resolvedRootRelative = resolveFileFromBase(path.resolve(options.projectRoot, `.${source}`));
+    if (resolvedRootRelative) {
+      return resolvedRootRelative;
+    }
     return resolveFileFromBase(source);
   }
 
+  for (const alias of options.viteAliases) {
+    const aliased = applyViteAlias(source, alias);
+    if (!aliased) {
+      continue;
+    }
+
+    const resolvedAliased = resolveAliasedPath(importerId, aliased, options.projectRoot);
+    if (resolvedAliased) {
+      return resolvedAliased;
+    }
+  }
+
   if (source === "$lib" || source.startsWith("$lib/")) {
-    const marker = `${path.sep}src${path.sep}`;
-    const markerIndex = importerId.lastIndexOf(marker);
-    if (markerIndex === -1) {
+    const projectRoot = inferProjectRootFromImporter(importerId) ?? options.projectRoot;
+    if (!projectRoot) {
       return null;
     }
 
-    const projectRoot = importerId.slice(0, markerIndex);
     const suffix = source === "$lib" ? "" : source.slice("$lib/".length);
     const base = path.join(projectRoot, "src", "lib", suffix);
     return resolveFileFromBase(base);
+  }
+
+  if (options.tsconfigResolver) {
+    const resolved = options.tsconfigResolver.resolve(source);
+    if (resolved) {
+      return resolved;
+    }
   }
 
   return null;
@@ -285,6 +699,24 @@ export interface CssTsPluginOptions {
 export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
   const moduleCss = new Map<string, string>();
   let server: ViteDevServer | undefined;
+  let projectRoot = process.cwd();
+  let viteAliases: ViteAliasEntry[] = [];
+  let tsconfigResolver: TsconfigPathResolver | null = null;
+  let resolverInitialized = false;
+
+  function initializeResolvers(root: string): void {
+    projectRoot = root;
+    tsconfigResolver = createTsconfigResolver(root);
+    resolverInitialized = true;
+  }
+
+  function ensureResolvers(importerId: string): void {
+    if (resolverInitialized) {
+      return;
+    }
+    const inferredRoot = inferProjectRootFromImporter(importerId);
+    initializeResolvers(inferredRoot ?? projectRoot);
+  }
 
   function combinedCss(): string {
     return mergeCss(moduleCss.values());
@@ -304,6 +736,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
 
     configureServer(devServer) {
       server = devServer;
+    },
+
+    configResolved(config: ResolvedConfig) {
+      projectRoot = config.root;
+      viteAliases = normalizeViteAliases(config.resolve.alias);
+      initializeResolvers(projectRoot);
     },
 
     resolveId(id) {
@@ -327,6 +765,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       }
 
       const normalizedId = cleanId(id);
+      ensureResolvers(normalizedId);
       if (!supportsTransform(normalizedId)) {
         return null;
       }
@@ -439,7 +878,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
           } else {
             const binding = moduleInfo.imports.get(head);
             if (binding) {
-              const resolvedImportFile = resolveImportToFile(moduleId, binding.source);
+              const resolvedImportFile = resolveImportToFile(moduleId, binding.source, {
+                projectRoot,
+                viteAliases,
+                tsconfigResolver,
+              });
               if (resolvedImportFile) {
                 const importedModuleInfo = getModuleInfo(resolvedImportFile);
                 if (importedModuleInfo) {
