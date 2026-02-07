@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import {
@@ -58,6 +59,26 @@ type ImportResolverOptions = {
   projectRoot: string;
   viteAliases: readonly ViteAliasEntry[];
   tsconfigResolver: TsconfigPathResolver | null;
+};
+
+const require = createRequire(import.meta.url);
+let tsTranspiler: ((source: string) => string) | null | undefined;
+
+const STATIC_EVAL_GLOBALS: Record<string, unknown> = {
+  Array,
+  Boolean,
+  Infinity,
+  JSON,
+  Math,
+  NaN,
+  Number,
+  Object,
+  String,
+  isFinite,
+  isNaN,
+  parseFloat,
+  parseInt,
+  undefined,
 };
 
 function cleanId(id: string): string {
@@ -226,11 +247,97 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     }
   }
 
-  const constMatcher = /\b(export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g;
+  const constMatcher = /\b(export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/g;
   for (let match = constMatcher.exec(code); match; match = constMatcher.exec(code)) {
     const isExported = Boolean(match[1]);
     const name = match[2];
-    const initializerStart = constMatcher.lastIndex;
+    let initializerStart = constMatcher.lastIndex;
+
+    while (initializerStart < code.length && /\s/.test(code[initializerStart])) {
+      initializerStart += 1;
+    }
+
+    if (code[initializerStart] === ":") {
+      initializerStart += 1;
+      let angleDepth = 0;
+      let parenDepth = 0;
+      let bracketDepth = 0;
+      let braceDepth = 0;
+      let inString: "" | "\"" | "'" | "`" = "";
+      let escaped = false;
+
+      for (; initializerStart < code.length; initializerStart += 1) {
+        const char = code[initializerStart];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (char === "\\") {
+            escaped = true;
+            continue;
+          }
+          if (char === inString) {
+            inString = "";
+          }
+          continue;
+        }
+
+        if (char === "\"" || char === "'" || char === "`") {
+          inString = char;
+          continue;
+        }
+
+        if (char === "<") {
+          angleDepth += 1;
+          continue;
+        }
+        if (char === ">") {
+          angleDepth = Math.max(0, angleDepth - 1);
+          continue;
+        }
+        if (char === "(") {
+          parenDepth += 1;
+          continue;
+        }
+        if (char === ")") {
+          parenDepth = Math.max(0, parenDepth - 1);
+          continue;
+        }
+        if (char === "[") {
+          bracketDepth += 1;
+          continue;
+        }
+        if (char === "]") {
+          bracketDepth = Math.max(0, bracketDepth - 1);
+          continue;
+        }
+        if (char === "{") {
+          braceDepth += 1;
+          continue;
+        }
+        if (char === "}") {
+          braceDepth = Math.max(0, braceDepth - 1);
+          continue;
+        }
+
+        if (
+          char === "=" &&
+          angleDepth === 0 &&
+          parenDepth === 0 &&
+          bracketDepth === 0 &&
+          braceDepth === 0
+        ) {
+          break;
+        }
+      }
+    }
+
+    if (code[initializerStart] !== "=") {
+      continue;
+    }
+
+    initializerStart += 1;
     const initializerEnd = findExpressionTerminator(code, initializerStart);
     const initializer = code.slice(initializerStart, initializerEnd).trim();
 
@@ -252,6 +359,66 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     constInitializers,
     exportedConsts,
   };
+}
+
+function getTsTranspiler(): ((source: string) => string) | null {
+  if (tsTranspiler !== undefined) {
+    return tsTranspiler;
+  }
+  try {
+    const typescript = require("typescript") as {
+      transpileModule: (
+        source: string,
+        options: {
+          compilerOptions: {
+            target: number;
+            module: number;
+          };
+        },
+      ) => { outputText: string };
+      ScriptTarget: { ES2020: number };
+      ModuleKind: { ESNext: number };
+    };
+
+    tsTranspiler = (source: string): string =>
+      typescript.transpileModule(source, {
+        compilerOptions: {
+          target: typescript.ScriptTarget.ES2020,
+          module: typescript.ModuleKind.ESNext,
+        },
+      }).outputText;
+    return tsTranspiler;
+  } catch {
+    tsTranspiler = null;
+    return null;
+  }
+}
+
+function transpileTsSnippet(source: string): string {
+  const transpile = getTsTranspiler();
+  if (!transpile) {
+    return source.trim();
+  }
+
+  let output = transpile(source)
+    .replace(/^\/\/# sourceMappingURL=.*$/gm, "")
+    .trim();
+  while (output.endsWith(";")) {
+    output = output.slice(0, -1).trimEnd();
+  }
+  return output;
+}
+
+function evaluateExpression(source: string, scope: Record<string, unknown>): unknown | null {
+  const jsSource = transpileTsSnippet(`(${source})`);
+  try {
+    const names = Object.keys(scope);
+    const values = names.map((name) => scope[name]);
+    const fn = new Function(...names, `"use strict"; return ${jsSource};`);
+    return fn(...values);
+  } catch {
+    return null;
+  }
 }
 
 function resolveFileFromBase(basePath: string): string | null {
@@ -867,10 +1034,33 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
         if (moduleInfo) {
           const initializer = moduleInfo.constInitializers.get(head);
           if (initializer !== undefined) {
-            const value = parseStaticExpression(initializer, (nestedPath) => {
+            let value = parseStaticExpression(initializer, (nestedPath) => {
               const nested = resolveIdentifierInModule(nestedPath, moduleId);
               return nested === null ? undefined : nested;
             });
+
+            if (value === null) {
+              const evalScope: Record<string, unknown> = {
+                ...STATIC_EVAL_GLOBALS,
+              };
+              for (const localName of moduleInfo.constInitializers.keys()) {
+                if (localName === head) {
+                  continue;
+                }
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              for (const localName of moduleInfo.imports.keys()) {
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+
+              value = evaluateExpression(initializer, evalScope);
+            }
 
             if (value !== null) {
               resolved = tail.length > 0 ? readMemberPath(value, tail) : value;

@@ -402,6 +402,7 @@ The build-time extractor supports `ct(...)` calls and `new ct()` declarations wi
 - optional `global`, `base`, `variant`, and `defaults` sections via `ct({ ... })`
 - identifier references to `const` objects/arrays in the same module
 - named imports of `const` style objects from relative paths, Vite/SvelteKit aliases (including `$lib/...`), and `tsconfig.json` path aliases
+- imported/local `const` objects computed by statically evaluable helper function calls
 - namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)
 - `new ct()` with subsequent `const`/`let`-scoped property assignments (`styles.base = ...`, etc.)
 
