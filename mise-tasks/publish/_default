@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Publish the Package to JSR Registry"
+set -euxo pipefail
+
+deno publish

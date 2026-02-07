@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build the Project | Deno Script"
+set -euxo pipefail
+
+deno task build

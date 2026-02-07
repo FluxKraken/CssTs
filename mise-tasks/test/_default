@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run Pre-Build Unit Test Suite"
+set -euxo pipefail
+
+deno task test

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run Full Test Suite (Pre-Build + Shim Smoke)"
+set -euxo pipefail
+
+deno task test
+deno task build
+node tools/shim_smoke.mjs

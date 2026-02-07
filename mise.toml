@@ -1,9 +1,4 @@
 [tools]
 deno = "latest"
 jj = "latest"
-
-[tasks]
-test = "deno task test"
-build = "deno task build"
-test_publish = "deno publish --dry-run --allow-dirty"
-publish = "deno publish"
+node = "latest"

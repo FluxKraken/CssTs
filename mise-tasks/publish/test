@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Publish Dry Run"
+set -euxo pipefail
+
+deno publish --dry-run --allow-dirty
