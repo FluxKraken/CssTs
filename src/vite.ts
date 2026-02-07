@@ -35,6 +35,7 @@ type ImportBinding =
 type ModuleStaticInfo = {
   imports: Map<string, ImportBinding>;
   constInitializers: Map<string, string>;
+  functionDeclarations: Map<string, string>;
   exportedConsts: Map<string, string>;
 };
 
@@ -61,7 +62,7 @@ type ImportResolverOptions = {
   tsconfigResolver: TsconfigPathResolver | null;
 };
 
-const require = createRequire(import.meta.url);
+const nodeRequire = createRequire(import.meta.url);
 let tsTranspiler: ((source: string) => string) | null | undefined;
 
 const STATIC_EVAL_GLOBALS: Record<string, unknown> = {
@@ -217,6 +218,7 @@ function parseBindingList(specifierList: string): Array<{ local: string; importe
 function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   const imports = new Map<string, ImportBinding>();
   const constInitializers = new Map<string, string>();
+  const functionDeclarations = new Map<string, string>();
   const exportedConsts = new Map<string, string>();
 
   const namespaceImportMatcher =
@@ -354,9 +356,153 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
       : initializerEnd;
   }
 
+  const functionMatcher =
+    /\b(export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  for (let match = functionMatcher.exec(code); match; match = functionMatcher.exec(code)) {
+    const isExported = Boolean(match[1]);
+    const name = match[2];
+    let cursor = functionMatcher.lastIndex;
+    let parenDepth = 1;
+    let inString: "" | "\"" | "'" | "`" = "";
+    let escaped = false;
+
+    for (; cursor < code.length; cursor += 1) {
+      const char = code[cursor];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (char === inString) {
+          inString = "";
+        }
+        continue;
+      }
+
+      if (char === "\"" || char === "'" || char === "`") {
+        inString = char;
+        continue;
+      }
+
+      if (char === "/" && code[cursor + 1] === "/") {
+        cursor += 2;
+        while (cursor < code.length && code[cursor] !== "\n") {
+          cursor += 1;
+        }
+        continue;
+      }
+
+      if (char === "/" && code[cursor + 1] === "*") {
+        cursor += 2;
+        while (cursor < code.length && !(code[cursor] === "*" && code[cursor + 1] === "/")) {
+          cursor += 1;
+        }
+        cursor += 1;
+        continue;
+      }
+
+      if (char === "(") {
+        parenDepth += 1;
+        continue;
+      }
+      if (char === ")") {
+        parenDepth -= 1;
+        if (parenDepth === 0) {
+          cursor += 1;
+          break;
+        }
+      }
+    }
+
+    while (cursor < code.length && /\s/.test(code[cursor])) {
+      cursor += 1;
+    }
+
+    if (code[cursor] === ":") {
+      cursor += 1;
+      while (cursor < code.length && code[cursor] !== "{") {
+        cursor += 1;
+      }
+    }
+    while (cursor < code.length && code[cursor] !== "{") {
+      cursor += 1;
+    }
+    if (cursor >= code.length) {
+      continue;
+    }
+
+    let bodyDepth = 0;
+    inString = "";
+    escaped = false;
+
+    for (; cursor < code.length; cursor += 1) {
+      const char = code[cursor];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (char === inString) {
+          inString = "";
+        }
+        continue;
+      }
+
+      if (char === "\"" || char === "'" || char === "`") {
+        inString = char;
+        continue;
+      }
+
+      if (char === "/" && code[cursor + 1] === "/") {
+        cursor += 2;
+        while (cursor < code.length && code[cursor] !== "\n") {
+          cursor += 1;
+        }
+        continue;
+      }
+      if (char === "/" && code[cursor + 1] === "*") {
+        cursor += 2;
+        while (cursor < code.length && !(code[cursor] === "*" && code[cursor + 1] === "/")) {
+          cursor += 1;
+        }
+        cursor += 1;
+        continue;
+      }
+
+      if (char === "{") {
+        bodyDepth += 1;
+        continue;
+      }
+      if (char === "}") {
+        bodyDepth -= 1;
+        if (bodyDepth === 0) {
+          const declarationSource = code
+            .slice(match.index, cursor + 1)
+            .replace(/^export\s+/, "")
+            .trim();
+          functionDeclarations.set(name, declarationSource);
+          if (isExported) {
+            exportedConsts.set(name, name);
+          }
+          functionMatcher.lastIndex = cursor + 1;
+          break;
+        }
+      }
+    }
+  }
+
   return {
     imports,
     constInitializers,
+    functionDeclarations,
     exportedConsts,
   };
 }
@@ -366,7 +512,7 @@ function getTsTranspiler(): ((source: string) => string) | null {
     return tsTranspiler;
   }
   try {
-    const typescript = require("typescript") as {
+    const typescript = nodeRequire("typescript") as {
       transpileModule: (
         source: string,
         options: {
@@ -415,6 +561,18 @@ function evaluateExpression(source: string, scope: Record<string, unknown>): unk
     const names = Object.keys(scope);
     const values = names.map((name) => scope[name]);
     const fn = new Function(...names, `"use strict"; return ${jsSource};`);
+    return fn(...values);
+  } catch {
+    return null;
+  }
+}
+
+function evaluateFunctionDeclaration(source: string, scope: Record<string, unknown>): unknown | null {
+  try {
+    const jsSource = transpileTsSnippet(source);
+    const names = Object.keys(scope);
+    const values = names.map((name) => scope[name]);
+    const fn = new Function(...names, `"use strict"; return (${jsSource});`);
     return fn(...values);
   } catch {
     return null;
@@ -1043,6 +1201,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
               const evalScope: Record<string, unknown> = {
                 ...STATIC_EVAL_GLOBALS,
               };
+              for (const localName of moduleInfo.functionDeclarations.keys()) {
+                if (localName === head) {
+                  continue;
+                }
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
               for (const localName of moduleInfo.constInitializers.keys()) {
                 if (localName === head) {
                   continue;
@@ -1066,6 +1233,44 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
               resolved = tail.length > 0 ? readMemberPath(value, tail) : value;
             }
           } else {
+            const functionDeclaration = moduleInfo.functionDeclarations.get(head);
+            if (functionDeclaration !== undefined) {
+              const evalScope: Record<string, unknown> = {
+                ...STATIC_EVAL_GLOBALS,
+              };
+              for (const localName of moduleInfo.functionDeclarations.keys()) {
+                if (localName === head) {
+                  continue;
+                }
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              for (const localName of moduleInfo.constInitializers.keys()) {
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              for (const localName of moduleInfo.imports.keys()) {
+                const localValue = resolveIdentifierInModule([localName], moduleId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+
+              const functionValue = evaluateFunctionDeclaration(
+                functionDeclaration,
+                evalScope,
+              );
+              if (functionValue !== null) {
+                resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
+              }
+            }
+          }
+
+          if (resolved === null) {
             const binding = moduleInfo.imports.get(head);
             if (binding) {
               const resolvedImportFile = resolveImportToFile(moduleId, binding.source, {

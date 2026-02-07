@@ -468,6 +468,50 @@ Deno.test("resolves imported constants computed by static helper function calls"
   }
 });
 
+Deno.test("resolves imported constants computed by function declarations", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/stylesheet.ts`,
+      `function oklch(l: number, c: number, h: number) {\n` +
+        `  return \`oklch(\${l}% \${c} \${h})\`;\n` +
+        `}\n` +
+        `export const blue = {\n` +
+        `  l300: oklch(70, 0.1679, 242.04),\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { blue } from "$lib/stylesheet";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = {\n` +
+      `  header: { borderBottom: "2px solid currentColor" },\n` +
+      `};\n` +
+      `styles.variant = {\n` +
+      `  theme: {\n` +
+      `    dark: { header: { borderBottomColor: blue.l300 } },\n` +
+      `  },\n` +
+      `};\n` +
+      `styles.defaults = { theme: "dark" };\n`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom:2px solid currentColor\}/);
+    assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
