@@ -145,6 +145,14 @@ def read_css_ts_specifier() -> str:
     return "npm:@jsr/kt-tools__css-ts"
 
 
+def read_css_ts_vite_specifier() -> str:
+    package_specifier = read_css_ts_specifier()
+    if "@^" in package_specifier:
+        base, version = package_specifier.split("@^", maxsplit=1)
+        return f"{base}@^{version}/vite"
+    return f"{package_specifier}/vite"
+
+
 def update_deno_config(root: Path) -> UpdateResult:
     result = UpdateResult()
     deno_path = find_first(root, DENO_CONFIG_CANDIDATES)
@@ -162,6 +170,7 @@ def update_deno_config(root: Path) -> UpdateResult:
     imports = ensure_object(config, "imports")
     required_imports = {
         "@kt-tools/css-ts": read_css_ts_specifier(),
+        "@kt-tools/css-ts/vite": read_css_ts_vite_specifier(),
         "@sveltejs/kit": f"npm:@sveltejs/kit@{README_VERSIONS['kit']}",
         "@sveltejs/vite-plugin-svelte": f"npm:@sveltejs/vite-plugin-svelte@{README_VERSIONS['vite_plugin_svelte']}",
         "svelte": f"npm:svelte@{README_VERSIONS['svelte']}",
@@ -221,20 +230,34 @@ def update_vite_config(root: Path, deno_mode: bool) -> UpdateResult:
     updated = vite_path.read_text(encoding="utf-8")
     changed = False
 
-    if "@kt-tools/css-ts" not in updated:
-        updated = insert_import(updated, 'import ct from "@kt-tools/css-ts";')
+    if "@kt-tools/css-ts/vite" not in updated:
+        updated = insert_import(updated, 'import ctVite from "@kt-tools/css-ts/vite";')
         changed = True
 
-    if "ct.vite" not in updated:
-        replaced = re.sub(r"sveltekit\s*\(\s*\)", "ct.vite(), sveltekit()", updated, count=1)
+    replaced_call = re.sub(r"\bct\.vite\s*\(\s*\)", "ctVite()", updated)
+    if replaced_call != updated:
+        updated = replaced_call
+        changed = True
+
+    if re.search(r"\bctVite\s*\(\s*\)", updated) is None:
+        replaced = re.sub(r"sveltekit\s*\(\s*\)", "ctVite(), sveltekit()", updated, count=1)
         if replaced != updated:
             updated = replaced
             changed = True
         elif re.search(r"plugins\s*:\s*\[", updated):
-            updated = re.sub(r"plugins\s*:\s*\[", "plugins: [ct.vite(), ", updated, count=1)
+            updated = re.sub(r"plugins\s*:\s*\[", "plugins: [ctVite(), ", updated, count=1)
             changed = True
         else:
-            result.warnings.append("Could not find a plugins array in vite.config. Add ct.vite() manually.")
+            result.warnings.append("Could not find a plugins array in vite.config. Add ctVite() manually.")
+
+    legacy_ct_import = re.compile(
+        r'^\s*import\s+ct\s+from\s+["\']@kt-tools/css-ts["\'];?\s*$',
+        flags=re.MULTILINE,
+    )
+    if legacy_ct_import.search(updated) and re.search(r"\bct\.", updated) is None:
+        updated = legacy_ct_import.sub("", updated)
+        changed = True
+        updated = re.sub(r"\n{3,}", "\n\n", updated)
 
     if deno_mode and "@jsr/kt-tools__css-ts" not in updated:
         alias_snippet = (
