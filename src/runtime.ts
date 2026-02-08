@@ -518,6 +518,9 @@ const CONFIG_KEYS = new Set(["base", "global", "variant", "defaults"]);
  * Set config via `builder.base = ...`, `builder.variant = ...`, etc.
  * Access compiled styles via `builder()` (factory) or `builder.myKey()` (direct).
  * The builder compiles lazily on first access and recompiles when a config property changes.
+ *
+ * @template T The base stylesheet input type.
+ * @template V The variant sheet type, or `undefined` if no variants are used.
  */
 type CtBuilder<
   T extends StyleSheetInput = StyleSheetInput,

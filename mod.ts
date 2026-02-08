@@ -10,7 +10,9 @@ export { vite } from "./src/index.ts";
 export { cv } from "./src/index.ts";
 /** Re-exported Vite plugin options type. */
 export type { CssTsPluginOptions } from "./src/index.ts";
-/** Re-exported builder type returned by `new ct()`. */
-export type { CtBuilder } from "./src/index.ts";
-/** Re-exported style types. */
-export type { StyleDeclaration, StyleSheet, StyleValue } from "./src/index.ts";
+/** Style object for a single class name. */
+export type { StyleDeclaration } from "./src/index.ts";
+/** Map of class keys to their style declarations. */
+export type { StyleSheet } from "./src/index.ts";
+/** CSS value accepted by style declarations. */
+export type { StyleValue } from "./src/index.ts";

@@ -35,5 +35,9 @@ export { cv };
 export type { CssTsPluginOptions } from "./vite.js";
 /** Re-exported builder type. */
 export type { CtBuilder } from "./runtime.js";
-/** Re-exported style types. */
-export type { StyleDeclaration, StyleSheet, StyleValue } from "./shared.js";
+/** Style object for a single class name. */
+export type { StyleDeclaration } from "./shared.js";
+/** Map of class keys to their style declarations. */
+export type { StyleSheet } from "./shared.js";
+/** CSS value accepted by style declarations. */
+export type { StyleValue } from "./shared.js";
