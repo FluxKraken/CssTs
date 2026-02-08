@@ -11,7 +11,7 @@ export interface CssVarRef {
   fallback?: PrimitiveStyleValue;
 }
 /** CSS value accepted by style declarations. */
-export type StyleValue = PrimitiveStyleValue | CssVarRef;
+export type StyleValue = PrimitiveStyleValue | CssVarRef | readonly (PrimitiveStyleValue | CssVarRef)[];
 /** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
@@ -22,6 +22,12 @@ export interface NestedStyleDeclaration {
 export type StyleDeclaration = NestedStyleDeclaration;
 /** Map of class keys to their style declarations. */
 export type StyleSheet = Record<string, StyleDeclaration>;
+
+/** Optional serialization settings shared by runtime and build-time extraction. */
+export interface CssSerializationOptions {
+  /** Named breakpoint aliases (for example `{ md: "48rem" }` used as `"@md"`). */
+  breakpoints?: Record<string, string>;
+}
 
 const UNITLESS_PROPERTIES = new Set([
   "line-height",
@@ -202,11 +208,30 @@ function isSupportedAtRule(key: string): boolean {
   return key.startsWith("@");
 }
 
+function resolveAtRule(key: string, options?: CssSerializationOptions): string {
+  if (!key.startsWith("@")) {
+    return key;
+  }
+
+  const aliasMatch = key.match(/^@([A-Za-z_$][A-Za-z0-9_$-]*)$/);
+  if (!aliasMatch) {
+    return key;
+  }
+
+  const breakpoint = options?.breakpoints?.[aliasMatch[1]];
+  if (!breakpoint) {
+    return key;
+  }
+
+  return `@media (width >= ${breakpoint})`;
+}
+
 function collectCssRules(
   selector: string,
   declaration: StyleDeclaration,
   atRules: readonly string[],
   rules: string[],
+  options?: CssSerializationOptions,
 ): void {
   const base: PseudoStyleDeclaration = {};
 
@@ -217,11 +242,11 @@ function collectCssRules(
     }
 
     if (isSupportedAtRule(name)) {
-      collectCssRules(selector, value, [...atRules, name], rules);
+      collectCssRules(selector, value, [...atRules, resolveAtRule(name, options)], rules, options);
       continue;
     }
 
-    collectCssRules(nestSelector(selector, name), value, atRules, rules);
+    collectCssRules(nestSelector(selector, name), value, atRules, rules, options);
   }
 
   if (Object.keys(base).length > 0) {
@@ -234,9 +259,13 @@ function collectCssRules(
  * @param className Class name without the leading dot.
  * @param declaration Style declaration to serialize.
  */
-export function toCssRules(className: string, declaration: StyleDeclaration): string[] {
+export function toCssRules(
+  className: string,
+  declaration: StyleDeclaration,
+  options?: CssSerializationOptions,
+): string[] {
   const rules: string[] = [];
-  collectCssRules(`.${className}`, declaration, [], rules);
+  collectCssRules(`.${className}`, declaration, [], rules, options);
   return rules;
 }
 
@@ -245,9 +274,10 @@ function collectGlobalCssRules(
   declaration: StyleDeclaration,
   atRules: readonly string[],
   rules: string[],
+  options?: CssSerializationOptions,
 ): void {
   if (isSupportedAtRule(selectorOrAtRule)) {
-    const nestedAtRules = [...atRules, selectorOrAtRule];
+    const nestedAtRules = [...atRules, resolveAtRule(selectorOrAtRule, options)];
     const nestedDeclarations: PseudoStyleDeclaration = {};
 
     for (const [name, value] of Object.entries(declaration)) {
@@ -256,7 +286,7 @@ function collectGlobalCssRules(
         continue;
       }
 
-      collectGlobalCssRules(name, value, nestedAtRules, rules);
+      collectGlobalCssRules(name, value, nestedAtRules, rules, options);
     }
 
     if (Object.keys(nestedDeclarations).length > 0) {
@@ -266,17 +296,17 @@ function collectGlobalCssRules(
     return;
   }
 
-  collectCssRules(selectorOrAtRule, declaration, atRules, rules);
+  collectCssRules(selectorOrAtRule, declaration, atRules, rules, options);
 }
 
 /**
  * Build CSS rules for global selectors/at-rules without generating class names.
  * @param styles Selector/at-rule map to serialize.
  */
-export function toCssGlobalRules(styles: StyleSheet): string[] {
+export function toCssGlobalRules(styles: StyleSheet, options?: CssSerializationOptions): string[] {
   const rules: string[] = [];
   for (const [selectorOrAtRule, declaration] of Object.entries(styles)) {
-    collectGlobalCssRules(selectorOrAtRule, declaration, [], rules);
+    collectGlobalCssRules(selectorOrAtRule, declaration, [], rules, options);
   }
   return rules;
 }
@@ -323,6 +353,10 @@ function formatPrimitiveStyleValue(property: string, value: PrimitiveStyleValue)
 }
 
 function formatStyleValue(property: string, value: StyleValue): string {
+  if (Array.isArray(value)) {
+    return value.map((entry) => formatStyleValue(property, entry)).join(" ");
+  }
+
   if (isCssVarRef(value)) {
     if (value.fallback === undefined) {
       return `var(${value.name})`;
@@ -330,5 +364,5 @@ function formatStyleValue(property: string, value: StyleValue): string {
     return `var(${value.name}, ${formatPrimitiveStyleValue(property, value.fallback)})`;
   }
 
-  return formatPrimitiveStyleValue(property, value);
+  return formatPrimitiveStyleValue(property, value as PrimitiveStyleValue);
 }

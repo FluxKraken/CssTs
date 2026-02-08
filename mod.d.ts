@@ -21,6 +21,10 @@ type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> 
   variant?: V;
   defaults?: VariantSelection<V>;
 };
+type CtRuntimeOptions = {
+  breakpoints?: Record<string, string>;
+  utilities?: StyleSheetInput;
+};
 type CompiledConfig<T extends StyleSheetInput> = {
   global?: true;
   base?: CompiledMap<T>;
@@ -56,6 +60,7 @@ export interface Ct {
   >(
     config: CtConfig<T, V>,
     compiled?: CompiledConfig<T>,
+    runtimeOptions?: CtRuntimeOptions,
   ): () => Accessor<T, V>;
   /** Vite plugin entry point. */
   vite: (options?: CssTsPluginOptions) => any;

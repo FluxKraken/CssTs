@@ -358,6 +358,81 @@ const styles = ct({
 
 When these references resolve to static `const` objects at build time, the Vite plugin precompiles them into CSS.
 
+### Space-delimited CSS values with arrays
+
+Property values can be arrays to produce space-delimited CSS values:
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct({
+  base: {
+    pageWrapper: {
+      display: "grid",
+      gridTemplateRows: ["auto", "1fr", "auto"],
+    },
+  },
+});
+```
+
+### `@apply` merge lists inside class declarations
+
+Use `@apply` to merge declaration objects at any position in a class declaration. Merge order is top-to-bottom and left-to-right.
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const singleColumn = {
+  gridTemplateRows: ["auto", "1fr", "auto"],
+};
+
+const baseColors = {
+  backgroundColor: "#4f4f4f",
+  color: "black",
+};
+
+const styles = ct({
+  base: {
+    pageWrapper: {
+      display: "grid",
+      "@apply": [baseColors, singleColumn],
+      color: "#00aaff", // overrides baseColors.color
+    },
+  },
+});
+```
+
+`@apply` entries can be:
+- declaration objects
+- arrays of declaration objects
+- utility names from `css.config.ts` (see below)
+
+### Global `css.config.ts`
+
+Create a `css.config.ts` file at project root to define project-wide imports, breakpoints, and utility classes:
+
+```ts
+import "./src/global.css";
+
+export default {
+  breakpoints: {
+    md: "48rem",
+    lg: "64rem",
+  },
+  imports: ["./src/theme.css"],
+  utilities: {
+    cardBase: {
+      borderRadius: "0.75rem",
+      padding: "1rem",
+    },
+  },
+};
+```
+
+- `import "./file.css"` and `imports: [...]` both add global stylesheet imports to the virtual CSS bundle.
+- `breakpoints` enables shorthand at-rules like `@md` (expanded to `@media (width >= 48rem)`).
+- `utilities` generates global utility classes like `.u-card-base` and can be referenced by name in `@apply`, for example `"@apply": ["cardBase"]`.
+
 ## Builder pattern (`new ct()`)
 
 As an alternative to the config-object API, you can use the builder pattern to declare styles incrementally via property assignment:
@@ -427,7 +502,9 @@ The build-time extractor supports `ct(...)` calls and `new ct()` declarations wi
 
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
+- property values as arrays for space-delimited CSS values
 - declaration arrays (merged left-to-right)
+- `@apply` merge lists inside declarations
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
 - optional `global`, `base`, `variant`, and `defaults` sections via `ct({ ... })`
 - identifier references to `const` objects/arrays in the same module

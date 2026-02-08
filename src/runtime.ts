@@ -1,4 +1,5 @@
 import {
+  CssSerializationOptions,
   createClassName,
   isCssVarRef,
   StyleDeclaration,
@@ -30,6 +31,9 @@ type CompiledConfig<T extends StyleSheetInput> = {
   global?: true;
   base?: CompiledMap<T>;
   variant?: VariantClassMap<T>;
+};
+type CtRuntimeOptions = CssSerializationOptions & {
+  utilities?: StyleSheetInput;
 };
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: StyleAccessor<V>;
@@ -77,6 +81,9 @@ function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
   }
 
   for (const nested of Object.values(value)) {
+    if (isStyleLeafArray(nested)) {
+      continue;
+    }
     if (
       typeof nested !== "string" &&
       typeof nested !== "number" &&
@@ -88,6 +95,14 @@ function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
   }
 
   return true;
+}
+
+function isPrimitiveStyleLeaf(value: unknown): boolean {
+  return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
+}
+
+function isStyleLeafArray(value: unknown): value is readonly StyleValue[] {
+  return Array.isArray(value) && value.every((entry) => isPrimitiveStyleLeaf(entry));
 }
 
 function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration): StyleDeclaration {
@@ -105,19 +120,78 @@ function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration):
   return merged as StyleDeclaration;
 }
 
-function normalizeStyleDeclarationInput(input: StyleDeclarationInput): StyleDeclaration {
+function normalizeStyleDeclarationInput(
+  input: StyleDeclarationInput,
+  options: { utilities?: StyleSheet } = {},
+): StyleDeclaration {
   if (Array.isArray(input)) {
     let merged: StyleDeclaration = {};
     for (const entry of input) {
-      merged = mergeStyleDeclarations(merged, normalizeStyleDeclarationInput(entry));
+      merged = mergeStyleDeclarations(merged, normalizeStyleDeclarationInput(entry, options));
     }
     return merged;
   }
 
-  return input as StyleDeclaration;
+  const declaration = input as StyleDeclaration;
+  let normalized: StyleDeclaration = {};
+
+  for (const [key, value] of Object.entries(declaration)) {
+    if (key === "@apply") {
+      const applyValue = normalizeApplyInput(value, options);
+      normalized = mergeStyleDeclarations(normalized, applyValue);
+      continue;
+    }
+
+    if (isStyleLeafArray(value) || isPrimitiveStyleLeaf(value)) {
+      (normalized as Record<string, StyleValue>)[key] = value as StyleValue;
+      continue;
+    }
+
+    if (Array.isArray(value) || isStyleDeclarationObject(value)) {
+      (normalized as Record<string, unknown>)[key] = normalizeStyleDeclarationInput(
+        value as StyleDeclarationInput,
+        options,
+      );
+      continue;
+    }
+
+    (normalized as Record<string, unknown>)[key] = value;
+  }
+
+  return normalized;
 }
 
-function normalizeStyleSheetInput(styles: StyleSheetInput | undefined): StyleSheet {
+function normalizeApplyInput(
+  value: unknown,
+  options: { utilities?: StyleSheet },
+): StyleDeclaration {
+  if (Array.isArray(value)) {
+    let merged: StyleDeclaration = {};
+    for (const entry of value) {
+      merged = mergeStyleDeclarations(merged, normalizeApplyInput(entry, options));
+    }
+    return merged;
+  }
+
+  if (typeof value === "string") {
+    const utility = options.utilities?.[value];
+    if (!utility) {
+      return {};
+    }
+    return normalizeStyleDeclarationInput(utility, options);
+  }
+
+  if (isStyleDeclarationObject(value) || Array.isArray(value)) {
+    return normalizeStyleDeclarationInput(value as StyleDeclarationInput, options);
+  }
+
+  return {};
+}
+
+function normalizeStyleSheetInput(
+  styles: StyleSheetInput | undefined,
+  options: { utilities?: StyleSheet } = {},
+): StyleSheet {
   const normalized: StyleSheet = {};
 
   if (!styles) {
@@ -125,14 +199,14 @@ function normalizeStyleSheetInput(styles: StyleSheetInput | undefined): StyleShe
   }
 
   for (const [key, declaration] of Object.entries(styles)) {
-    normalized[key] = normalizeStyleDeclarationInput(declaration);
+    normalized[key] = normalizeStyleDeclarationInput(declaration, options);
   }
 
   return normalized;
 }
 
 function isInlineStyleValue(value: unknown): value is StyleValue {
-  return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
+  return typeof value === "string" || typeof value === "number" || isCssVarRef(value) || isStyleLeafArray(value);
 }
 
 function mergeInlineDeclarations(...declarations: readonly StyleDeclaration[]): Record<string, StyleValue> {
@@ -159,6 +233,7 @@ function toInlineStyleString(...declarations: readonly StyleDeclaration[]): stri
 
 function normalizeVariantSheetInput<T extends StyleSheetInput>(
   variants: VariantSheet<T> | undefined,
+  options: { utilities?: StyleSheet } = {},
 ): Record<string, Record<string, Partial<StyleSheet>>> | undefined {
   if (!variants) {
     return undefined;
@@ -173,7 +248,10 @@ function normalizeVariantSheetInput<T extends StyleSheetInput>(
         if (!declaration) {
           continue;
         }
-        normalizedVariant[key] = normalizeStyleDeclarationInput(declaration as StyleDeclarationInput);
+        normalizedVariant[key] = normalizeStyleDeclarationInput(
+          declaration as StyleDeclarationInput,
+          options,
+        );
       }
       normalizedGroup[variantName] = normalizedVariant;
     }
@@ -208,14 +286,24 @@ function compileConfig<
 >(
   config: CtConfig<T, V>,
   compiled?: CompiledConfig<T>,
+  runtimeOptions: CtRuntimeOptions = {},
 ): () => Accessor<T, V> {
-  const globalStyles = normalizeStyleSheetInput(config.global);
-  const styles = normalizeStyleSheetInput(config.base);
-  const variants = normalizeVariantSheetInput(config.variant as VariantSheet<T> | undefined);
+  const utilities = runtimeOptions.utilities
+    ? normalizeStyleSheetInput(runtimeOptions.utilities)
+    : undefined;
+  const normalizeOptions = { utilities };
+  const cssOptions: CssSerializationOptions = { breakpoints: runtimeOptions.breakpoints };
+
+  const globalStyles = normalizeStyleSheetInput(config.global, normalizeOptions);
+  const styles = normalizeStyleSheetInput(config.base, normalizeOptions);
+  const variants = normalizeVariantSheetInput(
+    config.variant as VariantSheet<T> | undefined,
+    normalizeOptions,
+  );
   const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
 
   if (Object.keys(globalStyles).length > 0 && !compiled?.global) {
-    for (const rule of toCssGlobalRules(globalStyles)) {
+    for (const rule of toCssGlobalRules(globalStyles, cssOptions)) {
       injectRule(rule);
     }
   }
@@ -229,7 +317,7 @@ function compileConfig<
       compiledBase?.[key] ?? createClassName(String(key), declaration, "runtime");
 
     if (!compiledBase?.[key]) {
-      for (const rule of toCssRules(className, declaration)) {
+      for (const rule of toCssRules(className, declaration, cssOptions)) {
         injectRule(rule);
       }
     }
@@ -316,7 +404,7 @@ function compileConfig<
             createClassName(`${group}:${variantName}:${String(key)}`, declaration, "runtime");
 
           if (!compiledVariant?.[key]) {
-            for (const rule of toCssRules(className, declaration)) {
+            for (const rule of toCssRules(className, declaration, cssOptions)) {
               injectRule(rule);
             }
           }
@@ -350,13 +438,13 @@ type CtBuilder<
 function createCtBuilder<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
->(compiled?: CompiledConfig<T>): CtBuilder<T, V> {
+>(compiled?: CompiledConfig<T>, runtimeOptions: CtRuntimeOptions = {}): CtBuilder<T, V> {
   const config: Partial<CtConfig<T, V>> = {};
   let cachedFactory: (() => Accessor<T, V>) | null = null;
 
   function ensureCompiled(): () => Accessor<T, V> {
     if (!cachedFactory) {
-      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled);
+      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled, runtimeOptions);
     }
     return cachedFactory;
   }
@@ -404,11 +492,12 @@ export default function ct<
 >(
   config?: CtConfig<T, V>,
   compiled?: CompiledConfig<T>,
+  runtimeOptions: CtRuntimeOptions = {},
 ): (() => Accessor<T, V>) | CtBuilder<T, V> {
   if (new.target) {
-    return createCtBuilder<T, V>(compiled);
+    return createCtBuilder<T, V>(compiled, runtimeOptions);
   }
-  return compileConfig(config!, compiled);
+  return compileConfig(config!, compiled, runtimeOptions);
 }
 
 /** Re-exported builder type. */

@@ -7,7 +7,7 @@ import {
   parseCtConfig,
   parseStaticExpression,
 } from "./parser.js";
-import { createClassName, toCssGlobalRules, toCssRules } from "./shared.js";
+import { camelToKebab, createClassName, type StyleSheet, toCssGlobalRules, toCssRules } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -72,6 +72,18 @@ type ImportResolverOptions = {
   projectRoot: string;
   viteAliases: readonly ViteAliasEntry[];
   tsconfigResolver: TsconfigPathResolver | null;
+};
+
+type LoadedCssConfig = {
+  path: string | null;
+  imports: string[];
+  breakpoints: Record<string, string>;
+  utilities: StyleSheet;
+  utilityCss: string;
+  runtimeOptions: {
+    breakpoints?: Record<string, string>;
+    utilities?: StyleSheet;
+  };
 };
 
 type NodeFs = typeof import("node:fs");
@@ -212,6 +224,21 @@ function isVirtualSubRequest(id: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readMemberPath(value: unknown, members: readonly string[]): unknown | null {
+  let current: unknown = value;
+  for (const member of members) {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) {
+      return null;
+    }
+    const record = current as Record<string, unknown>;
+    if (!(member in record)) {
+      return null;
+    }
+    current = record[member];
+  }
+  return current;
 }
 
 function findMatchingBrace(input: string, openIndex: number): number {
@@ -620,6 +647,199 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     constInitializers,
     functionDeclarations,
     exportedConsts,
+  };
+}
+
+function findCssConfigPath(projectRoot: string): string | null {
+  const candidates = [
+    "css.config.ts",
+    "css.config.mts",
+    "css.config.js",
+    "css.config.mjs",
+    "css.config.cts",
+    "css.config.cjs",
+  ];
+
+  for (const candidate of candidates) {
+    const fullPath = getNodePath().resolve(projectRoot, candidate);
+    if (getNodeFs().existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  return null;
+}
+
+function extractDefaultExportExpression(source: string): string | null {
+  const marker = "export default";
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) {
+    return null;
+  }
+
+  let start = markerIndex + marker.length;
+  while (start < source.length && /\s/.test(source[start])) {
+    start += 1;
+  }
+
+  const end = findExpressionTerminator(source, start);
+  const expression = source.slice(start, end === -1 ? source.length : end).trim();
+  if (!expression) {
+    return null;
+  }
+
+  return expression.endsWith(";") ? expression.slice(0, -1).trim() : expression;
+}
+
+function normalizeBreakpoints(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [name, raw] of Object.entries(value)) {
+    if (typeof raw === "string") {
+      normalized[name] = raw;
+      continue;
+    }
+    if (typeof raw === "number") {
+      normalized[name] = `${raw}px`;
+    }
+  }
+  return normalized;
+}
+
+function toBrowserStylesheetPath(
+  importPath: string,
+  configPath: string,
+  projectRoot: string,
+): string | null {
+  if (/^(?:https?:)?\/\//.test(importPath) || importPath.startsWith("data:")) {
+    return importPath;
+  }
+  if (importPath.startsWith("/")) {
+    return importPath;
+  }
+  if (importPath.startsWith(".")) {
+    const resolved = getNodePath().resolve(getNodePath().dirname(configPath), importPath);
+    const relative = getNodePath().relative(projectRoot, resolved).split(getNodePath().sep).join("/");
+    if (relative.startsWith("..")) {
+      return null;
+    }
+    return `/${relative}`;
+  }
+  return importPath;
+}
+
+function loadCssConfig(projectRoot: string): LoadedCssConfig {
+  const configPath = findCssConfigPath(projectRoot);
+  if (!configPath) {
+    return {
+      path: null,
+      imports: [],
+      breakpoints: {},
+      utilities: {},
+      utilityCss: "",
+      runtimeOptions: {},
+    };
+  }
+
+  const source = getNodeFs().readFileSync(configPath, "utf8");
+  const sideEffectImports: string[] = [];
+  const cssImportMatcher = /import\s*["']([^"']+\.css(?:\?[^"']*)?)["']\s*;?/g;
+  for (let match = cssImportMatcher.exec(source); match; match = cssImportMatcher.exec(source)) {
+    sideEffectImports.push(match[1]);
+  }
+
+  const moduleInfo = parseModuleStaticInfo(source);
+  const constValueCache = new Map<string, unknown | null>();
+  const resolving = new Set<string>();
+
+  const resolveConstPath = (path: readonly string[]): unknown | undefined => {
+    if (path.length === 0) return undefined;
+    const [head, ...tail] = path;
+
+    const cacheKey = path.join(".");
+    if (constValueCache.has(cacheKey)) {
+      const cached = constValueCache.get(cacheKey);
+      return cached === null ? undefined : cached;
+    }
+    if (resolving.has(cacheKey)) {
+      return undefined;
+    }
+
+    resolving.add(cacheKey);
+    const initializer = moduleInfo.constInitializers.get(head);
+    if (initializer === undefined) {
+      resolving.delete(cacheKey);
+      constValueCache.set(cacheKey, null);
+      return undefined;
+    }
+
+    const value = parseStaticExpression(initializer, resolveConstPath);
+    const resolvedValue = value === null ? null : (tail.length > 0 ? readMemberPath(value, tail) : value);
+    resolving.delete(cacheKey);
+    constValueCache.set(cacheKey, resolvedValue);
+    return resolvedValue === null ? undefined : resolvedValue;
+  };
+
+  const defaultExpr = extractDefaultExportExpression(source);
+  let configObject: Record<string, unknown> = {};
+
+  if (defaultExpr) {
+    const parsed = parseStaticExpression(defaultExpr, resolveConstPath);
+    if (isRecord(parsed)) {
+      configObject = parsed;
+    } else {
+      const evalScope: Record<string, unknown> = {
+        ...STATIC_EVAL_GLOBALS,
+        defineCssConfig: (input: unknown) => input,
+      };
+      for (const name of moduleInfo.constInitializers.keys()) {
+        const value = resolveConstPath([name]);
+        if (value !== undefined) {
+          evalScope[name] = value;
+        }
+      }
+      const evaluated = evaluateExpression(defaultExpr, evalScope);
+      if (isRecord(evaluated)) {
+        configObject = evaluated;
+      }
+    }
+  }
+
+  const importsFromObject = Array.isArray(configObject.imports)
+    ? configObject.imports.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+  const allImports = Array.from(new Set([...sideEffectImports, ...importsFromObject]))
+    .map((importPath) => toBrowserStylesheetPath(importPath, configPath, projectRoot))
+    .filter((entry): entry is string => Boolean(entry));
+
+  const breakpoints = normalizeBreakpoints(configObject.breakpoints);
+  const utilitiesParsed = isRecord(configObject.utilities)
+    ? parseCtConfig({ base: configObject.utilities })?.base ?? {}
+    : {};
+
+  const utilityRules = Object.entries(utilitiesParsed)
+    .flatMap(([name, declaration]) => toCssRules(`u-${camelToKebab(name)}`, declaration, { breakpoints }));
+  const utilityCss = utilityRules.join("\n");
+
+  const runtimeOptions: LoadedCssConfig["runtimeOptions"] = {};
+  if (Object.keys(breakpoints).length > 0) {
+    runtimeOptions.breakpoints = breakpoints;
+  }
+  if (Object.keys(utilitiesParsed).length > 0) {
+    runtimeOptions.utilities = utilitiesParsed;
+  }
+
+  return {
+    path: configPath,
+    imports: allImports,
+    breakpoints,
+    utilities: utilitiesParsed,
+    utilityCss,
+    runtimeOptions,
   };
 }
 
@@ -1151,11 +1371,20 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   let projectRoot = process.cwd();
   let viteAliases: ViteAliasEntry[] = [];
   let tsconfigResolver: TsconfigPathResolver | null = null;
+  let cssConfig: LoadedCssConfig = {
+    path: null,
+    imports: [],
+    breakpoints: {},
+    utilities: {},
+    utilityCss: "",
+    runtimeOptions: {},
+  };
   let resolverInitialized = false;
 
   function initializeResolvers(root: string): void {
     projectRoot = root;
     tsconfigResolver = createTsconfigResolver(root);
+    cssConfig = loadCssConfig(root);
     resolverInitialized = true;
   }
 
@@ -1168,7 +1397,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   }
 
   function combinedCss(): string {
-    return mergeCss(moduleCss.values());
+    const parts: string[] = [];
+    for (const cssImport of cssConfig.imports) {
+      parts.push(`@import "${cssImport}";`);
+    }
+    if (cssConfig.utilityCss) {
+      parts.push(cssConfig.utilityCss);
+    }
+    parts.push(mergeCss(moduleCss.values()));
+    return parts.filter((part) => part.length > 0).join("\n");
   }
 
   function invalidateVirtualModule(): void {
@@ -1440,10 +1677,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const call of calls) {
-        const parsed = parseCtCallArguments(call.arg) ??
+        const parsed = parseCtCallArguments(call.arg, { utilities: cssConfig.utilities }) ??
           parseCtCallArgumentsWithResolver(
             call.arg,
             (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+            { utilities: cssConfig.utilities },
           );
         if (!parsed) {
           continue;
@@ -1454,7 +1692,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const compiledConfig: Record<string, unknown> = {};
 
         if (parsed.global) {
-          for (const rule of toCssGlobalRules(parsed.global)) {
+          for (const rule of toCssGlobalRules(parsed.global, { breakpoints: cssConfig.breakpoints })) {
             rules.add(rule);
           }
           compiledConfig.global = true;
@@ -1463,7 +1701,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
-          for (const rule of toCssRules(className, declaration)) {
+          for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
             rules.add(rule);
           }
         }
@@ -1481,7 +1719,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   normalizedId,
                 );
                 variantMap[key] = className;
-                for (const rule of toCssRules(className, declaration)) {
+                for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
                   rules.add(rule);
                 }
               }
@@ -1492,7 +1730,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.variant = variantClassMap;
         }
 
-        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)})`;
+        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)}, ${JSON.stringify(cssConfig.runtimeOptions)})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
       }
 
@@ -1519,7 +1757,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
-        const parsed = parseCtConfig(configParts);
+        const parsed = parseCtConfig(configParts, { utilities: cssConfig.utilities });
         if (!parsed) {
           continue;
         }
@@ -1529,7 +1767,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const compiledConfig: Record<string, unknown> = {};
 
         if (parsed.global) {
-          for (const rule of toCssGlobalRules(parsed.global)) {
+          for (const rule of toCssGlobalRules(parsed.global, { breakpoints: cssConfig.breakpoints })) {
             rules.add(rule);
           }
           compiledConfig.global = true;
@@ -1538,7 +1776,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
-          for (const rule of toCssRules(className, declaration)) {
+          for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
             rules.add(rule);
           }
         }
@@ -1556,7 +1794,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   normalizedId,
                 );
                 variantMap[key] = className;
-                for (const rule of toCssRules(className, declaration)) {
+                for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
                   rules.add(rule);
                 }
               }
@@ -1570,7 +1808,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const configEntries = Object.entries(rawParts)
           .map(([key, raw]) => `${key}: ${raw}`)
           .join(", ");
-        const ctCall = `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)})`;
+        const ctCall =
+          `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)}, ${JSON.stringify(cssConfig.runtimeOptions)})`;
         replacements.push({ start: decl.start, end: decl.end, text: `const ${decl.varName} = ${ctCall}` });
 
         for (const assignment of decl.assignments) {
@@ -1618,6 +1857,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
     handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
+      if (cssConfig.path && normalizedId === cleanId(cssConfig.path)) {
+        cssConfig = loadCssConfig(projectRoot);
+        invalidateVirtualModule();
+      }
       if (moduleCss.has(normalizedId)) {
         moduleCss.delete(normalizedId);
         invalidateVirtualModule();

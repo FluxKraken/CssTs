@@ -155,6 +155,44 @@ Deno.test("parser merges style declaration arrays in ct config", () => {
   assertEquals(parsed.base.myButton.padding, "0.5rem");
 });
 
+Deno.test("parser supports space-delimited property arrays", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      pageWrapper: {
+        display: "grid",
+        gridTemplateRows: ["auto", "1fr", "auto"]
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const rows = (parsed.base.pageWrapper as Record<string, unknown>).gridTemplateRows;
+  assert(Array.isArray(rows));
+  assertEquals(rows, ["auto", "1fr", "auto"]);
+});
+
+Deno.test("parser supports @apply merge lists with local declarations", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      pageWrapper: {
+        display: "grid",
+        "@apply": [
+          { backgroundColor: "#4f4f4f", color: "black" },
+          { gridTemplateRows: ["auto", "1fr", "auto"] }
+        ],
+        color: "#00aaff"
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  assertEquals(declaration.display, "grid");
+  assertEquals(declaration.backgroundColor, "#4f4f4f");
+  assertEquals(declaration.color, "#00aaff");
+  assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
+});
+
 Deno.test("parser accepts defaults variant selections", () => {
   const parsed = parseCtCallArguments(`{
     base: {
@@ -243,6 +281,110 @@ Deno.test("extracts merged declaration arrays at build time", () => {
     css,
     /\.ct_[a-z0-9]+\{font-size:1\.25rem;padding:0\.5rem;background:black;color:white\}/,
   );
+});
+
+Deno.test("extracts space-delimited property arrays at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    pageWrapper: {\n` +
+    `      display: "grid",\n` +
+    `      gridTemplateRows: ["auto", "1fr", "auto"],\n` +
+    `    }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/list-props.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;grid-template-rows:auto 1fr auto\}/);
+});
+
+Deno.test("extracts @apply merge lists at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
+    `const singleColumn = { gridTemplateRows: ["auto", "1fr", "auto"] };\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    pageWrapper: {\n` +
+    `      display: "grid",\n` +
+    `      "@apply": [baseColors, singleColumn],\n` +
+    `      color: "#00aaff",\n` +
+    `    }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/apply.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{display:grid;background-color:#4f4f4f;color:#00aaff;grid-template-rows:auto 1fr auto\}/,
+  );
+});
+
+Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `import "./src/global.css";\n` +
+        `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
+        `export default {\n` +
+        `  breakpoints: { md: "48rem" },\n` +
+        `  utilities: {\n` +
+        `    cardBase: {\n` +
+        `      "@apply": [baseColors],\n` +
+        `      borderRadius: "8px",\n` +
+        `    },\n` +
+        `  },\n` +
+        `};\n`,
+    );
+    Deno.writeTextFileSync(`${root}/src/global.css`, "/* global */\n");
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      "@apply": ["cardBase"],\n` +
+      `      display: "grid",\n` +
+      `      "@md": {\n` +
+      `        gridTemplateColumns: "1fr 1fr",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/global.css";'));
+    assertMatch(css, /\.u-card-base\{background-color:#4f4f4f;color:black;border-radius:8px\}/);
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/);
+    assertMatch(css, /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
 });
 
 Deno.test("resolves imported style objects and precompiles them", () => {
