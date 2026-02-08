@@ -25,11 +25,11 @@ npx jsr add --yarn @kt-tools/css-ts
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import ct from "@kt-tools/css-ts";
+import ctVite from "@kt-tools/css-ts/vite";
 
 export default defineConfig({
   plugins: [
-    ct.vite(),
+    ctVite(),
   ],
 });
 ```
@@ -87,7 +87,7 @@ import maps, so you must map the JSR package to its npm shim and add a Vite alia
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import ct from "@kt-tools/css-ts";
+import ctVite from "@kt-tools/css-ts/vite";
 
 export default defineConfig({
   resolve: {
@@ -95,7 +95,7 @@ export default defineConfig({
       "@kt-tools/css-ts": "@jsr/kt-tools__css-ts",
     },
   },
-  plugins: [ct.vite()],
+  plugins: [ctVite()],
 });
 ```
 
@@ -129,7 +129,7 @@ deno add jsr:@kt-tools/css-ts
 ```ts
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vite";
-import ct from "@kt-tools/css-ts";
+import ctVite from "@kt-tools/css-ts/vite";
 
 export default defineConfig({
   resolve: {
@@ -137,7 +137,7 @@ export default defineConfig({
       "@kt-tools/css-ts": "@jsr/kt-tools__css-ts",
     },
   },
-  plugins: [ct.vite(), sveltekit()],
+  plugins: [ctVite(), sveltekit()],
 });
 ```
 

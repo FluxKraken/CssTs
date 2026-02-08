@@ -204,6 +204,22 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
 });
 
+Deno.test("extracts css from scoped package imports in ts modules", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "@kt-tools/css-ts";\n` +
+    `export const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/scoped-styles.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
 Deno.test("extracts merged declaration arrays at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

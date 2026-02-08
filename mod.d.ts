@@ -1,4 +1,3 @@
-import type { Plugin } from "vite";
 import type {
   CssVarRef,
   PrimitiveStyleValue,
@@ -59,7 +58,7 @@ export interface Ct {
     compiled?: CompiledConfig<T>,
   ): () => Accessor<T, V>;
   /** Vite plugin entry point. */
-  vite: (options?: CssTsPluginOptions) => Plugin;
+  vite: (options?: CssTsPluginOptions) => any;
   /** Create a CSS variable reference. */
   cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
   /** Alias for {@link Ct.cv}. */
@@ -70,6 +69,6 @@ export interface Ct {
 declare const ct: Ct;
 export default ct;
 /** Named export for the Vite plugin. */
-export const vite: (options?: CssTsPluginOptions) => Plugin;
+export const vite: (options?: CssTsPluginOptions) => any;
 /** Named export for creating CSS variable references. */
 export const cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;

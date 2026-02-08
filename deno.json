@@ -1,14 +1,18 @@
 {
   "name": "@kt-tools/css-ts",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "license": "MIT",
-  "exports": "./mod.ts",
+  "exports": {
+    ".": "./mod.ts",
+    "./vite": "./vite.ts"
+  },
   "types": "./mod.d.ts",
   "publish": {
     "include": [
       "README.md",
       "mod.ts",
       "mod.d.ts",
+      "vite.ts",
       "src/**/*.ts",
       "dist/**/*.js",
       "dist/**/*.d.ts"

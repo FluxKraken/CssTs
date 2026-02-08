@@ -1,7 +1,3 @@
-import fs from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
-import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import {
   findCtCalls,
   findExpressionTerminator,
@@ -56,14 +52,119 @@ type TsconfigPathResolver = {
   resolve: (source: string) => string | null;
 };
 
+type ViteModuleGraphLike = {
+  getModuleById: (id: string) => unknown;
+  invalidateModule: (module: unknown) => void;
+};
+
+type ViteDevServerLike = {
+  moduleGraph: ViteModuleGraphLike;
+};
+
+type ViteResolvedConfigLike = {
+  root: string;
+  resolve: {
+    alias?: unknown;
+  };
+};
+
 type ImportResolverOptions = {
   projectRoot: string;
   viteAliases: readonly ViteAliasEntry[];
   tsconfigResolver: TsconfigPathResolver | null;
 };
 
-const nodeRequire = createRequire(import.meta.url);
+type NodeFs = typeof import("node:fs");
+type NodePath = typeof import("node:path");
+type NodeModule = typeof import("node:module");
+type NodeRequire = (id: string) => unknown;
+
+let nodeFs: NodeFs | null | undefined;
+let nodePath: NodePath | null | undefined;
+let nodeRequire: NodeRequire | null | undefined;
 let tsTranspiler: ((source: string) => string) | null | undefined;
+
+function getBuiltinModule(id: string): unknown | null {
+  const processValue = (globalThis as { process?: unknown }).process;
+  if (!processValue || typeof processValue !== "object") {
+    return null;
+  }
+
+  const getBuiltinModule = (processValue as { getBuiltinModule?: unknown }).getBuiltinModule;
+  if (typeof getBuiltinModule !== "function") {
+    return null;
+  }
+
+  try {
+    return (getBuiltinModule as (name: string) => unknown)(id);
+  } catch {
+    return null;
+  }
+}
+
+function getFallbackRequire(): NodeRequire | null {
+  try {
+    const req = new Function("return typeof require === \"function\" ? require : null;")();
+    return typeof req === "function" ? (req as NodeRequire) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getNodeRequire(): NodeRequire | null {
+  if (nodeRequire !== undefined) {
+    return nodeRequire;
+  }
+
+  const moduleBuiltin = getBuiltinModule("node:module") as NodeModule | null;
+  if (moduleBuiltin && typeof moduleBuiltin.createRequire === "function") {
+    nodeRequire = moduleBuiltin.createRequire(import.meta.url) as NodeRequire;
+    return nodeRequire;
+  }
+
+  nodeRequire = getFallbackRequire();
+  return nodeRequire;
+}
+
+function getNodeFs(): NodeFs {
+  if (nodeFs) {
+    return nodeFs;
+  }
+
+  const builtin = getBuiltinModule("node:fs") as NodeFs | null;
+  if (builtin) {
+    nodeFs = builtin;
+    return nodeFs;
+  }
+
+  const requireFn = getNodeRequire();
+  if (requireFn) {
+    nodeFs = requireFn("node:fs") as NodeFs;
+    return nodeFs;
+  }
+
+  throw new Error("css-ts vite plugin requires Node.js built-ins (node:fs).");
+}
+
+function getNodePath(): NodePath {
+  if (nodePath) {
+    return nodePath;
+  }
+
+  const builtin = getBuiltinModule("node:path") as NodePath | null;
+  if (builtin) {
+    nodePath = builtin;
+    return nodePath;
+  }
+
+  const requireFn = getNodeRequire();
+  if (requireFn) {
+    nodePath = requireFn("node:path") as NodePath;
+    return nodePath;
+  }
+
+  throw new Error("css-ts vite plugin requires Node.js built-ins (node:path).");
+}
 
 const STATIC_EVAL_GLOBALS: Record<string, unknown> = {
   Array,
@@ -88,6 +189,21 @@ function cleanId(id: string): string {
 
 function supportsTransform(id: string): boolean {
   return /\.(?:[jt]sx?|svelte)$/.test(cleanId(id));
+}
+
+const CSS_TS_IMPORT_SOURCES = [
+  "css-ts",
+  "@kt-tools/css-ts",
+  "@jsr/kt-tools__css-ts",
+] as const;
+
+function hasCssTsImport(code: string): boolean {
+  for (const source of CSS_TS_IMPORT_SOURCES) {
+    if (code.includes(`from "${source}"`) || code.includes(`from '${source}'`)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isVirtualSubRequest(id: string): boolean {
@@ -511,7 +627,15 @@ function getTsTranspiler(): ((source: string) => string) | null {
   if (tsTranspiler !== undefined) {
     return tsTranspiler;
   }
+
+  const requireFn = getNodeRequire();
+  if (!requireFn) {
+    tsTranspiler = null;
+    return null;
+  }
+
   try {
+    const nodeRequire = requireFn;
     const typescript = nodeRequire("typescript") as {
       transpileModule: (
         source: string,
@@ -581,18 +705,18 @@ function evaluateFunctionDeclaration(source: string, scope: Record<string, unkno
 
 function resolveFileFromBase(basePath: string): string | null {
   const candidates: string[] = [];
-  if (path.extname(basePath)) {
+  if (getNodePath().extname(basePath)) {
     candidates.push(basePath);
   } else {
     for (const extension of STATIC_STYLE_EXTENSIONS) {
       candidates.push(`${basePath}${extension}`);
-      candidates.push(path.join(basePath, `index${extension}`));
+      candidates.push(getNodePath().join(basePath, `index${extension}`));
     }
   }
 
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return path.normalize(candidate);
+    if (getNodeFs().existsSync(candidate) && getNodeFs().statSync(candidate).isFile()) {
+      return getNodePath().normalize(candidate);
     }
   }
 
@@ -716,7 +840,7 @@ function parseJsonc(input: string): unknown | null {
 
 function parseJsoncFile(filePath: string): Record<string, unknown> | null {
   try {
-    const raw = fs.readFileSync(filePath, "utf8");
+    const raw = getNodeFs().readFileSync(filePath, "utf8");
     const parsed = parseJsonc(raw);
     return isRecord(parsed) ? parsed : null;
   } catch {
@@ -727,22 +851,22 @@ function parseJsoncFile(filePath: string): Record<string, unknown> | null {
 function resolveTsconfigExtendsPath(configDir: string, extendsValue: string): string | null {
   if (extendsValue.startsWith(".")) {
     const withExtension = extendsValue.endsWith(".json") ? extendsValue : `${extendsValue}.json`;
-    return path.resolve(configDir, withExtension);
+    return getNodePath().resolve(configDir, withExtension);
   }
 
   if (extendsValue.startsWith("/")) {
     return extendsValue;
   }
 
-  const candidate = path.resolve(configDir, "node_modules", extendsValue);
-  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+  const candidate = getNodePath().resolve(configDir, "node_modules", extendsValue);
+  if (getNodeFs().existsSync(candidate) && getNodeFs().statSync(candidate).isFile()) {
     return candidate;
   }
-  if (fs.existsSync(`${candidate}.json`) && fs.statSync(`${candidate}.json`).isFile()) {
+  if (getNodeFs().existsSync(`${candidate}.json`) && getNodeFs().statSync(`${candidate}.json`).isFile()) {
     return `${candidate}.json`;
   }
-  const nested = path.resolve(candidate, "tsconfig.json");
-  if (fs.existsSync(nested) && fs.statSync(nested).isFile()) {
+  const nested = getNodePath().resolve(candidate, "tsconfig.json");
+  if (getNodeFs().existsSync(nested) && getNodeFs().statSync(nested).isFile()) {
     return nested;
   }
 
@@ -756,7 +880,7 @@ function loadTsconfigCompilerOptions(
   baseUrl?: string;
   paths?: Record<string, string[]>;
 } | null {
-  const normalizedPath = path.normalize(tsconfigPath);
+  const normalizedPath = getNodePath().normalize(tsconfigPath);
   if (visited.has(normalizedPath)) {
     return null;
   }
@@ -767,7 +891,7 @@ function loadTsconfigCompilerOptions(
     return null;
   }
 
-  const configDir = path.dirname(normalizedPath);
+  const configDir = getNodePath().dirname(normalizedPath);
   let mergedBaseUrl: string | undefined;
   let mergedPaths: Record<string, string[]> = {};
 
@@ -777,7 +901,7 @@ function loadTsconfigCompilerOptions(
     if (parentPath) {
       const parent = loadTsconfigCompilerOptions(parentPath, visited);
       if (parent?.baseUrl) {
-        mergedBaseUrl = path.resolve(path.dirname(parentPath), parent.baseUrl);
+        mergedBaseUrl = getNodePath().resolve(getNodePath().dirname(parentPath), parent.baseUrl);
       }
       if (parent?.paths) {
         mergedPaths = { ...parent.paths };
@@ -789,7 +913,7 @@ function loadTsconfigCompilerOptions(
   if (isRecord(rawCompilerOptions)) {
     const rawBaseUrl = rawCompilerOptions.baseUrl;
     if (typeof rawBaseUrl === "string") {
-      mergedBaseUrl = path.resolve(configDir, rawBaseUrl);
+      mergedBaseUrl = getNodePath().resolve(configDir, rawBaseUrl);
     }
 
     const rawPaths = rawCompilerOptions.paths;
@@ -813,8 +937,8 @@ function loadTsconfigCompilerOptions(
 }
 
 function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | null {
-  const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
-  if (!fs.existsSync(tsconfigPath) || !fs.statSync(tsconfigPath).isFile()) {
+  const tsconfigPath = getNodePath().resolve(projectRoot, "tsconfig.json");
+  if (!getNodeFs().existsSync(tsconfigPath) || !getNodeFs().statSync(tsconfigPath).isFile()) {
     return null;
   }
 
@@ -867,9 +991,9 @@ function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | nul
 
         for (const target of matcher.targets) {
           const resolvedTarget = matcher.hasWildcard ? target.replace(/\*/g, wildcardValue) : target;
-          const candidateBase = path.isAbsolute(resolvedTarget)
+          const candidateBase = getNodePath().isAbsolute(resolvedTarget)
             ? resolvedTarget
-            : path.resolve(baseUrl, resolvedTarget);
+            : getNodePath().resolve(baseUrl, resolvedTarget);
           const resolvedFile = resolveFileFromBase(candidateBase);
           if (resolvedFile) {
             return resolvedFile;
@@ -877,7 +1001,7 @@ function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | nul
         }
       }
 
-      const baseUrlFallback = resolveFileFromBase(path.resolve(baseUrl, source));
+      const baseUrlFallback = resolveFileFromBase(getNodePath().resolve(baseUrl, source));
       return baseUrlFallback;
     },
   };
@@ -936,11 +1060,11 @@ function applyViteAlias(source: string, alias: ViteAliasEntry): string | null {
 
 function resolveAliasedPath(importerId: string, source: string, projectRoot: string): string | null {
   if (source.startsWith(".")) {
-    return resolveFileFromBase(path.resolve(path.dirname(importerId), source));
+    return resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(importerId), source));
   }
 
-  if (path.isAbsolute(source)) {
-    const rootRelative = resolveFileFromBase(path.resolve(projectRoot, `.${source}`));
+  if (getNodePath().isAbsolute(source)) {
+    const rootRelative = resolveFileFromBase(getNodePath().resolve(projectRoot, `.${source}`));
     if (rootRelative) {
       return rootRelative;
     }
@@ -951,28 +1075,28 @@ function resolveAliasedPath(importerId: string, source: string, projectRoot: str
     return null;
   }
 
-  return resolveFileFromBase(path.resolve(projectRoot, source));
+  return resolveFileFromBase(getNodePath().resolve(projectRoot, source));
 }
 
 function inferProjectRootFromImporter(importerId: string): string | null {
-  const normalized = path.normalize(importerId);
-  const marker = `${path.sep}src${path.sep}`;
+  const normalized = getNodePath().normalize(importerId);
+  const marker = `${getNodePath().sep}src${getNodePath().sep}`;
   const markerIndex = normalized.lastIndexOf(marker);
   if (markerIndex === -1) {
     return null;
   }
   const inferred = normalized.slice(0, markerIndex);
-  return inferred || path.parse(normalized).root;
+  return inferred || getNodePath().parse(normalized).root;
 }
 
 function resolveImportToFile(importerId: string, source: string, options: ImportResolverOptions): string | null {
   if (source.startsWith(".")) {
-    const base = path.resolve(path.dirname(importerId), source);
+    const base = getNodePath().resolve(getNodePath().dirname(importerId), source);
     return resolveFileFromBase(base);
   }
 
   if (source.startsWith("/")) {
-    const resolvedRootRelative = resolveFileFromBase(path.resolve(options.projectRoot, `.${source}`));
+    const resolvedRootRelative = resolveFileFromBase(getNodePath().resolve(options.projectRoot, `.${source}`));
     if (resolvedRootRelative) {
       return resolvedRootRelative;
     }
@@ -998,7 +1122,7 @@ function resolveImportToFile(importerId: string, source: string, options: Import
     }
 
     const suffix = source === "$lib" ? "" : source.slice("$lib/".length);
-    const base = path.join(projectRoot, "src", "lib", suffix);
+    const base = getNodePath().join(projectRoot, "src", "lib", suffix);
     return resolveFileFromBase(base);
   }
 
@@ -1021,9 +1145,9 @@ export interface CssTsPluginOptions {
 /**
  * Vite plugin that extracts `ct()` usage and emits a virtual stylesheet.
  */
-export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
+export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   const moduleCss = new Map<string, string>();
-  let server: ViteDevServer | undefined;
+  let server: ViteDevServerLike | undefined;
   let projectRoot = process.cwd();
   let viteAliases: ViteAliasEntry[] = [];
   let tsconfigResolver: TsconfigPathResolver | null = null;
@@ -1059,17 +1183,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
     name: "css-ts",
     enforce: "pre",
 
-    configureServer(devServer) {
+    configureServer(devServer: ViteDevServerLike) {
       server = devServer;
     },
 
-    configResolved(config: ResolvedConfig) {
+    configResolved(config: ViteResolvedConfigLike) {
       projectRoot = config.root;
       viteAliases = normalizeViteAliases(config.resolve.alias);
       initializeResolvers(projectRoot);
     },
 
-    resolveId(id) {
+    resolveId(id: string) {
       if (cleanId(id) === PUBLIC_VIRTUAL_ID) {
         const suffix = id.slice(PUBLIC_VIRTUAL_ID.length);
         return `${RESOLVED_VIRTUAL_ID}${suffix}`;
@@ -1077,14 +1201,14 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       return null;
     },
 
-    load(id) {
+    load(id: string) {
       if (cleanId(id) === RESOLVED_VIRTUAL_ID) {
         return combinedCss();
       }
       return null;
     },
 
-    transform(code, id) {
+    transform(code: string, id: string) {
       if (isVirtualSubRequest(id)) {
         return null;
       }
@@ -1100,9 +1224,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       const isSvelte = normalizedId.endsWith(".svelte");
       let nextCode = code;
 
-      const hasCssTsImport =
-        code.includes("from \"css-ts\"") || code.includes("from 'css-ts'");
-      if (!isSvelte && !hasCssTsImport) {
+      if (!isSvelte && !hasCssTsImport(code)) {
         return null;
       }
 
@@ -1151,7 +1273,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
           return code;
         }
         try {
-          return fs.readFileSync(moduleId, "utf8");
+          return getNodeFs().readFileSync(moduleId, "utf8");
         } catch {
           return null;
         }
@@ -1494,7 +1616,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): Plugin {
       };
     },
 
-    handleHotUpdate(ctx) {
+    handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
       if (moduleCss.has(normalizedId)) {
         moduleCss.delete(normalizedId);
