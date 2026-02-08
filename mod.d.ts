@@ -23,6 +23,7 @@ type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> 
 };
 type CtRuntimeOptions = {
   breakpoints?: Record<string, string>;
+  containers?: Record<string, { type?: string; rule: string }>;
   utilities?: StyleSheetInput;
 };
 type CompiledConfig<T extends StyleSheetInput> = {
@@ -41,6 +42,22 @@ type StyleAccessor<V extends VariantSheet<any> | undefined> =
   & {
     class: (variants?: VariantSelection<V>) => string;
     style: (variants?: VariantSelection<V>) => string;
+  };
+type CtBuilder<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> =
+  & (() => Accessor<T, V>)
+  & Accessor<T, V>
+  & {
+    base: T | undefined;
+    global: StyleSheetInput | undefined;
+    variant: V | undefined;
+    defaults: VariantSelection<V> | undefined;
+    addContainer: (
+      container: {
+        name: string;
+        type?: string;
+        rule: string;
+      },
+    ) => CtBuilder<T, V>;
   };
 
 /** Re-exported Vite plugin options. */
@@ -62,6 +79,10 @@ export interface Ct {
     compiled?: CompiledConfig<T>,
     runtimeOptions?: CtRuntimeOptions,
   ): () => Accessor<T, V>;
+  new <
+    T extends StyleSheetInput = StyleSheetInput,
+    V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+  >(): CtBuilder<T, V>;
   /** Vite plugin entry point. */
   vite: (options?: CssTsPluginOptions) => any;
   /** Create a CSS variable reference. */

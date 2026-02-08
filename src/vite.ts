@@ -78,10 +78,12 @@ type LoadedCssConfig = {
   path: string | null;
   imports: string[];
   breakpoints: Record<string, string>;
+  containers: Record<string, { type?: string; rule: string }>;
   utilities: StyleSheet;
   utilityCss: string;
   runtimeOptions: {
     breakpoints?: Record<string, string>;
+    containers?: Record<string, { type?: string; rule: string }>;
     utilities?: StyleSheet;
   };
 };
@@ -709,6 +711,42 @@ function normalizeBreakpoints(value: unknown): Record<string, string> {
   return normalized;
 }
 
+function normalizeContainers(
+  value: unknown,
+): Record<string, { type?: string; rule: string }> {
+  const normalized: Record<string, { type?: string; rule: string }> = {};
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!isRecord(entry)) {
+        continue;
+      }
+      const name = entry.name;
+      const rule = entry.rule;
+      if (typeof name !== "string" || typeof rule !== "string") {
+        continue;
+      }
+      const type = typeof entry.type === "string" ? entry.type : undefined;
+      normalized[name] = type ? { type, rule } : { rule };
+    }
+    return normalized;
+  }
+
+  if (!isRecord(value)) {
+    return normalized;
+  }
+
+  for (const [name, raw] of Object.entries(value)) {
+    if (!isRecord(raw) || typeof raw.rule !== "string") {
+      continue;
+    }
+    const type = typeof raw.type === "string" ? raw.type : undefined;
+    normalized[name] = type ? { type, rule: raw.rule } : { rule: raw.rule };
+  }
+
+  return normalized;
+}
+
 function toBrowserStylesheetPath(
   importPath: string,
   configPath: string,
@@ -738,6 +776,7 @@ function loadCssConfig(projectRoot: string): LoadedCssConfig {
       path: null,
       imports: [],
       breakpoints: {},
+      containers: {},
       utilities: {},
       utilityCss: "",
       runtimeOptions: {},
@@ -817,17 +856,23 @@ function loadCssConfig(projectRoot: string): LoadedCssConfig {
     .filter((entry): entry is string => Boolean(entry));
 
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
+  const containers = normalizeContainers(configObject.containers);
   const utilitiesParsed = isRecord(configObject.utilities)
-    ? parseCtConfig({ base: configObject.utilities })?.base ?? {}
+    ? parseCtConfig({ base: configObject.utilities }, { containers })?.base ?? {}
     : {};
 
   const utilityRules = Object.entries(utilitiesParsed)
-    .flatMap(([name, declaration]) => toCssRules(`u-${camelToKebab(name)}`, declaration, { breakpoints }));
+    .flatMap(([name, declaration]) =>
+      toCssRules(`u-${camelToKebab(name)}`, declaration, { breakpoints, containers })
+    );
   const utilityCss = utilityRules.join("\n");
 
   const runtimeOptions: LoadedCssConfig["runtimeOptions"] = {};
   if (Object.keys(breakpoints).length > 0) {
     runtimeOptions.breakpoints = breakpoints;
+  }
+  if (Object.keys(containers).length > 0) {
+    runtimeOptions.containers = containers;
   }
   if (Object.keys(utilitiesParsed).length > 0) {
     runtimeOptions.utilities = utilitiesParsed;
@@ -837,6 +882,7 @@ function loadCssConfig(projectRoot: string): LoadedCssConfig {
     path: configPath,
     imports: allImports,
     breakpoints,
+    containers,
     utilities: utilitiesParsed,
     utilityCss,
     runtimeOptions,
@@ -1375,6 +1421,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     path: null,
     imports: [],
     breakpoints: {},
+    containers: {},
     utilities: {},
     utilityCss: "",
     runtimeOptions: {},
@@ -1677,11 +1724,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const call of calls) {
-        const parsed = parseCtCallArguments(call.arg, { utilities: cssConfig.utilities }) ??
+        const parsed = parseCtCallArguments(call.arg, {
+          utilities: cssConfig.utilities,
+          containers: cssConfig.containers,
+        }) ??
           parseCtCallArgumentsWithResolver(
             call.arg,
             (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
-            { utilities: cssConfig.utilities },
+            {
+              utilities: cssConfig.utilities,
+              containers: cssConfig.containers,
+            },
           );
         if (!parsed) {
           continue;
@@ -1692,7 +1745,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const compiledConfig: Record<string, unknown> = {};
 
         if (parsed.global) {
-          for (const rule of toCssGlobalRules(parsed.global, { breakpoints: cssConfig.breakpoints })) {
+          for (
+            const rule of toCssGlobalRules(parsed.global, {
+              breakpoints: cssConfig.breakpoints,
+              containers: cssConfig.containers,
+            })
+          ) {
             rules.add(rule);
           }
           compiledConfig.global = true;
@@ -1701,7 +1759,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
-          for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
+          for (
+            const rule of toCssRules(className, declaration, {
+              breakpoints: cssConfig.breakpoints,
+              containers: cssConfig.containers,
+            })
+          ) {
             rules.add(rule);
           }
         }
@@ -1719,7 +1782,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   normalizedId,
                 );
                 variantMap[key] = className;
-                for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
+                for (
+                  const rule of toCssRules(className, declaration, {
+                    breakpoints: cssConfig.breakpoints,
+                    containers: cssConfig.containers,
+                  })
+                ) {
                   rules.add(rule);
                 }
               }
@@ -1735,6 +1803,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const decl of newCtDecls) {
+        const addContainerMatcher = new RegExp(`\\b${decl.varName}\\.addContainer\\s*\\(`);
+        if (addContainerMatcher.test(nextCode)) {
+          continue;
+        }
+
         const configParts: Record<string, unknown> = {};
         const rawParts: Record<string, string> = {};
         let allParsed = true;
@@ -1757,7 +1830,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
-        const parsed = parseCtConfig(configParts, { utilities: cssConfig.utilities });
+        const parsed = parseCtConfig(configParts, {
+          utilities: cssConfig.utilities,
+          containers: cssConfig.containers,
+        });
         if (!parsed) {
           continue;
         }
@@ -1767,7 +1843,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const compiledConfig: Record<string, unknown> = {};
 
         if (parsed.global) {
-          for (const rule of toCssGlobalRules(parsed.global, { breakpoints: cssConfig.breakpoints })) {
+          for (
+            const rule of toCssGlobalRules(parsed.global, {
+              breakpoints: cssConfig.breakpoints,
+              containers: cssConfig.containers,
+            })
+          ) {
             rules.add(rule);
           }
           compiledConfig.global = true;
@@ -1776,7 +1857,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         for (const [key, declaration] of Object.entries(parsed.base)) {
           const className = createClassName(key, declaration, normalizedId);
           classMap[key] = className;
-          for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
+          for (
+            const rule of toCssRules(className, declaration, {
+              breakpoints: cssConfig.breakpoints,
+              containers: cssConfig.containers,
+            })
+          ) {
             rules.add(rule);
           }
         }
@@ -1794,7 +1880,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   normalizedId,
                 );
                 variantMap[key] = className;
-                for (const rule of toCssRules(className, declaration, { breakpoints: cssConfig.breakpoints })) {
+                for (
+                  const rule of toCssRules(className, declaration, {
+                    breakpoints: cssConfig.breakpoints,
+                    containers: cssConfig.containers,
+                  })
+                ) {
                   rules.add(rule);
                 }
               }

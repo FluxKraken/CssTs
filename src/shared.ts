@@ -27,6 +27,8 @@ export type StyleSheet = Record<string, StyleDeclaration>;
 export interface CssSerializationOptions {
   /** Named breakpoint aliases (for example `{ md: "48rem" }` used as `"@md"`). */
   breakpoints?: Record<string, string>;
+  /** Named container presets (for example `{ card: { type: "inline-size", rule: "width < 20rem" } }`). */
+  containers?: Record<string, { type?: string; rule: string }>;
 }
 
 const UNITLESS_PROPERTIES = new Set([
@@ -213,6 +215,23 @@ function resolveAtRule(key: string, options?: CssSerializationOptions): string {
     return key;
   }
 
+  const rangeMatch = key.match(/^@\(\s*([A-Za-z_$][A-Za-z0-9_$-]*)\s*,\s*([A-Za-z_$][A-Za-z0-9_$-]*)\s*\)$/);
+  if (rangeMatch) {
+    const lower = options?.breakpoints?.[rangeMatch[1]];
+    const upper = options?.breakpoints?.[rangeMatch[2]];
+    if (lower && upper) {
+      return `@media (${lower} < width < ${upper})`;
+    }
+
+    const lowerContainer = options?.containers?.[rangeMatch[1]];
+    const upperContainer = options?.containers?.[rangeMatch[2]];
+    if (lowerContainer?.rule && upperContainer?.rule) {
+      return `@container (${lowerContainer.rule}) and (${upperContainer.rule})`;
+    }
+
+    return key;
+  }
+
   const aliasMatch = key.match(/^@([A-Za-z_$][A-Za-z0-9_$-]*)$/);
   if (!aliasMatch) {
     return key;
@@ -220,6 +239,10 @@ function resolveAtRule(key: string, options?: CssSerializationOptions): string {
 
   const breakpoint = options?.breakpoints?.[aliasMatch[1]];
   if (!breakpoint) {
+    const container = options?.containers?.[aliasMatch[1]];
+    if (container?.rule) {
+      return `@container ${aliasMatch[1]} (${container.rule})`;
+    }
     return key;
   }
 

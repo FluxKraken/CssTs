@@ -113,6 +113,52 @@ Deno.test("toCssRules supports nested selectors and nested @media/@container blo
   assert(rules.includes(".test:hover{opacity:0.8}"));
 });
 
+Deno.test("toCssRules resolves breakpoint shorthand and ranges", () => {
+  const rules = toCssRules(
+    "test",
+    {
+      display: "grid",
+      "@sm": {
+        gap: "1rem",
+      },
+      "@(xs,xl)": {
+        gridTemplateColumns: "1fr 1fr",
+      },
+    },
+    {
+      breakpoints: {
+        xs: "30rem",
+        sm: "40rem",
+        xl: "80rem",
+      },
+    },
+  );
+
+  assert(rules.includes(".test{display:grid}"));
+  assert(rules.includes("@media (width >= 40rem){.test{gap:1rem}}"));
+  assert(rules.includes("@media (30rem < width < 80rem){.test{grid-template-columns:1fr 1fr}}"));
+});
+
+Deno.test("toCssRules resolves container shorthand and ranges", () => {
+  const rules = toCssRules(
+    "test",
+    {
+      "@card": { backgroundColor: "blue" },
+      "@(cardMin,cardMax)": { color: "white" },
+    },
+    {
+      containers: {
+        card: { type: "inline-size", rule: "width < 20rem" },
+        cardMin: { type: "inline-size", rule: "12rem <= width" },
+        cardMax: { type: "inline-size", rule: "width < 24rem" },
+      },
+    },
+  );
+
+  assert(rules.includes("@container card (width < 20rem){.test{background-color:blue}}"));
+  assert(rules.includes("@container (12rem <= width) and (width < 24rem){.test{color:white}}"));
+});
+
 Deno.test("parser accepts quoted nested selectors and nested @media/@container", () => {
   const parsed = parseCtCallArguments(`{
     base: {
@@ -191,6 +237,32 @@ Deno.test("parser supports @apply merge lists with local declarations", () => {
   assertEquals(declaration.backgroundColor, "#4f4f4f");
   assertEquals(declaration.color, "#00aaff");
   assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
+});
+
+Deno.test("parser supports @set with configured containers", () => {
+  const parsed = parseCtCallArguments(
+    `{
+      base: {
+        mainContainer: {
+          "@set": "card"
+        },
+        card: {
+          "@card": {
+            backgroundColor: "blue"
+          }
+        }
+      }
+    }`,
+    {
+      containers: {
+        card: { type: "inline-size", rule: "width < 20rem" },
+      },
+    },
+  );
+
+  assert(parsed !== null);
+  assertEquals((parsed.base.mainContainer as Record<string, unknown>).containerName, "card");
+  assertEquals((parsed.base.mainContainer as Record<string, unknown>).containerType, "inline-size");
 });
 
 Deno.test("parser accepts defaults variant selections", () => {
@@ -382,6 +454,96 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
     assertMatch(css, /\.u-card-base\{background-color:#4f4f4f;color:black;border-radius:8px\}/);
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/);
     assertMatch(css, /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts breakpoint ranges with @(from,to) shorthand", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  breakpoints: {\n` +
+        `    xs: "30rem",\n` +
+        `    xl: "80rem",\n` +
+        `  },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      display: "grid",\n` +
+      `      "@(xs,xl)": {\n` +
+      `        gridTemplateColumns: "1fr 1fr",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app-range.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /@media \(30rem < width < 80rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts containers and supports @set/@container shorthand", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  containers: {\n` +
+        `    card: { type: "inline-size", rule: "width < 20rem" },\n` +
+        `  },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    mainContainer: {\n` +
+      `      "@set": "card",\n` +
+      `    },\n` +
+      `    card: {\n` +
+      `      "@card": {\n` +
+      `        backgroundColor: "blue",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app-container.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{container-name:card;container-type:inline-size\}/);
+    assertMatch(css, /@container card \(width < 20rem\)\{\.ct_[a-z0-9]+\{background-color:blue\}\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -967,6 +1129,29 @@ Deno.test("new ct() runtime with variants and defaults", () => {
   assert(withDefaults !== styles().myButton({ size: "sm" }));
   assertEquals(styles().myButton.style(), "padding:1rem;font-size:1rem");
   assertEquals(styles().myButton.style({ size: "sm" }), "padding:1rem;font-size:0.8rem");
+});
+
+Deno.test("new ct() runtime supports addContainer with @set and @container shorthand", () => {
+  const styles = new (ct as any)();
+  styles.addContainer({
+    name: "card",
+    type: "inline-size",
+    rule: "width < 20rem",
+  });
+  styles.base = {
+    mainContainer: {
+      "@set": "card",
+    },
+    card: {
+      "@card": {
+        backgroundColor: "blue",
+      },
+    },
+  };
+
+  const mainInline = styles().mainContainer.style();
+  assert(mainInline.includes("container-name:card"));
+  assert(mainInline.includes("container-type:inline-size"));
 });
 
 Deno.test("parser findNewCtDeclarations detects new ct() pattern", () => {

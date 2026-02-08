@@ -407,6 +407,56 @@ const styles = ct({
 - arrays of declaration objects
 - utility names from `css.config.ts` (see below)
 
+### Container presets and shorthand
+
+You can define container presets in `css.config.ts`:
+
+```ts
+export default {
+  containers: {
+    card: {
+      type: "inline-size",
+      rule: "width < 20rem",
+    },
+  },
+};
+```
+
+Then use:
+
+- `@set` to turn a class into that container
+- `@<name>` shorthand to emit a matching `@container` query
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct({
+  base: {
+    mainContainer: {
+      "@set": "card",
+    },
+    card: {
+      "@card": {
+        backgroundColor: "blue",
+      },
+    },
+  },
+});
+```
+
+You can also set containers at runtime on a builder:
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = new ct();
+styles.addContainer({
+  name: "card",
+  type: "inline-size",
+  rule: "width < 20rem",
+});
+```
+
 ### Global `css.config.ts`
 
 Create a `css.config.ts` file at project root to define project-wide imports, breakpoints, and utility classes:
@@ -426,11 +476,19 @@ export default {
       padding: "1rem",
     },
   },
+  containers: {
+    card: {
+      type: "inline-size",
+      rule: "width < 20rem",
+    },
+  },
 };
 ```
 
 - `import "./file.css"` and `imports: [...]` both add global stylesheet imports to the virtual CSS bundle.
 - `breakpoints` enables shorthand at-rules like `@md` (expanded to `@media (width >= 48rem)`).
+- `breakpoints` also supports range shorthand `@(from,to)` (for example `@(xs,xl)` -> `@media (30rem < width < 80rem)`).
+- `containers` enables container shorthand `@card` and optional range shorthand `@(cardMin,cardMax)` -> `@container (...) and (...)`.
 - `utilities` generates global utility classes like `.u-card-base` and can be referenced by name in `@apply`, for example `"@apply": ["cardBase"]`.
 
 ## Builder pattern (`new ct()`)

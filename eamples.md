@@ -16,6 +16,12 @@ export default {
     md: "48rem",
     lg: "64rem",
   },
+  containers: {
+    card: {
+      type: "inline-size",
+      rule: "width < 20rem",
+    },
+  },
   utilities: {
     cardBase: {
       borderRadius: "0.75rem",
@@ -80,6 +86,115 @@ const styles = ct({
 ```
 
 If an alias is not found, it remains a normal at-rule key.
+
+### Breakpoint ranges
+
+You can target a range with `@(from,to)`:
+
+```ts
+const styles = ct({
+  base: {
+    pageWrapper: {
+      "@(xs,xl)": {
+        gridTemplateColumns: "1fr 1fr",
+      },
+    },
+  },
+});
+```
+
+With:
+
+```ts
+breakpoints: {
+  xs: "30rem",
+  xl: "80rem",
+}
+```
+
+This resolves to:
+
+```css
+@media (30rem < width < 80rem) { ... }
+```
+
+## Feature: Container presets + `@set`
+
+Define named containers in `css.config.ts`:
+
+```ts
+export default {
+  containers: {
+    card: {
+      type: "inline-size",
+      rule: "width < 20rem",
+    },
+  },
+};
+```
+
+Apply the container to a class with `@set`:
+
+```ts
+const styles = ct({
+  base: {
+    mainContainer: {
+      "@set": "card",
+    },
+  },
+});
+```
+
+This injects:
+
+```css
+container-name: card;
+container-type: inline-size;
+```
+
+Use container query shorthand with `@<name>`:
+
+```ts
+const styles = ct({
+  base: {
+    card: {
+      "@card": {
+        backgroundColor: "blue",
+      },
+    },
+  },
+});
+```
+
+This resolves to:
+
+```css
+@container card (width < 20rem) { ... }
+```
+
+Container range shorthand is also supported:
+
+```ts
+// with containers cardMin/cardMax defined in config
+"@(cardMin,cardMax)": { ... }
+```
+
+Resolves to:
+
+```css
+@container (cardMinRule) and (cardMaxRule) { ... }
+```
+
+You can also register containers on a builder at runtime:
+
+```ts
+const styles = new ct();
+styles.addContainer({
+  name: "card",
+  type: "inline-size",
+  rule: "width < 20rem",
+});
+```
 
 ## Feature: Global utility classes
 

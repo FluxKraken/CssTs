@@ -15,6 +15,7 @@ type CtConfig = {
 };
 type ParseCtOptions = {
   utilities?: StyleSheet;
+  containers?: Record<string, { type?: string; rule: string }>;
 };
 
 type IdentifierReference = {
@@ -342,6 +343,53 @@ function normalizeApplyValue(
   return normalizeStyleDeclaration(value, options);
 }
 
+function normalizeSetValue(
+  value: unknown,
+  options: ParseCtOptions,
+): StyleDeclaration | null {
+  if (Array.isArray(value)) {
+    let merged: StyleDeclaration = {};
+    for (const item of value) {
+      const declaration = normalizeSetValue(item, options);
+      if (!declaration) {
+        return null;
+      }
+      merged = mergeStyleDeclarations(merged, declaration);
+    }
+    return merged;
+  }
+
+  if (typeof value === "string") {
+    const preset = options.containers?.[value];
+    if (preset) {
+      return {
+        containerName: value,
+        containerType: preset.type ?? "inline-size",
+      };
+    }
+
+    return {
+      containerName: value,
+      containerType: "inline-size",
+    };
+  }
+
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const name = value.name;
+  if (typeof name !== "string") {
+    return null;
+  }
+
+  const type = typeof value.type === "string" ? value.type : "inline-size";
+  return {
+    containerName: name,
+    containerType: type,
+  };
+}
+
 function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration): StyleDeclaration {
   const merged: Record<string, unknown> = { ...base };
 
@@ -379,6 +427,15 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
   for (const [key, declarationValue] of Object.entries(value)) {
     if (key === "@apply") {
       const declaration = normalizeApplyValue(declarationValue, options);
+      if (!declaration) {
+        return null;
+      }
+      merged = mergeStyleDeclarations(merged, declaration);
+      continue;
+    }
+
+    if (key === "@set") {
+      const declaration = normalizeSetValue(declarationValue, options);
       if (!declaration) {
         return null;
       }

@@ -35,6 +35,11 @@ type CompiledConfig<T extends StyleSheetInput> = {
 type CtRuntimeOptions = CssSerializationOptions & {
   utilities?: StyleSheetInput;
 };
+type ContainerDefinitionInput = {
+  name: string;
+  type?: string;
+  rule: string;
+};
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: StyleAccessor<V>;
 };
@@ -122,7 +127,10 @@ function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration):
 
 function normalizeStyleDeclarationInput(
   input: StyleDeclarationInput,
-  options: { utilities?: StyleSheet } = {},
+  options: {
+    utilities?: StyleSheet;
+    containers?: Record<string, { type?: string; rule: string }>;
+  } = {},
 ): StyleDeclaration {
   if (Array.isArray(input)) {
     let merged: StyleDeclaration = {};
@@ -139,6 +147,12 @@ function normalizeStyleDeclarationInput(
     if (key === "@apply") {
       const applyValue = normalizeApplyInput(value, options);
       normalized = mergeStyleDeclarations(normalized, applyValue);
+      continue;
+    }
+
+    if (key === "@set") {
+      const setValue = normalizeSetInput(value, options);
+      normalized = mergeStyleDeclarations(normalized, setValue);
       continue;
     }
 
@@ -163,7 +177,10 @@ function normalizeStyleDeclarationInput(
 
 function normalizeApplyInput(
   value: unknown,
-  options: { utilities?: StyleSheet },
+  options: {
+    utilities?: StyleSheet;
+    containers?: Record<string, { type?: string; rule: string }>;
+  },
 ): StyleDeclaration {
   if (Array.isArray(value)) {
     let merged: StyleDeclaration = {};
@@ -188,9 +205,49 @@ function normalizeApplyInput(
   return {};
 }
 
+function normalizeSetInput(
+  value: unknown,
+  options: {
+    containers?: Record<string, { type?: string; rule: string }>;
+  },
+): StyleDeclaration {
+  if (Array.isArray(value)) {
+    let merged: StyleDeclaration = {};
+    for (const entry of value) {
+      merged = mergeStyleDeclarations(merged, normalizeSetInput(entry, options));
+    }
+    return merged;
+  }
+
+  if (typeof value === "string") {
+    const preset = options.containers?.[value];
+    return {
+      containerName: value,
+      containerType: preset?.type ?? "inline-size",
+    };
+  }
+
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const name = (value as { name?: unknown }).name;
+    if (typeof name !== "string") {
+      return {};
+    }
+    const type = (value as { type?: unknown }).type;
+    return {
+      containerName: name,
+      containerType: typeof type === "string" ? type : "inline-size",
+    };
+  }
+
+  return {};
+}
+
 function normalizeStyleSheetInput(
   styles: StyleSheetInput | undefined,
-  options: { utilities?: StyleSheet } = {},
+  options: {
+    utilities?: StyleSheet;
+    containers?: Record<string, { type?: string; rule: string }>;
+  } = {},
 ): StyleSheet {
   const normalized: StyleSheet = {};
 
@@ -233,7 +290,10 @@ function toInlineStyleString(...declarations: readonly StyleDeclaration[]): stri
 
 function normalizeVariantSheetInput<T extends StyleSheetInput>(
   variants: VariantSheet<T> | undefined,
-  options: { utilities?: StyleSheet } = {},
+  options: {
+    utilities?: StyleSheet;
+    containers?: Record<string, { type?: string; rule: string }>;
+  } = {},
 ): Record<string, Record<string, Partial<StyleSheet>>> | undefined {
   if (!variants) {
     return undefined;
@@ -291,8 +351,11 @@ function compileConfig<
   const utilities = runtimeOptions.utilities
     ? normalizeStyleSheetInput(runtimeOptions.utilities)
     : undefined;
-  const normalizeOptions = { utilities };
-  const cssOptions: CssSerializationOptions = { breakpoints: runtimeOptions.breakpoints };
+  const normalizeOptions = { utilities, containers: runtimeOptions.containers };
+  const cssOptions: CssSerializationOptions = {
+    breakpoints: runtimeOptions.breakpoints,
+    containers: runtimeOptions.containers,
+  };
 
   const globalStyles = normalizeStyleSheetInput(config.global, normalizeOptions);
   const styles = normalizeStyleSheetInput(config.base, normalizeOptions);
@@ -433,6 +496,7 @@ type CtBuilder<
   global: StyleSheetInput | undefined;
   variant: V | undefined;
   defaults: VariantSelection<V> | undefined;
+  addContainer(container: ContainerDefinitionInput): CtBuilder<T, V>;
 } & Accessor<T, V>;
 
 function createCtBuilder<
@@ -440,11 +504,16 @@ function createCtBuilder<
   V extends VariantSheet<T> | undefined,
 >(compiled?: CompiledConfig<T>, runtimeOptions: CtRuntimeOptions = {}): CtBuilder<T, V> {
   const config: Partial<CtConfig<T, V>> = {};
+  const mutableContainers = { ...(runtimeOptions.containers ?? {}) };
+  const effectiveRuntimeOptions: CtRuntimeOptions = {
+    ...runtimeOptions,
+    containers: mutableContainers,
+  };
   let cachedFactory: (() => Accessor<T, V>) | null = null;
 
   function ensureCompiled(): () => Accessor<T, V> {
     if (!cachedFactory) {
-      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled, runtimeOptions);
+      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled, effectiveRuntimeOptions);
     }
     return cachedFactory;
   }
@@ -452,8 +521,7 @@ function createCtBuilder<
   const builder = function () {
     return ensureCompiled()();
   };
-
-  return new Proxy(builder, {
+  const proxy = new Proxy(builder, {
     apply(_target, _thisArg, _args) {
       return ensureCompiled()();
     },
@@ -478,6 +546,21 @@ function createCtBuilder<
       return Reflect.get(target, prop, receiver);
     },
   }) as unknown as CtBuilder<T, V>;
+
+  proxy.addContainer = (container: ContainerDefinitionInput) => {
+    if (typeof container?.name !== "string" || container.name.length === 0 || typeof container.rule !== "string") {
+      throw new Error("addContainer() expects { name: string, rule: string, type?: string }");
+    }
+
+    mutableContainers[container.name] = {
+      type: typeof container.type === "string" ? container.type : "inline-size",
+      rule: container.rule,
+    };
+    cachedFactory = null;
+    return proxy;
+  };
+
+  return proxy;
 }
 
 /**
