@@ -3,6 +3,8 @@ import {
   isCssVarRef,
   StyleDeclaration,
   StyleSheet,
+  StyleValue,
+  toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
 } from "./shared.js";
@@ -30,7 +32,11 @@ type CompiledConfig<T extends StyleSheetInput> = {
   variant?: VariantClassMap<T>;
 };
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
-  [K in keyof T]: (variants?: VariantSelection<V>) => string;
+  [K in keyof T]: StyleAccessor<V>;
+};
+type StyleAccessor<V extends VariantSheet<any> | undefined> = ((variants?: VariantSelection<V>) => string) & {
+  class: (variants?: VariantSelection<V>) => string;
+  style: (variants?: VariantSelection<V>) => string;
 };
 
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
@@ -125,6 +131,32 @@ function normalizeStyleSheetInput(styles: StyleSheetInput | undefined): StyleShe
   return normalized;
 }
 
+function isInlineStyleValue(value: unknown): value is StyleValue {
+  return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
+}
+
+function mergeInlineDeclarations(...declarations: readonly StyleDeclaration[]): Record<string, StyleValue> {
+  const merged: Record<string, StyleValue> = {};
+  for (const declaration of declarations) {
+    for (const [name, value] of Object.entries(declaration)) {
+      if (!isInlineStyleValue(value)) {
+        continue;
+      }
+      merged[name] = value;
+    }
+  }
+  return merged;
+}
+
+function toInlineStyleString(...declarations: readonly StyleDeclaration[]): string {
+  const merged = mergeInlineDeclarations(...declarations);
+  const parts: string[] = [];
+  for (const [name, value] of Object.entries(merged)) {
+    parts.push(toCssDeclaration(name, value));
+  }
+  return parts.join(";");
+}
+
 function normalizeVariantSheetInput<T extends StyleSheetInput>(
   variants: VariantSheet<T> | undefined,
 ): Record<string, Record<string, Partial<StyleSheet>>> | undefined {
@@ -202,7 +234,36 @@ function compileConfig<
       }
     }
 
-    accessors[key] = (selection) => {
+    const resolveSelection = (selection?: VariantSelection<V>) =>
+      selection
+        ? ({ ...defaultSelection, ...selection } as VariantSelection<V>)
+        : defaultSelection;
+
+    const resolveVariantDeclarations = (selection?: VariantSelection<V>): StyleDeclaration[] => {
+      if (!variants) {
+        return [];
+      }
+
+      const resolvedSelection = resolveSelection(selection);
+      const declarations: StyleDeclaration[] = [];
+
+      for (const [group, variantName] of Object.entries(
+        resolvedSelection as Record<string, string | number | symbol | undefined>,
+      )) {
+        if (!variantName) {
+          continue;
+        }
+
+        const variantDeclaration = variants[group]?.[String(variantName)]?.[String(key)];
+        if (variantDeclaration) {
+          declarations.push(variantDeclaration as StyleDeclaration);
+        }
+      }
+
+      return declarations;
+    };
+
+    const classAccessor = (selection?: VariantSelection<V>): string => {
       const resolvedSelection = selection
         ? ({ ...defaultSelection, ...selection } as VariantSelection<V>)
         : defaultSelection;
@@ -228,6 +289,13 @@ function compileConfig<
 
       return classNames.join(" ");
     };
+
+    const accessor = classAccessor as StyleAccessor<V>;
+    accessor.class = classAccessor;
+    accessor.style = (selection?: VariantSelection<V>) =>
+      toInlineStyleString(declaration, ...resolveVariantDeclarations(selection));
+
+    accessors[key] = accessor as Accessor<T, V>[keyof T];
   }
 
   if (variants) {

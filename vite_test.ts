@@ -775,6 +775,21 @@ Deno.test("new ct() runtime with direct accessor access", () => {
   assertEquals(viaFactory, viaDirect);
 });
 
+Deno.test("runtime accessors expose class() and style()", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    myButton: {
+      backgroundColor: "black",
+      color: "white",
+      hover: { color: "gold" },
+    },
+  };
+
+  const accessor = styles().myButton;
+  assertEquals(accessor.class(), accessor());
+  assertEquals(accessor.style(), "background-color:black;color:white");
+});
+
 Deno.test("new ct() runtime with variants and defaults", () => {
   const styles = new (ct as any)();
   styles.base = {
@@ -792,6 +807,8 @@ Deno.test("new ct() runtime with variants and defaults", () => {
   assertEquals(withDefaults, styles().myButton({}));
   assertEquals(withDefaults, styles().myButton({ size: "md" }));
   assert(withDefaults !== styles().myButton({ size: "sm" }));
+  assertEquals(styles().myButton.style(), "padding:1rem;font-size:1rem");
+  assertEquals(styles().myButton.style({ size: "sm" }), "padding:1rem;font-size:0.8rem");
 });
 
 Deno.test("parser findNewCtDeclarations detects new ct() pattern", () => {

@@ -31,8 +31,14 @@ type VariantSelection<V extends VariantSheet<any> | undefined> = V extends Varia
   ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
-  [K in keyof T]: (variants?: VariantSelection<V>) => string;
+  [K in keyof T]: StyleAccessor<V>;
 };
+type StyleAccessor<V extends VariantSheet<any> | undefined> =
+  & ((variants?: VariantSelection<V>) => string)
+  & {
+    class: (variants?: VariantSelection<V>) => string;
+    style: (variants?: VariantSelection<V>) => string;
+  };
 
 /** Re-exported Vite plugin options. */
 export type { CssTsPluginOptions };

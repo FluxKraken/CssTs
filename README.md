@@ -196,6 +196,36 @@ export default config;
 </header>
 ```
 
+### Inline style output (`style={...}`)
+
+Each accessor now includes:
+
+- `myStyle()` -> class string (existing behavior)
+- `myStyle.class()` -> class string alias
+- `myStyle.style()` -> inline style string
+
+This is useful for components that expect a `style` prop (for example PaneForge):
+
+```svelte
+<script lang="ts">
+  import ct from "@kt-tools/css-ts";
+
+  const styles = ct({
+    base: {
+      myGroup: { backgroundColor: "#111", color: "white" },
+      leftPane: { minWidth: "200px" },
+      rightPane: { minWidth: "200px" },
+    },
+  });
+</script>
+
+<PaneGroup style={styles().myGroup.style()} direction="horizontal">
+  <Pane style={styles().leftPane.style()} defaultSize={50}>Pane 1</Pane>
+  <PaneResizer />
+  <Pane style={styles().rightPane.style()} defaultSize={50}>Pane 2</Pane>
+</PaneGroup>
+```
+
 ### Pseudo selectors
 
 You can nest pseudo-classes/elements inside a style block. Keys are camel-cased (e.g. `focusVisible`)
