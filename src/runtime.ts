@@ -10,41 +10,66 @@ import {
   toCssRules,
 } from "./shared.js";
 
+/** A style declaration or recursive array of declarations (merged left-to-right). */
 type StyleDeclarationInput = StyleDeclaration | readonly StyleDeclarationInput[];
+/** Map of class keys to style declaration inputs. */
 type StyleSheetInput = Record<string, StyleDeclarationInput>;
+/** Precompiled class name map keyed by style key. */
 type CompiledMap<T extends StyleSheetInput> = Partial<Record<keyof T, string>>;
+/** Variant group map: `{ groupName: { variantName: Partial<StyleSheet> } }`. */
 type VariantSheet<T extends StyleSheetInput> = Record<string, Record<string, Partial<T>>>;
+/** Precompiled variant class name map. */
 type VariantClassMap<T extends StyleSheetInput> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
+/** Selected variant values: `{ groupName: variantName }`. */
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
   ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
+/** Configuration object accepted by `ct()`. */
 type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+  /** Global stylesheet rules applied without class names. */
   global?: StyleSheetInput;
+  /** Base stylesheet mapping class keys to declarations. */
   base?: T;
+  /** Variant groups that conditionally override base styles. */
   variant?: V;
+  /** Default variant selections. */
   defaults?: VariantSelection<V>;
 };
+/** Build-time precompiled config passed as the second argument to `ct()`. */
 type CompiledConfig<T extends StyleSheetInput> = {
+  /** Whether global rules have been extracted. */
   global?: true;
+  /** Precompiled base class names. */
   base?: CompiledMap<T>;
+  /** Precompiled variant class names. */
   variant?: VariantClassMap<T>;
 };
+/** Runtime options merged from `css.config.ts` and passed as the third argument to `ct()`. */
 type CtRuntimeOptions = CssSerializationOptions & {
+  /** Utility declarations available for `@apply` references. */
   utilities?: StyleSheetInput;
 };
+/** Input for {@link CtBuilder.addContainer} to register a container preset at runtime. */
 type ContainerDefinitionInput = {
+  /** Container name used in `@set` and `@<name>` shorthand. */
   name: string;
+  /** CSS container type (defaults to `"inline-size"`). */
   type?: string;
+  /** Container query condition (for example `"width < 20rem"`). */
   rule: string;
 };
+/** Maps each base style key to a {@link StyleAccessor} for class/style output. */
 type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
   [K in keyof T]: StyleAccessor<V>;
 };
+/** Callable accessor for a single style key that returns class names or inline styles. */
 type StyleAccessor<V extends VariantSheet<any> | undefined> = ((variants?: VariantSelection<V>) => string) & {
+  /** Return the CSS class name(s) for this style key. */
   class: (variants?: VariantSelection<V>) => string;
+  /** Return an inline style string for this style key. */
   style: (variants?: VariantSelection<V>) => string;
 };
 
@@ -498,11 +523,17 @@ type CtBuilder<
   T extends StyleSheetInput = StyleSheetInput,
   V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
 > = {
+  /** Call the builder as a factory to get the compiled style accessor. */
   (): Accessor<T, V>;
+  /** Base stylesheet mapping class keys to style declarations. */
   base: T | undefined;
+  /** Global stylesheet rules (selectors and at-rules applied without class names). */
   global: StyleSheetInput | undefined;
+  /** Variant groups that conditionally override base styles. */
   variant: V | undefined;
+  /** Default variant selections applied when no explicit selection is given. */
   defaults: VariantSelection<V> | undefined;
+  /** Register a container preset for `@set` and `@<name>` shorthand at runtime. */
   addContainer(container: ContainerDefinitionInput): CtBuilder<T, V>;
 } & Accessor<T, V>;
 
