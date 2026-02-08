@@ -37,6 +37,7 @@ type ParsedValue =
   | ParsedObject
   | ParsedArray;
 
+/** Callback that resolves a dotted identifier path to its static value during parsing. */
 export type IdentifierResolver = (path: readonly string[]) => unknown | undefined;
 
 function isIdentifierStart(char: string): boolean {
@@ -535,6 +536,11 @@ function normalizeVariantSelection(
   return selection;
 }
 
+/**
+ * Validate and normalize a parsed config object into a {@link CtConfig}.
+ * Allowed top-level keys: `global`, `base`, `variant`, `defaults`.
+ * Returns `null` when the input cannot be validated.
+ */
 export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOptions = {}): CtConfig | null {
   const allowed = new Set(["global", "base", "variant", "defaults"]);
   for (const key of Object.keys(value)) {

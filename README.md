@@ -424,7 +424,7 @@ export default {
 
 Then use:
 
-- `@set` to turn a class into that container
+- `@set` to apply `container-name` and `container-type` to a class
 - `@<name>` shorthand to emit a matching `@container` query
 
 ```ts
@@ -434,11 +434,13 @@ const styles = ct({
   base: {
     mainContainer: {
       "@set": "card",
+      // injects: container-name: card; container-type: inline-size;
     },
     card: {
       "@card": {
         backgroundColor: "blue",
       },
+      // resolves to: @container card (width < 20rem) { ... }
     },
   },
 });
@@ -459,22 +461,17 @@ styles.addContainer({
 
 ### Global `css.config.ts`
 
-Create a `css.config.ts` file at project root to define project-wide imports, breakpoints, and utility classes:
+Create a config file at project root to define project-wide imports, breakpoints, containers, and utility classes. Supported filenames: `css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`, `css.config.cts`, `css.config.cjs`.
 
 ```ts
 import "./src/global.css";
 
 export default {
+  imports: ["./src/theme.css"],
   breakpoints: {
+    sm: "40rem",
     md: "48rem",
     lg: "64rem",
-  },
-  imports: ["./src/theme.css"],
-  utilities: {
-    cardBase: {
-      borderRadius: "0.75rem",
-      padding: "1rem",
-    },
   },
   containers: {
     card: {
@@ -482,14 +479,91 @@ export default {
       rule: "width < 20rem",
     },
   },
+  utilities: {
+    cardBase: {
+      borderRadius: "0.75rem",
+      padding: "1rem",
+      backgroundColor: "#4f4f4f",
+      color: "black",
+    },
+  },
 };
 ```
 
-- `import "./file.css"` and `imports: [...]` both add global stylesheet imports to the virtual CSS bundle.
-- `breakpoints` enables shorthand at-rules like `@md` (expanded to `@media (width >= 48rem)`).
-- `breakpoints` also supports range shorthand `@(from,to)` (for example `@(xs,xl)` -> `@media (30rem < width < 80rem)`).
-- `containers` enables container shorthand `@card` and optional range shorthand `@(cardMin,cardMax)` -> `@container (...) and (...)`.
-- `utilities` generates global utility classes like `.u-card-base` and can be referenced by name in `@apply`, for example `"@apply": ["cardBase"]`.
+#### Global stylesheet imports
+
+Both `import "./file.css"` side-effect imports and the `imports: [...]` array add global stylesheet imports to the virtual CSS bundle as `@import` rules.
+
+#### Breakpoint aliases
+
+`breakpoints` defines named aliases for `@media` width queries. Use `@<name>` in style objects:
+
+```ts
+const styles = ct({
+  base: {
+    pageWrapper: {
+      display: "grid",
+      "@md": {
+        gridTemplateColumns: "1fr 1fr",
+      },
+    },
+  },
+});
+```
+
+`"@md"` expands to `@media (width >= 48rem) { ... }`.
+
+Breakpoint values can be strings or numbers (numbers get a `px` suffix):
+
+```ts
+breakpoints: {
+  sm: 640,    // becomes "640px"
+  md: "48rem",
+}
+```
+
+Alias names may start with digits (for example `2xs`, `2xl`):
+
+```ts
+breakpoints: { "2xs": "20rem", "2xl": "96rem" }
+// "@2xs" -> @media (width >= 20rem)
+```
+
+Target a range between two breakpoints with `@(from,to)`:
+
+```ts
+"@(xs,xl)": { gridTemplateColumns: "1fr 1fr" }
+// expands to: @media (30rem < width < 80rem) { ... }
+```
+
+If an alias is not found, the key is kept as a literal at-rule.
+
+#### Container presets
+
+`containers` defines named container presets. Use `@<name>` shorthand for container queries, and `@(from,to)` for range queries across two container presets:
+
+```ts
+"@card": { backgroundColor: "blue" }
+// expands to: @container card (width < 20rem) { ... }
+
+"@(cardSm,cardLg)": { fontSize: "1.25rem" }
+// expands to: @container (smRule) and (lgRule) { ... }
+```
+
+See [Container presets and shorthand](#container-presets-and-shorthand) for full usage.
+
+#### Utility classes
+
+`utilities` generates global CSS classes emitted into the virtual stylesheet. Class names are derived from the camelCase key converted to kebab-case with a `u-` prefix:
+
+- `cardBase` &rarr; `.u-card-base`
+- `mutedText` &rarr; `.u-muted-text`
+
+Utility names can be referenced by `@apply` inside style declarations:
+
+```ts
+"@apply": ["cardBase"]
+```
 
 ## Builder pattern (`new ct()`)
 

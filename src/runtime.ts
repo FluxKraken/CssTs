@@ -487,6 +487,13 @@ function compileConfig<
 
 const CONFIG_KEYS = new Set(["base", "global", "variant", "defaults"]);
 
+/**
+ * Builder returned by `new ct()` that supports incremental property assignment.
+ *
+ * Set config via `builder.base = ...`, `builder.variant = ...`, etc.
+ * Access compiled styles via `builder()` (factory) or `builder.myKey()` (direct).
+ * The builder compiles lazily on first access and recompiles when a config property changes.
+ */
 type CtBuilder<
   T extends StyleSheetInput = StyleSheetInput,
   V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
