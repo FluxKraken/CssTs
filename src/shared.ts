@@ -215,7 +215,7 @@ function resolveAtRule(key: string, options?: CssSerializationOptions): string {
     return key;
   }
 
-  const rangeMatch = key.match(/^@\(\s*([A-Za-z_$][A-Za-z0-9_$-]*)\s*,\s*([A-Za-z_$][A-Za-z0-9_$-]*)\s*\)$/);
+  const rangeMatch = key.match(/^@\(\s*([A-Za-z0-9_$-]+)\s*,\s*([A-Za-z0-9_$-]+)\s*\)$/);
   if (rangeMatch) {
     const lower = options?.breakpoints?.[rangeMatch[1]];
     const upper = options?.breakpoints?.[rangeMatch[2]];
@@ -232,7 +232,7 @@ function resolveAtRule(key: string, options?: CssSerializationOptions): string {
     return key;
   }
 
-  const aliasMatch = key.match(/^@([A-Za-z_$][A-Za-z0-9_$-]*)$/);
+  const aliasMatch = key.match(/^@([A-Za-z0-9_$-]+)$/);
   if (!aliasMatch) {
     return key;
   }

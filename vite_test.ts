@@ -139,6 +139,29 @@ Deno.test("toCssRules resolves breakpoint shorthand and ranges", () => {
   assert(rules.includes("@media (30rem < width < 80rem){.test{grid-template-columns:1fr 1fr}}"));
 });
 
+Deno.test("toCssRules resolves numeric breakpoint aliases like 2xs/2xl", () => {
+  const rules = toCssRules(
+    "test",
+    {
+      "@2xs": {
+        gap: "0.25rem",
+      },
+      "@(2xs,2xl)": {
+        gridTemplateColumns: "1fr 1fr",
+      },
+    },
+    {
+      breakpoints: {
+        "2xs": "20rem",
+        "2xl": "96rem",
+      },
+    },
+  );
+
+  assert(rules.includes("@media (width >= 20rem){.test{gap:0.25rem}}"));
+  assert(rules.includes("@media (20rem < width < 96rem){.test{grid-template-columns:1fr 1fr}}"));
+});
+
 Deno.test("toCssRules resolves container shorthand and ranges", () => {
   const rules = toCssRules(
     "test",
