@@ -855,6 +855,131 @@ Deno.test("resolves imported constants computed by function declarations", () =>
   }
 });
 
+Deno.test("new ct() extracts styles computed by local function declarations", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `function responsiveWidth(width: string) {\n` +
+    `  return \`min(\${width}, 100%)\`;\n` +
+    `}\n` +
+    `const styles = new ct();\n` +
+    `styles.base = {\n` +
+    `  content: {\n` +
+    `    width: responsiveWidth("60rem"),\n` +
+    `    marginInline: "auto",\n` +
+    `  },\n` +
+    `};\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-local-fn.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct()"));
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+});
+
+Deno.test("new ct() extracts styles computed by local const arrow functions", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n` +
+    `const styles = new ct();\n` +
+    `styles.base = {\n` +
+    `  content: {\n` +
+    `    width: responsiveWidth("60rem"),\n` +
+    `    marginInline: "auto",\n` +
+    `  },\n` +
+    `};\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-local-arrow.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct()"));
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+});
+
+Deno.test("new ct() extracts styles computed by imported default const arrow functions", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/responsive.ts`,
+      `const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n` +
+        `export default responsiveWidth;\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import responsiveWidth from "$lib/responsive";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = {\n` +
+      `  content: {\n` +
+      `    width: responsiveWidth("60rem"),\n` +
+      `    marginInline: "auto",\n` +
+      `  },\n` +
+      `};\n`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const code = transformed.code as string;
+    assert(!code.includes("new ct()"));
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("new ct() extracts styles computed by imported named const arrow functions", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/responsive.ts`,
+      `export const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { responsiveWidth } from "$lib/responsive";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = {\n` +
+      `  content: {\n` +
+      `    width: responsiveWidth("60rem"),\n` +
+      `    marginInline: "auto",\n` +
+      `  },\n` +
+      `};\n`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const code = transformed.code as string;
+    assert(!code.includes("new ct()"));
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("extracts quoted nested selectors and nested @media/@container at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

@@ -33,6 +33,7 @@ type ModuleStaticInfo = {
   constInitializers: Map<string, string>;
   functionDeclarations: Map<string, string>;
   exportedConsts: Map<string, string>;
+  defaultExportExpression: string | null;
 };
 
 type ViteAliasEntry = {
@@ -366,6 +367,15 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   const functionDeclarations = new Map<string, string>();
   const exportedConsts = new Map<string, string>();
 
+  const defaultImportMatcher =
+    /import\s+(?!type\b)([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*(?:\{[\s\S]*?\}|\*\s*as\s*[A-Za-z_$][A-Za-z0-9_$]*))?\s*from\s*["']([^"']+)["']/g;
+  for (let match = defaultImportMatcher.exec(code); match; match = defaultImportMatcher.exec(code)) {
+    imports.set(match[1], {
+      source: match[2],
+      kind: "default",
+    });
+  }
+
   const namespaceImportMatcher =
     /import\s*\*\s*as\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*from\s*["']([^"']+)["']/g;
   for (let match = namespaceImportMatcher.exec(code); match; match = namespaceImportMatcher.exec(code)) {
@@ -649,6 +659,7 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     constInitializers,
     functionDeclarations,
     exportedConsts,
+    defaultExportExpression: extractDefaultExportExpression(code),
   };
 }
 
@@ -1596,6 +1607,37 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const moduleInfo = getModuleInfo(moduleId);
         if (moduleInfo) {
+          const buildEvalScope = (excludeName?: string): Record<string, unknown> => {
+            const evalScope: Record<string, unknown> = {
+              ...STATIC_EVAL_GLOBALS,
+            };
+            for (const localName of moduleInfo.functionDeclarations.keys()) {
+              if (localName === excludeName) {
+                continue;
+              }
+              const localValue = resolveIdentifierInModule([localName], moduleId);
+              if (localValue !== null) {
+                evalScope[localName] = localValue;
+              }
+            }
+            for (const localName of moduleInfo.constInitializers.keys()) {
+              if (localName === excludeName) {
+                continue;
+              }
+              const localValue = resolveIdentifierInModule([localName], moduleId);
+              if (localValue !== null) {
+                evalScope[localName] = localValue;
+              }
+            }
+            for (const localName of moduleInfo.imports.keys()) {
+              const localValue = resolveIdentifierInModule([localName], moduleId);
+              if (localValue !== null) {
+                evalScope[localName] = localValue;
+              }
+            }
+            return evalScope;
+          };
+
           const initializer = moduleInfo.constInitializers.get(head);
           if (initializer !== undefined) {
             let value = parseStaticExpression(initializer, (nestedPath) => {
@@ -1604,35 +1646,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             });
 
             if (value === null) {
-              const evalScope: Record<string, unknown> = {
-                ...STATIC_EVAL_GLOBALS,
-              };
-              for (const localName of moduleInfo.functionDeclarations.keys()) {
-                if (localName === head) {
-                  continue;
-                }
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-              for (const localName of moduleInfo.constInitializers.keys()) {
-                if (localName === head) {
-                  continue;
-                }
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-              for (const localName of moduleInfo.imports.keys()) {
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-
-              value = evaluateExpression(initializer, evalScope);
+              value = evaluateExpression(initializer, buildEvalScope(head));
             }
 
             if (value !== null) {
@@ -1641,34 +1655,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           } else {
             const functionDeclaration = moduleInfo.functionDeclarations.get(head);
             if (functionDeclaration !== undefined) {
-              const evalScope: Record<string, unknown> = {
-                ...STATIC_EVAL_GLOBALS,
-              };
-              for (const localName of moduleInfo.functionDeclarations.keys()) {
-                if (localName === head) {
-                  continue;
-                }
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-              for (const localName of moduleInfo.constInitializers.keys()) {
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-              for (const localName of moduleInfo.imports.keys()) {
-                const localValue = resolveIdentifierInModule([localName], moduleId);
-                if (localValue !== null) {
-                  evalScope[localName] = localValue;
-                }
-              }
-
               const functionValue = evaluateFunctionDeclaration(
                 functionDeclaration,
-                evalScope,
+                buildEvalScope(head),
               );
               if (functionValue !== null) {
                 resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
@@ -1702,10 +1691,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                     }
                   } else {
                     const importedName = binding.kind === "default" ? "default" : binding.imported;
-                    const exportedLocalName =
-                      importedModuleInfo.exportedConsts.get(importedName) ?? importedName;
+                    const exportedLocalName = importedName === "default"
+                      ? null
+                      : (importedModuleInfo.exportedConsts.get(importedName) ?? importedName);
                     const importedValue = resolveIdentifierInModule(
-                      [exportedLocalName],
+                      exportedLocalName
+                        ? [exportedLocalName]
+                        : ["default"],
                       resolvedImportFile,
                     );
                     resolved = tail.length > 0
@@ -1713,6 +1705,24 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                       : importedValue;
                   }
                 }
+              }
+            }
+          }
+
+          if (resolved === null && head === "default" && moduleInfo.defaultExportExpression) {
+            const parsedDefault = parseStaticExpression(
+              moduleInfo.defaultExportExpression,
+              (nestedPath) => resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
+            );
+            if (parsedDefault !== null) {
+              resolved = tail.length > 0 ? readMemberPath(parsedDefault, tail) : parsedDefault;
+            } else {
+              const evaluatedDefault = evaluateExpression(
+                moduleInfo.defaultExportExpression,
+                buildEvalScope(),
+              );
+              if (evaluatedDefault !== null) {
+                resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
               }
             }
           }
@@ -1813,11 +1823,38 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         let allParsed = true;
 
         for (const assignment of decl.assignments) {
-          const value = parseStaticExpression(assignment.valueSource) ??
+          let value = parseStaticExpression(assignment.valueSource) ??
             parseStaticExpression(
               assignment.valueSource,
               (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
             );
+          if (value === null) {
+            const moduleInfo = getModuleInfo(normalizedId);
+            if (moduleInfo) {
+              const evalScope: Record<string, unknown> = {
+                ...STATIC_EVAL_GLOBALS,
+              };
+              for (const localName of moduleInfo.functionDeclarations.keys()) {
+                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              for (const localName of moduleInfo.constInitializers.keys()) {
+                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              for (const localName of moduleInfo.imports.keys()) {
+                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                if (localValue !== null) {
+                  evalScope[localName] = localValue;
+                }
+              }
+              value = evaluateExpression(assignment.valueSource, evalScope);
+            }
+          }
           if (value === null) {
             allParsed = false;
             break;
