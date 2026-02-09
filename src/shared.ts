@@ -207,11 +207,20 @@ function wrapInAtRules(rule: string, atRules: readonly string[]): string {
 }
 
 function isSupportedAtRule(key: string): boolean {
-  return key.startsWith("@");
+  return key.startsWith("@") || key.startsWith("!@");
 }
 
 function resolveAtRule(key: string, options?: CssSerializationOptions): string {
-  if (!key.startsWith("@")) {
+  if (!(key.startsWith("@") || key.startsWith("!@"))) {
+    return key;
+  }
+
+  const reverseAliasMatch = key.match(/^!@([A-Za-z0-9_$-]+)$/);
+  if (reverseAliasMatch) {
+    const reverseBreakpoint = options?.breakpoints?.[reverseAliasMatch[1]];
+    if (reverseBreakpoint) {
+      return `@media (width <= ${reverseBreakpoint})`;
+    }
     return key;
   }
 
@@ -257,6 +266,7 @@ function collectCssRules(
   options?: CssSerializationOptions,
 ): void {
   const base: PseudoStyleDeclaration = {};
+  const nested: Array<[string, NestedStyleDeclaration]> = [];
 
   for (const [name, value] of Object.entries(declaration)) {
     if (!isNestedStyleDeclaration(value)) {
@@ -264,16 +274,20 @@ function collectCssRules(
       continue;
     }
 
+    nested.push([name, value]);
+  }
+
+  if (Object.keys(base).length > 0) {
+    rules.push(wrapInAtRules(toCssRule(selector, base), atRules));
+  }
+
+  for (const [name, value] of nested) {
     if (isSupportedAtRule(name)) {
       collectCssRules(selector, value, [...atRules, resolveAtRule(name, options)], rules, options);
       continue;
     }
 
     collectCssRules(nestSelector(selector, name), value, atRules, rules, options);
-  }
-
-  if (Object.keys(base).length > 0) {
-    rules.push(wrapInAtRules(toCssRule(selector, base), atRules));
   }
 }
 

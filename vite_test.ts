@@ -121,6 +121,9 @@ Deno.test("toCssRules resolves breakpoint shorthand and ranges", () => {
       "@sm": {
         gap: "1rem",
       },
+      "!@sm": {
+        padding: "2rem",
+      },
       "@(xs,xl)": {
         gridTemplateColumns: "1fr 1fr",
       },
@@ -136,7 +139,28 @@ Deno.test("toCssRules resolves breakpoint shorthand and ranges", () => {
 
   assert(rules.includes(".test{display:grid}"));
   assert(rules.includes("@media (width >= 40rem){.test{gap:1rem}}"));
+  assert(rules.includes("@media (width <= 40rem){.test{padding:2rem}}"));
   assert(rules.includes("@media (30rem < width < 80rem){.test{grid-template-columns:1fr 1fr}}"));
+});
+
+Deno.test("toCssRules emits base declarations before breakpoint rules for override semantics", () => {
+  const rules = toCssRules(
+    "test",
+    {
+      textAlign: "left",
+      "@sm": {
+        textAlign: "justify",
+      },
+    },
+    {
+      breakpoints: {
+        sm: "25rem",
+      },
+    },
+  );
+
+  assertEquals(rules[0], ".test{text-align:left}");
+  assertEquals(rules[1], "@media (width >= 25rem){.test{text-align:justify}}");
 });
 
 Deno.test("toCssRules resolves numeric breakpoint aliases like 2xs/2xl", () => {
@@ -466,6 +490,9 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
       `      "@md": {\n` +
       `        gridTemplateColumns: "1fr 1fr",\n` +
       `      },\n` +
+      `      "!@md": {\n` +
+      `        gridTemplateColumns: "1fr",\n` +
+      `      },\n` +
       `    },\n` +
       `  },\n` +
       `});`;
@@ -477,6 +504,7 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
     assertMatch(css, /\.u-card-base\{background-color:#4f4f4f;color:black;border-radius:8px\}/);
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/);
     assertMatch(css, /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
+    assertMatch(css, /@media \(width <= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr\}\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

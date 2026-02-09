@@ -506,12 +506,16 @@ const styles = ct({
       "@md": {
         gridTemplateColumns: "1fr 1fr",
       },
+      "!@md": {
+        gridTemplateColumns: "1fr",
+      },
     },
   },
 });
 ```
 
 `"@md"` expands to `@media (width >= 48rem) { ... }`.
+`"!@md"` expands to `@media (width <= 48rem) { ... }`.
 
 Breakpoint values can be strings or numbers (numbers get a `px` suffix):
 
