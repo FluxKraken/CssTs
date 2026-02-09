@@ -490,6 +490,13 @@ export default {
 };
 ```
 
+`css.config.ts` supports the same static identifier resolution used for `ct(...)` extraction, including:
+
+- local `const` values
+- imported `const` values from relative files
+- imports resolved through Vite aliases (including SvelteKit `$lib/...`)
+- imports resolved through `tsconfig.json` `paths` aliases
+
 #### Global stylesheet imports
 
 Both `import "./file.css"` side-effect imports and the `imports: [...]` array add global stylesheet imports to the virtual CSS bundle as `@import` rules.

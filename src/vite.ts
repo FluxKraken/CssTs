@@ -761,26 +761,55 @@ function normalizeContainers(
 function toBrowserStylesheetPath(
   importPath: string,
   configPath: string,
-  projectRoot: string,
+  options: ImportResolverOptions,
 ): string | null {
-  if (/^(?:https?:)?\/\//.test(importPath) || importPath.startsWith("data:")) {
-    return importPath;
-  }
-  if (importPath.startsWith("/")) {
-    return importPath;
-  }
-  if (importPath.startsWith(".")) {
-    const resolved = getNodePath().resolve(getNodePath().dirname(configPath), importPath);
-    const relative = getNodePath().relative(projectRoot, resolved).split(getNodePath().sep).join("/");
+  const queryIndex = importPath.indexOf("?");
+  const bareImportPath = queryIndex === -1 ? importPath : importPath.slice(0, queryIndex);
+  const querySuffix = queryIndex === -1 ? "" : importPath.slice(queryIndex);
+
+  const toProjectPath = (resolvedFile: string): string | null => {
+    const relative = getNodePath().relative(options.projectRoot, resolvedFile).split(getNodePath().sep).join("/");
     if (relative.startsWith("..")) {
       return null;
     }
-    return `/${relative}`;
+    return `/${relative}${querySuffix}`;
+  };
+
+  if (/^(?:https?:)?\/\//.test(importPath) || importPath.startsWith("data:")) {
+    return importPath;
   }
+  if (bareImportPath.startsWith("/")) {
+    return importPath;
+  }
+
+  if (bareImportPath.startsWith(".")) {
+    const resolved = resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(configPath), bareImportPath));
+    if (resolved) {
+      return toProjectPath(resolved);
+    }
+
+    const fallback = getNodePath().resolve(getNodePath().dirname(configPath), bareImportPath);
+    return toProjectPath(fallback);
+  }
+
+  const resolved = resolveImportToFile(configPath, bareImportPath, options);
+  if (resolved) {
+    const projectPath = toProjectPath(resolved);
+    if (projectPath) {
+      return projectPath;
+    }
+  }
+
   return importPath;
 }
 
-function loadCssConfig(projectRoot: string): LoadedCssConfig {
+function loadCssConfig(
+  projectRoot: string,
+  resolverOptions: {
+    viteAliases: readonly ViteAliasEntry[];
+    tsconfigResolver: TsconfigPathResolver | null;
+  },
+): LoadedCssConfig {
   const configPath = findCssConfigPath(projectRoot);
   if (!configPath) {
     return {
@@ -801,56 +830,204 @@ function loadCssConfig(projectRoot: string): LoadedCssConfig {
     sideEffectImports.push(match[1]);
   }
 
-  const moduleInfo = parseModuleStaticInfo(source);
+  const moduleInfoCache = new Map<string, ModuleStaticInfo>();
   const constValueCache = new Map<string, unknown | null>();
   const resolving = new Set<string>();
 
-  const resolveConstPath = (path: readonly string[]): unknown | undefined => {
-    if (path.length === 0) return undefined;
-    const [head, ...tail] = path;
+  function getModuleCode(moduleId: string): string | null {
+    if (moduleId === configPath) {
+      return source;
+    }
+    try {
+      return getNodeFs().readFileSync(moduleId, "utf8");
+    } catch {
+      return null;
+    }
+  }
 
-    const cacheKey = path.join(".");
+  function getModuleInfo(moduleId: string): ModuleStaticInfo | null {
+    const cached = moduleInfoCache.get(moduleId);
+    if (cached) {
+      return cached;
+    }
+    const moduleCode = getModuleCode(moduleId);
+    if (!moduleCode) {
+      return null;
+    }
+    const parsed = parseModuleStaticInfo(moduleCode);
+    moduleInfoCache.set(moduleId, parsed);
+    return parsed;
+  }
+
+  function buildEvalScope(
+    moduleInfo: ModuleStaticInfo,
+    moduleId: string,
+    excludeName?: string,
+  ): Record<string, unknown> {
+    const evalScope: Record<string, unknown> = {
+      ...STATIC_EVAL_GLOBALS,
+    };
+
+    for (const localName of moduleInfo.functionDeclarations.keys()) {
+      if (localName === excludeName) {
+        continue;
+      }
+      const localValue = resolveIdentifierInModule([localName], moduleId);
+      if (localValue !== null) {
+        evalScope[localName] = localValue;
+      }
+    }
+
+    for (const localName of moduleInfo.constInitializers.keys()) {
+      if (localName === excludeName) {
+        continue;
+      }
+      const localValue = resolveIdentifierInModule([localName], moduleId);
+      if (localValue !== null) {
+        evalScope[localName] = localValue;
+      }
+    }
+
+    for (const localName of moduleInfo.imports.keys()) {
+      const localValue = resolveIdentifierInModule([localName], moduleId);
+      if (localValue !== null) {
+        evalScope[localName] = localValue;
+      }
+    }
+
+    return evalScope;
+  }
+
+  function resolveIdentifierInModule(identifierPath: readonly string[], moduleId: string): unknown | null {
+    if (identifierPath.length === 0) {
+      return null;
+    }
+
+    const cacheKey = `${moduleId}::${identifierPath.join(".")}`;
     if (constValueCache.has(cacheKey)) {
-      const cached = constValueCache.get(cacheKey);
-      return cached === null ? undefined : cached;
+      return constValueCache.get(cacheKey) ?? null;
     }
     if (resolving.has(cacheKey)) {
-      return undefined;
+      return null;
     }
 
     resolving.add(cacheKey);
-    const initializer = moduleInfo.constInitializers.get(head);
-    if (initializer === undefined) {
-      resolving.delete(cacheKey);
-      constValueCache.set(cacheKey, null);
-      return undefined;
+    let resolved: unknown | null = null;
+    const [head, ...tail] = identifierPath;
+
+    const moduleInfo = getModuleInfo(moduleId);
+    if (moduleInfo) {
+      const initializer = moduleInfo.constInitializers.get(head);
+      if (initializer !== undefined) {
+        let value = parseStaticExpression(initializer, (nestedPath) => {
+          const nested = resolveIdentifierInModule(nestedPath, moduleId);
+          return nested === null ? undefined : nested;
+        });
+
+        if (value === null) {
+          value = evaluateExpression(initializer, buildEvalScope(moduleInfo, moduleId, head));
+        }
+
+        if (value !== null) {
+          resolved = tail.length > 0 ? readMemberPath(value, tail) : value;
+        }
+      } else {
+        const functionDeclaration = moduleInfo.functionDeclarations.get(head);
+        if (functionDeclaration !== undefined) {
+          const functionValue = evaluateFunctionDeclaration(
+            functionDeclaration,
+            buildEvalScope(moduleInfo, moduleId, head),
+          );
+          if (functionValue !== null) {
+            resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
+          }
+        }
+      }
+
+      if (resolved === null) {
+        const binding = moduleInfo.imports.get(head);
+        if (binding) {
+          const resolvedImportFile = resolveImportToFile(moduleId, binding.source, {
+            projectRoot,
+            viteAliases: resolverOptions.viteAliases,
+            tsconfigResolver: resolverOptions.tsconfigResolver,
+          });
+          if (resolvedImportFile) {
+            const importedModuleInfo = getModuleInfo(resolvedImportFile);
+            if (importedModuleInfo) {
+              if (binding.kind === "namespace") {
+                if (tail.length > 0) {
+                  const [namespaceExport, ...namespaceTail] = tail;
+                  const exportedLocalName =
+                    importedModuleInfo.exportedConsts.get(namespaceExport) ?? namespaceExport;
+                  const namespaceValue = resolveIdentifierInModule(
+                    [exportedLocalName],
+                    resolvedImportFile,
+                  );
+                  resolved = namespaceTail.length > 0
+                    ? readMemberPath(namespaceValue, namespaceTail)
+                    : namespaceValue;
+                }
+              } else {
+                const importedName = binding.kind === "default" ? "default" : binding.imported;
+                const exportedLocalName = importedName === "default"
+                  ? null
+                  : (importedModuleInfo.exportedConsts.get(importedName) ?? importedName);
+                const importedValue = resolveIdentifierInModule(
+                  exportedLocalName
+                    ? [exportedLocalName]
+                    : ["default"],
+                  resolvedImportFile,
+                );
+                resolved = tail.length > 0
+                  ? readMemberPath(importedValue, tail)
+                  : importedValue;
+              }
+            }
+          }
+        }
+      }
+
+      if (resolved === null && head === "default" && moduleInfo.defaultExportExpression) {
+        const parsedDefault = parseStaticExpression(
+          moduleInfo.defaultExportExpression,
+          (nestedPath) => resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
+        );
+        if (parsedDefault !== null) {
+          resolved = tail.length > 0 ? readMemberPath(parsedDefault, tail) : parsedDefault;
+        } else {
+          const evaluatedDefault = evaluateExpression(
+            moduleInfo.defaultExportExpression,
+            buildEvalScope(moduleInfo, moduleId),
+          );
+          if (evaluatedDefault !== null) {
+            resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
+          }
+        }
+      }
     }
 
-    const value = parseStaticExpression(initializer, resolveConstPath);
-    const resolvedValue = value === null ? null : (tail.length > 0 ? readMemberPath(value, tail) : value);
     resolving.delete(cacheKey);
-    constValueCache.set(cacheKey, resolvedValue);
-    return resolvedValue === null ? undefined : resolvedValue;
-  };
+    constValueCache.set(cacheKey, resolved);
+    return resolved;
+  }
 
-  const defaultExpr = extractDefaultExportExpression(source);
+  const configModuleInfo = getModuleInfo(configPath);
+  const defaultExpr = configModuleInfo?.defaultExportExpression ?? extractDefaultExportExpression(source);
   let configObject: Record<string, unknown> = {};
 
   if (defaultExpr) {
-    const parsed = parseStaticExpression(defaultExpr, resolveConstPath);
+    const parsed = parseStaticExpression(
+      defaultExpr,
+      (identifierPath) => resolveIdentifierInModule(identifierPath, configPath) ?? undefined,
+    );
     if (isRecord(parsed)) {
       configObject = parsed;
-    } else {
+    } else if (configModuleInfo) {
       const evalScope: Record<string, unknown> = {
-        ...STATIC_EVAL_GLOBALS,
+        ...buildEvalScope(configModuleInfo, configPath),
         defineCssConfig: (input: unknown) => input,
       };
-      for (const name of moduleInfo.constInitializers.keys()) {
-        const value = resolveConstPath([name]);
-        if (value !== undefined) {
-          evalScope[name] = value;
-        }
-      }
       const evaluated = evaluateExpression(defaultExpr, evalScope);
       if (isRecord(evaluated)) {
         configObject = evaluated;
@@ -863,7 +1040,11 @@ function loadCssConfig(projectRoot: string): LoadedCssConfig {
     : [];
 
   const allImports = Array.from(new Set([...sideEffectImports, ...importsFromObject]))
-    .map((importPath) => toBrowserStylesheetPath(importPath, configPath, projectRoot))
+    .map((importPath) => toBrowserStylesheetPath(importPath, configPath, {
+      projectRoot,
+      viteAliases: resolverOptions.viteAliases,
+      tsconfigResolver: resolverOptions.tsconfigResolver,
+    }))
     .filter((entry): entry is string => Boolean(entry));
 
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
@@ -1442,7 +1623,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   function initializeResolvers(root: string): void {
     projectRoot = root;
     tsconfigResolver = createTsconfigResolver(root);
-    cssConfig = loadCssConfig(root);
+    cssConfig = loadCssConfig(root, { viteAliases, tsconfigResolver });
     resolverInitialized = true;
   }
 
@@ -1986,7 +2167,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
       if (cssConfig.path && normalizedId === cleanId(cssConfig.path)) {
-        cssConfig = loadCssConfig(projectRoot);
+        cssConfig = loadCssConfig(projectRoot, { viteAliases, tsconfigResolver });
         invalidateVirtualModule();
       }
       if (moduleCss.has(normalizedId)) {

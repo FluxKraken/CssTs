@@ -1,0 +1,10 @@
+[breakpoints]
+sm = "20rem"
+full = "70rem"
+
+[colors]
+primary = "#00AAFF"
+light = "white"
+dark = "black"
+
+[[utility]]

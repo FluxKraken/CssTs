@@ -600,6 +600,113 @@ Deno.test("loads css.config.ts containers and supports @set/@container shorthand
   }
 });
 
+Deno.test("loads css.config.ts breakpoints from imported constants", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const stylesDir = `${root}/src/lib/styles`;
+    Deno.mkdirSync(stylesDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${stylesDir}/tokens.ts`,
+      `export const pageWidth = "60rem";\n`,
+    );
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `import { pageWidth } from "./src/lib/styles/tokens";\n` +
+        `export default {\n` +
+        `  breakpoints: { sm: pageWidth },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      textAlign: "left",\n` +
+      `      "@sm": {\n` +
+      `        textAlign: "justify",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /@media \(width >= 60rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alias", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const themeDir = `${root}/src/theme`;
+    Deno.mkdirSync(themeDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${themeDir}/layout.ts`,
+      `export const pageWidth = "72rem";\n`,
+    );
+    Deno.writeTextFileSync(`${themeDir}/global.css`, "/* themed global */\n");
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `import "@theme/global.css";\n` +
+        `import { pageWidth } from "@theme/layout";\n` +
+        `export default {\n` +
+        `  breakpoints: { sm: pageWidth },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({
+      root,
+      resolve: {
+        alias: [
+          {
+            find: "@theme",
+            replacement: `${root}/src/theme`,
+          },
+        ],
+      },
+    });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      textAlign: "left",\n` +
+      `      "@sm": {\n` +
+      `        textAlign: "justify",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/theme/global.css";'));
+    assertMatch(css, /@media \(width >= 72rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("resolves imported style objects and precompiles them", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
