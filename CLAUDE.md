@@ -185,7 +185,6 @@ The Vite plugin maintains a cache (`moduleInfoCache`) of parsed module metadata:
 ### Type Safety
 - Runtime types are strict (`StyleDeclarationInput`, `CtConfig` generic overloads)
 - `CtBuilder` type combines callable signature, config property setters, and accessor intersection
-- Variant system enforces variant keys match base stylesheet keys
 - Parser maintains type information through recursive descent
 
 ## Important Implementation Notes

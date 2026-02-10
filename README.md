@@ -350,8 +350,6 @@ styles().label(); // applies defaults.size when available
 
 Notes:
 - Variant entries are partial overrides; you can provide only the keys you need.
-- Variant keys must exist in the base style object.
-- If a key is variant-only, define it in base as an empty object (for example `label: {}`).
 
 ### Reusable style objects and declaration arrays
 

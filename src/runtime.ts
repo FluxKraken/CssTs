@@ -346,25 +346,6 @@ function normalizeVariantSheetInput<T extends StyleSheetInput>(
   return normalized;
 }
 
-function assertVariantKeys(
-  styles: StyleSheet,
-  variants: Record<string, Record<string, Partial<StyleSheet>>>,
-): void {
-  const styleKeys = new Set(Object.keys(styles));
-  for (const [group, groupVariants] of Object.entries(variants)) {
-    for (const [variantName, declarations] of Object.entries(groupVariants)) {
-      for (const classKey of Object.keys(declarations)) {
-        if (!styleKeys.has(classKey)) {
-          throw new Error(
-            `Unknown style key '${classKey}' in variant '${group}.${variantName}'. ` +
-              "Define it in the base style object (use an empty object if needed).",
-          );
-        }
-      }
-    }
-  }
-}
-
 function compileConfig<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
@@ -475,7 +456,6 @@ function compileConfig<
   }
 
   if (variants) {
-    assertVariantKeys(styles, variants);
     const compiledVariants = compiled?.variant;
 
     for (const [group, groupVariants] of Object.entries(variants)) {

@@ -400,6 +400,22 @@ Deno.test("parser accepts defaults variant selections", () => {
   assertEquals(parsed.defaults, { size: "md" });
 });
 
+Deno.test("parser accepts variant keys not present in base", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      myButton: {}
+    },
+    variant: {
+      size: {
+        sm: { label: { fontSize: "0.8rem" } }
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.variant?.size?.sm?.label.fontSize, "0.8rem");
+});
+
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -1369,6 +1385,21 @@ Deno.test("runtime applies defaults to variant selection and allows overrides", 
   assertEquals(withDefaults, styles().myButton({}));
   assertEquals(withDefaults, styles().myButton({ size: "md" }));
   assert(withDefaults !== styles().myButton({ size: "sm" }));
+});
+
+Deno.test("runtime accepts variant keys not present in base", () => {
+  const styles = ct({
+    base: {
+      myButton: { padding: "1rem" },
+    },
+    variant: {
+      size: {
+        sm: { label: { fontSize: "0.8rem" } },
+      },
+    },
+  } as any);
+
+  assertMatch(styles().myButton({ size: "sm" }), /^ct_[a-z0-9]+$/);
 });
 
 Deno.test("runtime works without a document global", () => {

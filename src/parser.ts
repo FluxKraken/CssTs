@@ -476,7 +476,7 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   return sheet;
 }
 
-function normalizeVariantSheet(value: unknown, baseKeys: Set<string>, options: ParseCtOptions): VariantSheet | null {
+function normalizeVariantSheet(value: unknown, options: ParseCtOptions): VariantSheet | null {
   if (!isPlainObject(value)) {
     return null;
   }
@@ -494,12 +494,6 @@ function normalizeVariantSheet(value: unknown, baseKeys: Set<string>, options: P
       const normalizedVariant = normalizeStyleSheet(variant, options);
       if (!normalizedVariant) {
         return null;
-      }
-
-      for (const classKey of Object.keys(normalizedVariant)) {
-        if (!baseKeys.has(classKey)) {
-          return null;
-        }
       }
 
       normalizedGroup[variantName] = normalizedVariant;
@@ -571,7 +565,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   if ("variant" in value) {
-    const normalized = normalizeVariantSheet(value.variant, new Set(Object.keys(base)), options);
+    const normalized = normalizeVariantSheet(value.variant, options);
     if (!normalized) {
       return null;
     }
