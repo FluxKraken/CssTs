@@ -80,6 +80,7 @@ type LoadedCssConfig = {
   imports: string[];
   breakpoints: Record<string, string>;
   containers: Record<string, { type?: string; rule: string }>;
+  include: string[];
   utilities: StyleSheet;
   utilityCss: string;
   runtimeOptions: {
@@ -758,6 +759,25 @@ function normalizeContainers(
   return normalized;
 }
 
+function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
+  const entries = typeof value === "string"
+    ? [value]
+    : Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === "string")
+      : [];
+
+  const normalized = entries
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) =>
+      getNodePath().normalize(
+        getNodePath().isAbsolute(entry) ? entry : getNodePath().resolve(projectRoot, entry),
+      )
+    );
+
+  return Array.from(new Set(normalized));
+}
+
 function toBrowserStylesheetPath(
   importPath: string,
   configPath: string,
@@ -817,6 +837,7 @@ function loadCssConfig(
       imports: [],
       breakpoints: {},
       containers: {},
+      include: [],
       utilities: {},
       utilityCss: "",
       runtimeOptions: {},
@@ -1049,6 +1070,7 @@ function loadCssConfig(
 
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
   const containers = normalizeContainers(configObject.containers);
+  const include = normalizeIncludePaths(configObject.include, projectRoot);
   const utilitiesParsed = isRecord(configObject.utilities)
     ? parseCtConfig({ base: configObject.utilities }, { containers })?.base ?? {}
     : {};
@@ -1075,6 +1097,7 @@ function loadCssConfig(
     imports: allImports,
     breakpoints,
     containers,
+    include,
     utilities: utilitiesParsed,
     utilityCss,
     runtimeOptions,
@@ -1594,9 +1617,72 @@ function resolveImportToFile(importerId: string, source: string, options: Import
   return null;
 }
 
+function moduleIdToFilePath(id: string, projectRoot: string): string | null {
+  if (id.startsWith("\0")) {
+    return null;
+  }
+
+  let normalizedId = id;
+  if (normalizedId.startsWith("file://")) {
+    try {
+      const url = new URL(normalizedId);
+      if (url.protocol !== "file:") {
+        return null;
+      }
+      normalizedId = decodeURIComponent(url.pathname);
+      if (/^\/[A-Za-z]:\//.test(normalizedId)) {
+        normalizedId = normalizedId.slice(1);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (getNodePath().isAbsolute(normalizedId)) {
+    const absolute = getNodePath().normalize(normalizedId);
+    if (getNodeFs().existsSync(absolute)) {
+      return absolute;
+    }
+
+    const rootRelative = getNodePath().resolve(projectRoot, `.${normalizedId}`);
+    if (getNodeFs().existsSync(rootRelative)) {
+      return getNodePath().normalize(rootRelative);
+    }
+
+    return absolute;
+  }
+
+  return getNodePath().normalize(getNodePath().resolve(projectRoot, normalizedId));
+}
+
+function isPathWithinScope(filePath: string, scopePath: string): boolean {
+  const relative = getNodePath().relative(scopePath, filePath);
+  return relative === "" || (!relative.startsWith("..") && !getNodePath().isAbsolute(relative));
+}
+
+function isInDefaultTransformScope(id: string, projectRoot: string, includePaths: readonly string[]): boolean {
+  const modulePath = moduleIdToFilePath(id, projectRoot);
+  if (!modulePath) {
+    return false;
+  }
+
+  const srcPath = getNodePath().resolve(projectRoot, "src");
+  if (isPathWithinScope(modulePath, srcPath)) {
+    return true;
+  }
+
+  for (const includePath of includePaths) {
+    if (isPathWithinScope(modulePath, includePath)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Options for {@link cssTsPlugin}. */
 export interface CssTsPluginOptions {
-  /** Limit transforms to ids that match this regex. */
+  /** Override the default scope (`<root>/src/**`) with a custom id matcher. */
   include?: RegExp;
 }
 
@@ -1614,6 +1700,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     imports: [],
     breakpoints: {},
     containers: {},
+    include: [],
     utilities: {},
     utilityCss: "",
     runtimeOptions: {},
@@ -1695,6 +1782,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return null;
       }
       if (options.include && !options.include.test(normalizedId)) {
+        return null;
+      }
+      if (!options.include && !isInDefaultTransformScope(normalizedId, projectRoot, cssConfig.include)) {
         return null;
       }
       const isSvelte = normalizedId.endsWith(".svelte");

@@ -67,6 +67,74 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
   );
 });
 
+Deno.test("limits transforms to src by default", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.mkdirSync(`${root}/node_modules/pkg`, { recursive: true });
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    card: { display: "grid" },\n` +
+      `  },\n` +
+      `});`;
+
+    const transformedSrc = transform(moduleCode, `${root}/src/app.ts`);
+    assert(transformedSrc && typeof transformedSrc === "object" && "code" in transformedSrc);
+
+    const transformedNodeModules = transform(moduleCode, `${root}/node_modules/pkg/app.ts`);
+    assertEquals(transformedNodeModules, null);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("extends transform scope with css.config.ts include paths", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.mkdirSync(`${root}/packages/ui`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  include: ["./packages/ui"],\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    card: { display: "grid" },\n` +
+      `  },\n` +
+      `});`;
+
+    const transformedIncluded = transform(moduleCode, `${root}/packages/ui/button.ts`);
+    assert(transformedIncluded && typeof transformedIncluded === "object" && "code" in transformedIncluded);
+
+    const transformedUnincluded = transform(moduleCode, `${root}/packages/other/button.ts`);
+    assertEquals(transformedUnincluded, null);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("cv() formats css variable references", () => {
   assertEquals(toCssDeclaration("backgroundColor", cv("--background")), "background-color:var(--background)");
   assertEquals(

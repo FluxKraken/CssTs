@@ -34,6 +34,18 @@ export default defineConfig({
 });
 ```
 
+By default, `ctVite()` only transforms modules inside `<project-root>/src/**`. This avoids transforming third-party code in `node_modules`.
+
+To include extra directories, add `include` paths in root `css.config.ts`:
+
+```ts
+export default {
+  include: ["./packages/ui"],
+};
+```
+
+If you need full control, pass `ctVite({ include: /.../ })` to override the default scope matcher.
+
 ## SvelteKit setup workflow (Python + uv)
 
 This repo includes a local setup CLI built with Python (`click` + `rich`).
@@ -467,6 +479,7 @@ Create a config file at project root to define project-wide imports, breakpoints
 import "./src/global.css";
 
 export default {
+  include: ["./packages/ui"],
   imports: ["./src/theme.css"],
   breakpoints: {
     sm: "40rem",
@@ -496,6 +509,17 @@ export default {
 - imported `const` values from relative files
 - imports resolved through Vite aliases (including SvelteKit `$lib/...`)
 - imports resolved through `tsconfig.json` `paths` aliases
+
+#### Transform include paths
+
+By default, extraction only runs for files under `<project-root>/src/**`.
+Use `include` to add additional directories:
+
+```ts
+export default {
+  include: ["./packages/ui", "./shared/styles"],
+};
+```
 
 #### Global stylesheet imports
 
