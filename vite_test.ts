@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch, assertThrows } from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
@@ -664,6 +664,226 @@ Deno.test("extracts @import from svelte ct() into virtual global stylesheet", ()
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/lib/styles/reset.css";'));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolution=static throws when ct() cannot be statically resolved", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "static",\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      width: window.innerWidth,\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+
+    assertThrows(
+      () => transform(moduleCode, `${root}/src/app.ts`),
+      Error,
+      "resolution=\"static\" could not statically resolve ct(...)",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolution=dynamic disables static extraction", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "dynamic",\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      display: "grid",\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+
+    const transformed = transform(moduleCode, `${root}/src/app.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    const code = transformed.code as string;
+    assert(code.includes("undefined, {\"resolution\":\"dynamic\"}"));
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(!/\.ct_[a-z0-9]+/.test(css));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolution modes are enforced in dev server mode", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      width: window.innerWidth,\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "static",\n` +
+        `};\n`,
+    );
+
+    const staticPlugin = cssTsPlugin();
+    const staticConfigResolved = asHook(staticPlugin.configResolved);
+    const staticConfigureServer = asHook(staticPlugin.configureServer);
+    const staticTransform = asHook(staticPlugin.transform);
+
+    staticConfigResolved({ root, resolve: { alias: [] } });
+    staticConfigureServer({
+      moduleGraph: {
+        getModuleById: () => null,
+        invalidateModule: () => undefined,
+      },
+    });
+    assertThrows(
+      () => staticTransform(moduleCode, `${root}/src/dev-static.ts`),
+      Error,
+      "resolution=\"static\" could not statically resolve ct(...)",
+    );
+
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "dynamic",\n` +
+        `};\n`,
+    );
+
+    const dynamicPlugin = cssTsPlugin();
+    const dynamicConfigResolved = asHook(dynamicPlugin.configResolved);
+    const dynamicConfigureServer = asHook(dynamicPlugin.configureServer);
+    const dynamicTransform = asHook(dynamicPlugin.transform);
+    const dynamicLoad = asHook(dynamicPlugin.load);
+
+    dynamicConfigResolved({ root, resolve: { alias: [] } });
+    dynamicConfigureServer({
+      moduleGraph: {
+        getModuleById: () => null,
+        invalidateModule: () => undefined,
+      },
+    });
+    const transformed = dynamicTransform(moduleCode, `${root}/src/dev-dynamic.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert((transformed.code as string).includes("undefined, {\"resolution\":\"dynamic\"}"));
+
+    const css = dynamicLoad(VIRTUAL_ID) as string;
+    assert(!/\.ct_[a-z0-9]+/.test(css));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("debug.logStatic only logs in dev server mode", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  debug: {\n` +
+        `    logStatic: true,\n` +
+        `  },\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({ base: { card: { display: "grid" } } });`;
+
+    const originalConsoleLog = console.log;
+    const devLogs: string[] = [];
+    const buildLogs: string[] = [];
+
+    try {
+      console.log = (...args: unknown[]) => {
+        devLogs.push(args.map((value) => String(value)).join(" "));
+      };
+
+      const devPlugin = cssTsPlugin();
+      const devConfigResolved = asHook(devPlugin.configResolved);
+      const devConfigureServer = asHook(devPlugin.configureServer);
+      const devTransform = asHook(devPlugin.transform);
+
+      devConfigResolved({ root, resolve: { alias: [] } });
+      devConfigureServer({
+        moduleGraph: {
+          getModuleById: () => null,
+          invalidateModule: () => undefined,
+        },
+      });
+      const transformed = devTransform(moduleCode, `${root}/src/dev.ts`);
+      assert(transformed && typeof transformed === "object" && "code" in transformed);
+      assert((transformed.code as string).includes("\"debug\":{\"enabled\":true,\"logDynamic\":false,\"logStatic\":true}"));
+    } finally {
+      console.log = originalConsoleLog;
+    }
+
+    try {
+      console.log = (...args: unknown[]) => {
+        buildLogs.push(args.map((value) => String(value)).join(" "));
+      };
+
+      const buildPlugin = cssTsPlugin();
+      const buildConfigResolved = asHook(buildPlugin.configResolved);
+      const buildTransform = asHook(buildPlugin.transform);
+
+      buildConfigResolved({ root, resolve: { alias: [] } });
+      const transformed = buildTransform(moduleCode, `${root}/src/build.ts`);
+      assert(transformed && typeof transformed === "object" && "code" in transformed);
+      assert(!(transformed.code as string).includes("\"debug\":"));
+    } finally {
+      console.log = originalConsoleLog;
+    }
+
+    assert(devLogs.some((entry) => entry.includes("[css-ts][static]")));
+    assertEquals(buildLogs.length, 0);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

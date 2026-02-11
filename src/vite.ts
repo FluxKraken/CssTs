@@ -78,6 +78,11 @@ type ImportResolverOptions = {
 type LoadedCssConfig = {
   path: string | null;
   imports: string[];
+  resolution: "static" | "dynamic" | "hybrid";
+  debug: {
+    logDynamic: boolean;
+    logStatic: boolean;
+  };
   breakpoints: Record<string, string>;
   containers: Record<string, { type?: string; rule: string }>;
   include: string[];
@@ -87,6 +92,12 @@ type LoadedCssConfig = {
     breakpoints?: Record<string, string>;
     containers?: Record<string, { type?: string; rule: string }>;
     utilities?: StyleSheet;
+    resolution?: "static" | "dynamic" | "hybrid";
+    debug?: {
+      enabled?: boolean;
+      logDynamic?: boolean;
+      logStatic?: boolean;
+    };
   };
 };
 
@@ -757,6 +768,27 @@ function normalizeContainers(
   return normalized;
 }
 
+function normalizeResolution(value: unknown): "static" | "dynamic" | "hybrid" {
+  if (value === "static" || value === "dynamic" || value === "hybrid") {
+    return value;
+  }
+  return "hybrid";
+}
+
+function normalizeDebugOptions(value: unknown): { logDynamic: boolean; logStatic: boolean } {
+  if (!isRecord(value)) {
+    return {
+      logDynamic: false,
+      logStatic: false,
+    };
+  }
+
+  return {
+    logDynamic: value.logDynamic === true,
+    logStatic: value.logStatic === true,
+  };
+}
+
 function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
   const entries = typeof value === "string"
     ? [value]
@@ -833,6 +865,11 @@ function loadCssConfig(
     return {
       path: null,
       imports: [],
+      resolution: "hybrid",
+      debug: {
+        logDynamic: false,
+        logStatic: false,
+      },
       breakpoints: {},
       containers: {},
       include: [],
@@ -1057,6 +1094,8 @@ function loadCssConfig(
   const importsFromObject = Array.isArray(configObject.imports)
     ? configObject.imports.filter((entry): entry is string => typeof entry === "string")
     : [];
+  const resolution = normalizeResolution(configObject.resolution);
+  const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
   const containers = normalizeContainers(configObject.containers);
 
@@ -1082,7 +1121,7 @@ function loadCssConfig(
     .flatMap(([name, declaration]) =>
       toCssRules(`u-${camelToKebab(name)}`, declaration, { breakpoints, containers })
     );
-  const utilityCss = utilityRules.join("\n");
+  const utilityCss = resolution === "dynamic" ? "" : utilityRules.join("\n");
 
   const runtimeOptions: LoadedCssConfig["runtimeOptions"] = {};
   if (Object.keys(breakpoints).length > 0) {
@@ -1094,10 +1133,13 @@ function loadCssConfig(
   if (Object.keys(utilitiesParsed).length > 0) {
     runtimeOptions.utilities = utilitiesParsed;
   }
+  runtimeOptions.resolution = resolution;
 
   return {
     path: configPath,
     imports: allImports,
+    resolution,
+    debug,
     breakpoints,
     containers,
     include,
@@ -1702,6 +1744,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   let cssConfig: LoadedCssConfig = {
     path: null,
     imports: [],
+    resolution: "hybrid",
+    debug: {
+      logDynamic: false,
+      logStatic: false,
+    },
     breakpoints: {},
     containers: {},
     include: [],
@@ -1829,9 +1876,51 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const replacements: Array<{ start: number; end: number; text: string }> = [];
       const importRules = new Set<string>();
       const rules = new Set<string>();
+      const resolution = cssConfig.resolution;
+      const runtimeOptionsForRuntime: LoadedCssConfig["runtimeOptions"] = {
+        ...cssConfig.runtimeOptions,
+      };
+      if (server && (cssConfig.debug.logDynamic || cssConfig.debug.logStatic)) {
+        runtimeOptionsForRuntime.debug = {
+          enabled: true,
+          logDynamic: cssConfig.debug.logDynamic,
+          logStatic: cssConfig.debug.logStatic,
+        };
+      }
+      const runtimeOptionsLiteral = JSON.stringify(runtimeOptionsForRuntime);
+      const shouldLogStatic = Boolean(server && cssConfig.debug.logStatic);
       const moduleInfoCache = new Map<string, ModuleStaticInfo>();
       const constValueCache = new Map<string, unknown | null>();
       const resolving = new Set<string>();
+
+      function lineAt(index: number): number {
+        let line = 1;
+        for (let i = 0; i < index; i += 1) {
+          if (nextCode[i] === "\n") {
+            line += 1;
+          }
+        }
+        return line;
+      }
+
+      function staticResolutionError(message: string, index: number): Error {
+        return new Error(`[css-ts] ${message} (${normalizedId}:${lineAt(index)})`);
+      }
+
+      function logStatic(message: string): void {
+        if (!shouldLogStatic) {
+          return;
+        }
+        console.log(`[css-ts][static] ${normalizedId} ${message}`);
+      }
+
+      function withRuntimeOptionsInNewCtDeclaration(declarationSource: string): string {
+        const replaced = declarationSource.replace(
+          /new\s+ct\s*\(\s*\)/,
+          `new ct(undefined, undefined, ${runtimeOptionsLiteral})`,
+        );
+        return replaced;
+      }
 
       function readMemberPath(value: unknown, members: readonly string[]): unknown | null {
         let current: unknown = value;
@@ -2019,6 +2108,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const call of calls) {
+        if (resolution === "dynamic") {
+          replacements.push({
+            start: call.start,
+            end: call.end,
+            text: `ct(${call.arg}, undefined, ${runtimeOptionsLiteral})`,
+          });
+          continue;
+        }
+
         const parsed = parseCtCallArguments(call.arg, {
           utilities: cssConfig.utilities,
           containers: cssConfig.containers,
@@ -2032,6 +2130,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             },
           );
         if (!parsed) {
+          if (resolution === "static") {
+            throw staticResolutionError(
+              "resolution=\"static\" could not statically resolve ct(...)",
+              call.start,
+            );
+          }
+          replacements.push({
+            start: call.start,
+            end: call.end,
+            text: `ct(${call.arg}, undefined, ${runtimeOptionsLiteral})`,
+          });
           continue;
         }
 
@@ -2043,6 +2152,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           });
           if (browserPath) {
             importRules.add(browserPath);
+            logStatic(`import -> ${browserPath}`);
           }
         }
 
@@ -2063,6 +2173,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             rules.add(rule);
           }
           compiledConfig.global = true;
+          for (const selector of Object.keys(parsed.global)) {
+            logStatic(`global.${selector}`);
+          }
         }
 
         for (const [key, declaration] of Object.entries(parsed.base)) {
@@ -2078,6 +2191,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           }
         }
         compiledConfig.base = classMap;
+        for (const [key, className] of Object.entries(classMap)) {
+          logStatic(`base.${key} -> .${className}`);
+        }
 
         if (parsed.variant) {
           for (const [group, variants] of Object.entries(parsed.variant)) {
@@ -2099,6 +2215,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ) {
                   rules.add(rule);
                 }
+                logStatic(`variant.${group}.${variantName}.${key} -> .${className}`);
               }
               groupMap[variantName] = variantMap;
             }
@@ -2107,13 +2224,28 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.variant = variantClassMap;
         }
 
-        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)}, ${JSON.stringify(cssConfig.runtimeOptions)})`;
+        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
       }
 
       for (const decl of newCtDecls) {
+        const declarationSource = nextCode.slice(decl.start, decl.end);
+        const runtimeDeclaration = withRuntimeOptionsInNewCtDeclaration(declarationSource);
+
+        if (resolution === "dynamic") {
+          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
+          continue;
+        }
+
         const addContainerMatcher = new RegExp(`\\b${decl.varName}\\.addContainer\\s*\\(`);
         if (addContainerMatcher.test(nextCode)) {
+          if (resolution === "static") {
+            throw staticResolutionError(
+              `resolution="static" cannot statically resolve ${decl.varName}.addContainer(...)`,
+              decl.start,
+            );
+          }
+          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
           continue;
         }
 
@@ -2163,6 +2295,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         if (!allParsed) {
+          if (resolution === "static") {
+            throw staticResolutionError(
+              `resolution="static" could not statically resolve assignments for ${decl.varName}`,
+              decl.start,
+            );
+          }
+          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
           continue;
         }
 
@@ -2171,6 +2310,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           containers: cssConfig.containers,
         });
         if (!parsed) {
+          if (resolution === "static") {
+            throw staticResolutionError(
+              `resolution="static" could not statically resolve config for ${decl.varName}`,
+              decl.start,
+            );
+          }
+          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
           continue;
         }
 
@@ -2182,6 +2328,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           });
           if (browserPath) {
             importRules.add(browserPath);
+            logStatic(`import -> ${browserPath}`);
           }
         }
 
@@ -2202,6 +2349,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             rules.add(rule);
           }
           compiledConfig.global = true;
+          for (const selector of Object.keys(parsed.global)) {
+            logStatic(`global.${selector}`);
+          }
         }
 
         for (const [key, declaration] of Object.entries(parsed.base)) {
@@ -2217,6 +2367,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           }
         }
         compiledConfig.base = classMap;
+        for (const [key, className] of Object.entries(classMap)) {
+          logStatic(`base.${key} -> .${className}`);
+        }
 
         if (parsed.variant) {
           for (const [group, variants] of Object.entries(parsed.variant)) {
@@ -2238,6 +2391,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ) {
                   rules.add(rule);
                 }
+                logStatic(`variant.${group}.${variantName}.${key} -> .${className}`);
               }
               groupMap[variantName] = variantMap;
             }
@@ -2250,7 +2404,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           .map(([key, raw]) => `${key}: ${raw}`)
           .join(", ");
         const ctCall =
-          `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)}, ${JSON.stringify(cssConfig.runtimeOptions)})`;
+          `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
         replacements.push({ start: decl.start, end: decl.end, text: `const ${decl.varName} = ${ctCall}` });
 
         for (const assignment of decl.assignments) {

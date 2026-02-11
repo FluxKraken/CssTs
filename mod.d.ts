@@ -25,6 +25,12 @@ type CtRuntimeOptions = {
   breakpoints?: Record<string, string>;
   containers?: Record<string, { type?: string; rule: string }>;
   utilities?: StyleSheetInput;
+  resolution?: "static" | "dynamic" | "hybrid";
+  debug?: {
+    enabled?: boolean;
+    logDynamic?: boolean;
+    logStatic?: boolean;
+  };
 };
 type CompiledConfig<T extends StyleSheetInput> = {
   imports?: true;

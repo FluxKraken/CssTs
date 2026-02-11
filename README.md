@@ -494,6 +494,11 @@ import "./src/global.css";
 export default {
   include: ["./packages/ui"],
   imports: ["./src/theme.css"],
+  resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default)
+  debug: {
+    logDynamic: false, // dev server only
+    logStatic: false,  // dev server only
+  },
   breakpoints: {
     sm: "40rem",
     md: "48rem",
@@ -512,6 +517,34 @@ export default {
       backgroundColor: "#4f4f4f",
       color: "black",
     },
+  },
+};
+```
+
+#### Resolution mode
+
+Use `resolution` to control how `ct(...)` is resolved:
+
+- `"hybrid"` (default): statically extract what can be resolved at build-time, fall back to runtime for the rest.
+- `"static"`: require static extraction. If a `ct(...)` block cannot be fully resolved at build-time, the Vite transform throws.
+- `"dynamic"`: disable static extraction for `ct(...)`; styles are applied at runtime.
+
+```ts
+export default {
+  resolution: "static",
+};
+```
+
+#### Dev debug logs
+
+Use `debug.logStatic` and `debug.logDynamic` to inspect what is static vs dynamic.
+These logs only run in the Vite dev server (`vite dev`), not in build/production output.
+
+```ts
+export default {
+  debug: {
+    logStatic: true,
+    logDynamic: true,
   },
 };
 ```

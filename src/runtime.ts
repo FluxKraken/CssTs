@@ -53,6 +53,17 @@ type CompiledConfig<T extends StyleSheetInput> = {
 type CtRuntimeOptions = CssSerializationOptions & {
   /** Utility declarations available for `@apply` references. */
   utilities?: StyleSheetInput;
+  /** Style resolution mode from `css.config.ts`. */
+  resolution?: "static" | "dynamic" | "hybrid";
+  /** Dev-only debug logging settings injected by the Vite plugin. */
+  debug?: {
+    /** Internal gate so debug logs only run in the Vite dev server. */
+    enabled?: boolean;
+    /** Log dynamically injected style rules/class names. */
+    logDynamic?: boolean;
+    /** Log statically resolved class names/rules. */
+    logStatic?: boolean;
+  };
 };
 /** Input for {@link CtBuilder.addContainer} to register a container preset at runtime. */
 type ContainerDefinitionInput = {
@@ -407,6 +418,18 @@ function compileConfig<
   compiled?: CompiledConfig<T>,
   runtimeOptions: CtRuntimeOptions = {},
 ): () => Accessor<T, V> {
+  const resolution = runtimeOptions.resolution ?? "hybrid";
+  const effectiveCompiled = resolution === "dynamic" ? undefined : compiled;
+  const debugEnabled = runtimeOptions.debug?.enabled === true;
+  const logDynamic = debugEnabled && runtimeOptions.debug?.logDynamic === true;
+  const logStatic = debugEnabled && runtimeOptions.debug?.logStatic === true;
+  const log = (mode: "dynamic" | "static", message: string): void => {
+    if ((mode === "dynamic" && !logDynamic) || (mode === "static" && !logStatic)) {
+      return;
+    }
+    console.log(`[css-ts][${mode}] ${message}`);
+  };
+
   const imports = new Set<string>();
   const utilities = runtimeOptions.utilities
     ? normalizeStyleSheetInput(runtimeOptions.utilities, {
@@ -428,30 +451,52 @@ function compileConfig<
   );
   const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
 
-  if (imports.size > 0 && !compiled?.imports) {
+  if (imports.size > 0 && !effectiveCompiled?.imports) {
+    if (resolution === "static") {
+      throw new Error("css-ts resolution=\"static\" requires @import rules to be statically extracted.");
+    }
     for (const importPath of imports) {
       injectImportRule(`@import "${importPath}";`);
+      log("dynamic", `@import "${importPath}"`);
+    }
+  } else if (imports.size > 0) {
+    for (const importPath of imports) {
+      log("static", `@import "${importPath}"`);
     }
   }
 
-  if (Object.keys(globalStyles).length > 0 && !compiled?.global) {
+  if (Object.keys(globalStyles).length > 0 && !effectiveCompiled?.global) {
+    if (resolution === "static") {
+      throw new Error("css-ts resolution=\"static\" requires global rules to be statically extracted.");
+    }
     for (const rule of toCssGlobalRules(globalStyles, cssOptions)) {
       injectRule(rule);
+      log("dynamic", `global rule injected: ${rule}`);
+    }
+  } else if (Object.keys(globalStyles).length > 0) {
+    for (const selector of Object.keys(globalStyles)) {
+      log("static", `global selector: ${selector}`);
     }
   }
 
   const accessors = {} as Accessor<T, V>;
   const variantClassMap: VariantClassMap<T> = {};
-  const compiledBase = compiled?.base;
+  const compiledBase = effectiveCompiled?.base;
 
   for (const [key, declaration] of Object.entries(styles) as [keyof T, StyleDeclaration][]) {
-    const className =
-      compiledBase?.[key] ?? createClassName(String(key), declaration, "runtime");
+    const compiledClassName = compiledBase?.[key];
+    if (resolution === "static" && !compiledClassName) {
+      throw new Error(`css-ts resolution="static" could not statically resolve base.${String(key)}.`);
+    }
+    const className = compiledClassName ?? createClassName(String(key), declaration, "runtime");
 
-    if (!compiledBase?.[key]) {
+    if (!compiledClassName) {
       for (const rule of toCssRules(className, declaration, cssOptions)) {
         injectRule(rule);
       }
+      log("dynamic", `base.${String(key)} -> .${className}`);
+    } else {
+      log("static", `base.${String(key)} -> .${className}`);
     }
 
     const resolveSelection = (selection?: VariantSelection<V>) =>
@@ -519,7 +564,7 @@ function compileConfig<
   }
 
   if (variants) {
-    const compiledVariants = compiled?.variant;
+    const compiledVariants = effectiveCompiled?.variant;
 
     for (const [group, groupVariants] of Object.entries(variants)) {
       const groupMap: Record<string, Partial<Record<keyof T, string>>> = {};
@@ -530,14 +575,23 @@ function compileConfig<
         const compiledVariant = compiledGroup?.[variantName];
 
         for (const [key, declaration] of Object.entries(declarations) as [keyof T, StyleDeclaration][]) {
+          const compiledClassName = compiledVariant?.[key];
+          if (resolution === "static" && !compiledClassName) {
+            throw new Error(
+              `css-ts resolution="static" could not statically resolve variant.${group}.${variantName}.${String(key)}.`,
+            );
+          }
           const className =
-            compiledVariant?.[key] ??
+            compiledClassName ??
             createClassName(`${group}:${variantName}:${String(key)}`, declaration, "runtime");
 
-          if (!compiledVariant?.[key]) {
+          if (!compiledClassName) {
             for (const rule of toCssRules(className, declaration, cssOptions)) {
               injectRule(rule);
             }
+            log("dynamic", `variant.${group}.${variantName}.${String(key)} -> .${className}`);
+          } else {
+            log("static", `variant.${group}.${variantName}.${String(key)} -> .${className}`);
           }
 
           variantMap[key] = className;
