@@ -107,6 +107,67 @@ Deno.test("injects virtual stylesheet import in astro files that only import ct 
   assert(code.includes('---\nimport "virtual:css-ts/styles.css";\nimport { styles } from "./styles.ts";'));
 });
 
+Deno.test("injects virtual stylesheet import and extracts css for new ct() usage in astro", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const source =
+    `---\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { card: { display: "grid", gap: "1rem" } };\n` +
+    `---\n\n` +
+    `<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, "/app/src/pages/new-ct.astro");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assertMatch(code, /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/);
+  assert(!code.includes("new ct()"));
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("injects plain virtual import when astro transform input is already JS-shaped", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source =
+    `import { createComponent as $$createComponent } from "astro/runtime/server/index.js";\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n`;
+
+  const transformed = transform(source, "/app/src/pages/js-shaped.astro");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.startsWith('import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }'));
+  assert(!code.startsWith("---\n"));
+});
+
+Deno.test("injects plain virtual import when JS-shaped astro input uses new ct()", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source =
+    `import { createComponent as $$createComponent } from "astro/runtime/server/index.js";\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { card: { display: "grid", gap: "1rem" } };\n`;
+
+  const transformed = transform(source, "/app/src/pages/js-shaped-new-ct.astro");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.startsWith('import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }'));
+  assert(!code.startsWith("---\n"));
+  assert(!code.includes("new ct()"));
+});
+
 Deno.test("limits transforms to src by default", () => {
   const root = Deno.makeTempDirSync();
 
@@ -741,6 +802,75 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
       () => transform(moduleCode, `${root}/src/app.ts`),
       Error,
       "resolution=\"static\" could not statically resolve ct(...)",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("astro defaults to static resolution when resolution is not explicitly configured", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/pages`, { recursive: true });
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `---\n` +
+      `import ct from "css-ts";\n` +
+      `const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      width: window.innerWidth,\n` +
+      `    },\n` +
+      `  },\n` +
+      `});\n` +
+      `---\n\n` +
+      `<main class={styles().pageWrapper()}></main>`;
+
+    assertThrows(
+      () => transform(moduleCode, `${root}/src/pages/index.astro`),
+      Error,
+      "resolution=\"static\" could not statically resolve ct(...)",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("astro defaults to static resolution for unresolved new ct() assignments", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/pages`, { recursive: true });
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `---\n` +
+      `import ct from "css-ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = {\n` +
+      `  pageWrapper: {\n` +
+      `    width: window.innerWidth,\n` +
+      `  },\n` +
+      `};\n` +
+      `---\n\n` +
+      `<main class={styles().pageWrapper()}></main>`;
+
+    assertThrows(
+      () => transform(moduleCode, `${root}/src/pages/new-ct.astro`),
+      Error,
+      "resolution=\"static\" could not statically resolve assignments for styles",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });

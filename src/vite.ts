@@ -79,6 +79,7 @@ type LoadedCssConfig = {
   path: string | null;
   imports: string[];
   resolution: "static" | "dynamic" | "hybrid";
+  hasExplicitResolution: boolean;
   debug: {
     logDynamic: boolean;
     logStatic: boolean;
@@ -346,6 +347,11 @@ function addVirtualImportToAstro(code: string): string {
       `import "${PUBLIC_VIRTUAL_ID}";\n` +
       code.slice(insertAt)
     );
+  }
+
+  const trimmed = code.trimStart();
+  if (/^(?:import|export|const|let|var|function|class)\b/.test(trimmed)) {
+    return addVirtualImport(code);
   }
 
   return `---\nimport "${PUBLIC_VIRTUAL_ID}";\n---\n${code}`;
@@ -884,6 +890,7 @@ function loadCssConfig(
       path: null,
       imports: [],
       resolution: "hybrid",
+      hasExplicitResolution: false,
       debug: {
         logDynamic: false,
         logStatic: false,
@@ -1112,6 +1119,7 @@ function loadCssConfig(
   const importsFromObject = Array.isArray(configObject.imports)
     ? configObject.imports.filter((entry): entry is string => typeof entry === "string")
     : [];
+  const hasExplicitResolution = Object.prototype.hasOwnProperty.call(configObject, "resolution");
   const resolution = normalizeResolution(configObject.resolution);
   const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
@@ -1157,6 +1165,7 @@ function loadCssConfig(
     path: configPath,
     imports: allImports,
     resolution,
+    hasExplicitResolution,
     debug,
     breakpoints,
     containers,
@@ -1763,6 +1772,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     path: null,
     imports: [],
     resolution: "hybrid",
+    hasExplicitResolution: false,
     debug: {
       logDynamic: false,
       logStatic: false,
@@ -1895,10 +1905,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const replacements: Array<{ start: number; end: number; text: string }> = [];
       const importRules = new Set<string>();
       const rules = new Set<string>();
-      const resolution = cssConfig.resolution;
+      const resolution = isAstro && !cssConfig.hasExplicitResolution ? "static" : cssConfig.resolution;
       const runtimeOptionsForRuntime: LoadedCssConfig["runtimeOptions"] = {
         ...cssConfig.runtimeOptions,
       };
+      runtimeOptionsForRuntime.resolution = resolution;
       if (server && (cssConfig.debug.logDynamic || cssConfig.debug.logStatic)) {
         runtimeOptionsForRuntime.debug = {
           enabled: true,

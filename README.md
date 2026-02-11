@@ -514,7 +514,7 @@ import "./src/global.css";
 export default {
   include: ["./packages/ui"],
   imports: ["./src/theme.css"],
-  resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default)
+  resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default for non-Astro files)
   debug: {
     logDynamic: false, // dev server only
     logStatic: false,  // dev server only
@@ -545,9 +545,11 @@ export default {
 
 Use `resolution` to control how `ct(...)` is resolved:
 
-- `"hybrid"` (default): statically extract what can be resolved at build-time, fall back to runtime for the rest.
+- `"hybrid"` (default for non-Astro files): statically extract what can be resolved at build-time, fall back to runtime for the rest.
 - `"static"`: require static extraction. If a `ct(...)` block cannot be fully resolved at build-time, the Vite transform throws.
 - `"dynamic"`: disable static extraction for `ct(...)`; styles are applied at runtime.
+
+Astro modules (`.astro`) default to `"static"` when `resolution` is not explicitly set in `css.config.*`.
 
 ```ts
 export default {
