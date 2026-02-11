@@ -1509,6 +1509,76 @@ Deno.test("resolves imported constants through tsconfig paths aliases", () => {
   }
 });
 
+Deno.test("resolves tsconfig paths aliases when extends chain does not define baseUrl", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const tsconfigDir = `${root}/node_modules/astro/tsconfigs`;
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(tsconfigDir, { recursive: true });
+    Deno.mkdirSync(libDir, { recursive: true });
+
+    Deno.writeTextFileSync(
+      `${tsconfigDir}/base.json`,
+      `{\n` +
+        `  "compilerOptions": {\n` +
+        `    "strict": true\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    Deno.writeTextFileSync(
+      `${tsconfigDir}/strict.json`,
+      `{\n` +
+        `  "extends": "./base.json",\n` +
+        `  "compilerOptions": {\n` +
+        `    "noUncheckedIndexedAccess": true\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    Deno.writeTextFileSync(
+      `${root}/tsconfig.json`,
+      `{\n` +
+        `  "extends": "astro/tsconfigs/strict",\n` +
+        `  "compilerOptions": {\n` +
+        `    "paths": {\n` +
+        `      "@/*": ["./src/*"]\n` +
+        `    }\n` +
+        `  }\n` +
+        `}\n`,
+    );
+
+    Deno.writeTextFileSync(
+      `${libDir}/theme.ts`,
+      `export const palette = {\n` +
+        `  accent: "#00aaff",\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { palette } from "@/lib/theme";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    myButton: {\n` +
+      `      backgroundColor: palette.accent,\n` +
+      `      color: "white",\n` +
+      `    }\n` +
+      `  }\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("resolves imported constants computed by static helper function calls", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -1592,6 +1662,57 @@ Deno.test("resolves imported constants computed by function declarations", () =>
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom:2px solid currentColor\}/);
     assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("new ct() resolves imported default objects without null-cache poisoning", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/theme.ts`,
+      `function createPalette(color: string) {\n` +
+        `  return { base: color };\n` +
+        `}\n` +
+        `function fontRegular() {\n` +
+        `  return { fontWeight: 400 };\n` +
+        `}\n` +
+        `const fonts = {\n` +
+        `  regular: fontRegular,\n` +
+        `};\n` +
+        `const colors = {\n` +
+        `  primary: createPalette("#00aaff"),\n` +
+        `};\n` +
+        `export default {\n` +
+        `  font: fonts,\n` +
+        `  color: colors,\n` +
+        `};\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import theme from "$lib/theme";\n` +
+      `const styles = new ct();\n` +
+      `styles.global = {\n` +
+      `  body: {\n` +
+      `    "@apply": theme.font.regular(),\n` +
+      `  },\n` +
+      `};\n`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const code = transformed.code as string;
+    assert(!code.includes("new ct()"));
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /body\{font-weight:400\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

@@ -1089,7 +1089,11 @@ function loadCssConfig(
     }
 
     resolving.delete(cacheKey);
-    constValueCache.set(cacheKey, resolved);
+    if (resolved !== null) {
+      constValueCache.set(cacheKey, resolved);
+    } else {
+      constValueCache.delete(cacheKey);
+    }
     return resolved;
   }
 
@@ -1484,7 +1488,10 @@ function loadTsconfigCompilerOptions(
   }
 
   return {
-    baseUrl: mergedBaseUrl ?? configDir,
+    // Only propagate baseUrl when it is explicitly defined by this config chain.
+    // Falling back to configDir here makes extended configs (for example
+    // "astro/tsconfigs/strict") incorrectly become the alias root.
+    baseUrl: mergedBaseUrl,
     paths: mergedPaths,
   };
 }
@@ -2133,7 +2140,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         resolving.delete(cacheKey);
-        constValueCache.set(cacheKey, resolved);
+        if (resolved !== null) {
+          constValueCache.set(cacheKey, resolved);
+        } else {
+          constValueCache.delete(cacheKey);
+        }
         return resolved;
       }
 

@@ -1,6 +1,6 @@
 {
   "name": "css-ts",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Type-safe CSS object runtime + Vite extraction plugin",
   "type": "module",
   "main": "./dist/index.js",
