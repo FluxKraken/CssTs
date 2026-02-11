@@ -417,6 +417,21 @@ const styles = ct({
 - arrays of declaration objects
 - utility names from `css.config.ts` (see below)
 
+Use stylesheet imports with an `@import` key (for example in `global`) to stay close to native CSS:
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct({
+  global: {
+    "@import": ["$lib/styles/reset.css"],
+  },
+  base: {
+    page: { display: "grid" },
+  },
+});
+```
+
 ### Container presets and shorthand
 
 You can define container presets in `css.config.ts`:

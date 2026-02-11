@@ -286,10 +286,10 @@ function toSvelteGlobalRule(rule: string): string {
   return `${next}${suffix}`;
 }
 
-function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
-  const css = Array.from(rules)
-    .map(toSvelteGlobalRule)
-    .join("\n");
+function addSvelteStyleBlock(code: string, imports: Iterable<string>, rules: Iterable<string>): string {
+  const importLines = Array.from(imports).map((value) => `@import "${value}";`);
+  const ruleLines = Array.from(rules).map(toSvelteGlobalRule);
+  const css = [...importLines, ...ruleLines].join("\n");
 
   if (!css) {
     return code;
@@ -780,7 +780,7 @@ function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
 
 function toBrowserStylesheetPath(
   importPath: string,
-  configPath: string,
+  importerPath: string,
   options: ImportResolverOptions,
 ): string | null {
   const queryIndex = importPath.indexOf("?");
@@ -803,16 +803,16 @@ function toBrowserStylesheetPath(
   }
 
   if (bareImportPath.startsWith(".")) {
-    const resolved = resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(configPath), bareImportPath));
+    const resolved = resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath));
     if (resolved) {
       return toProjectPath(resolved);
     }
 
-    const fallback = getNodePath().resolve(getNodePath().dirname(configPath), bareImportPath);
+    const fallback = getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath);
     return toProjectPath(fallback);
   }
 
-  const resolved = resolveImportToFile(configPath, bareImportPath, options);
+  const resolved = resolveImportToFile(importerPath, bareImportPath, options);
   if (resolved) {
     const projectPath = toProjectPath(resolved);
     if (projectPath) {
@@ -1059,21 +1059,26 @@ function loadCssConfig(
   const importsFromObject = Array.isArray(configObject.imports)
     ? configObject.imports.filter((entry): entry is string => typeof entry === "string")
     : [];
+  const breakpoints = normalizeBreakpoints(configObject.breakpoints);
+  const containers = normalizeContainers(configObject.containers);
 
-  const allImports = Array.from(new Set([...sideEffectImports, ...importsFromObject]))
+  const parsedUtilities = isRecord(configObject.utilities)
+    ? parseCtConfig({ base: configObject.utilities }, { containers })
+    : null;
+  const utilityImports = parsedUtilities?.imports ?? [];
+
+  const dedupedRawImports = Array.from(new Set([...sideEffectImports, ...importsFromObject, ...utilityImports]));
+  const resolvedImports = dedupedRawImports
     .map((importPath) => toBrowserStylesheetPath(importPath, configPath, {
       projectRoot,
       viteAliases: resolverOptions.viteAliases,
       tsconfigResolver: resolverOptions.tsconfigResolver,
     }))
     .filter((entry): entry is string => Boolean(entry));
+  const allImports = Array.from(new Set(resolvedImports));
 
-  const breakpoints = normalizeBreakpoints(configObject.breakpoints);
-  const containers = normalizeContainers(configObject.containers);
   const include = normalizeIncludePaths(configObject.include, projectRoot);
-  const utilitiesParsed = isRecord(configObject.utilities)
-    ? parseCtConfig({ base: configObject.utilities }, { containers })?.base ?? {}
-    : {};
+  const utilitiesParsed = parsedUtilities?.base ?? {};
 
   const utilityRules = Object.entries(utilitiesParsed)
     .flatMap(([name, declaration]) =>
@@ -1690,6 +1695,7 @@ export interface CssTsPluginOptions {
  * Vite plugin that extracts `ct()` usage and emits a virtual stylesheet.
  */
 export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
+  const moduleImports = new Map<string, string[]>();
   const moduleCss = new Map<string, string>();
   let server: ViteDevServerLike | undefined;
   let projectRoot = process.cwd();
@@ -1725,6 +1731,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   function combinedCss(): string {
     const parts: string[] = [];
     for (const cssImport of cssConfig.imports) {
+      parts.push(`@import "${cssImport}";`);
+    }
+    const dedupedModuleImports = new Set<string>();
+    for (const imports of moduleImports.values()) {
+      for (const cssImport of imports) {
+        dedupedModuleImports.add(cssImport);
+      }
+    }
+    for (const cssImport of dedupedModuleImports) {
       parts.push(`@import "${cssImport}";`);
     }
     if (cssConfig.utilityCss) {
@@ -1814,6 +1829,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       const replacements: Array<{ start: number; end: number; text: string }> = [];
+      const importRules = new Set<string>();
       const rules = new Set<string>();
       const moduleInfoCache = new Map<string, ModuleStaticInfo>();
       const constValueCache = new Map<string, unknown | null>();
@@ -2021,9 +2037,23 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
+        for (const importPath of parsed.imports ?? []) {
+          const browserPath = toBrowserStylesheetPath(importPath, normalizedId, {
+            projectRoot,
+            viteAliases,
+            tsconfigResolver,
+          });
+          if (browserPath) {
+            importRules.add(browserPath);
+          }
+        }
+
         const classMap: Record<string, string> = {};
         const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
         const compiledConfig: Record<string, unknown> = {};
+        if ((parsed.imports?.length ?? 0) > 0) {
+          compiledConfig.imports = true;
+        }
 
         if (parsed.global) {
           for (
@@ -2146,9 +2176,23 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
+        for (const importPath of parsed.imports ?? []) {
+          const browserPath = toBrowserStylesheetPath(importPath, normalizedId, {
+            projectRoot,
+            viteAliases,
+            tsconfigResolver,
+          });
+          if (browserPath) {
+            importRules.add(browserPath);
+          }
+        }
+
         const classMap: Record<string, string> = {};
         const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
         const compiledConfig: Record<string, unknown> = {};
+        if ((parsed.imports?.length ?? 0) > 0) {
+          compiledConfig.imports = true;
+        }
 
         if (parsed.global) {
           for (
@@ -2233,14 +2277,36 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
       if (isSvelte) {
         nextCode = addVirtualImportToSvelte(nextCode);
-        nextCode = addSvelteStyleBlock(nextCode, rules);
-        moduleCss.delete(normalizedId);
+        nextCode = addSvelteStyleBlock(nextCode, importRules, rules);
+        if (moduleImports.delete(normalizedId)) {
+          didVirtualCssChange = true;
+        }
+        if (moduleCss.delete(normalizedId)) {
+          didVirtualCssChange = true;
+        }
       } else {
         nextCode = addVirtualImport(nextCode);
+        const nextImports = Array.from(importRules);
+        const prevImports = moduleImports.get(normalizedId) ?? [];
+        const importsChanged = nextImports.length !== prevImports.length ||
+          nextImports.some((entry, index) => entry !== prevImports[index]);
+        if (importsChanged) {
+          if (nextImports.length > 0) {
+            moduleImports.set(normalizedId, nextImports);
+          } else {
+            moduleImports.delete(normalizedId);
+          }
+          didVirtualCssChange = true;
+        }
+
         const nextCss = mergeCss(rules);
-        const prevCss = moduleCss.get(normalizedId);
+        const prevCss = moduleCss.get(normalizedId) ?? "";
         if (prevCss !== nextCss) {
-          moduleCss.set(normalizedId, nextCss);
+          if (nextCss.length > 0) {
+            moduleCss.set(normalizedId, nextCss);
+          } else {
+            moduleCss.delete(normalizedId);
+          }
           didVirtualCssChange = true;
         }
       }
@@ -2262,6 +2328,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
       if (moduleCss.has(normalizedId)) {
         moduleCss.delete(normalizedId);
+        invalidateVirtualModule();
+      }
+      if (moduleImports.has(normalizedId)) {
+        moduleImports.delete(normalizedId);
         invalidateVirtualModule();
       }
     },

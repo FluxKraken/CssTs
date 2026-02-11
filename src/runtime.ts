@@ -40,6 +40,8 @@ type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> 
 };
 /** Build-time precompiled config passed as the second argument to `ct()`. */
 type CompiledConfig<T extends StyleSheetInput> = {
+  /** Whether stylesheet imports have been extracted. */
+  imports?: true;
   /** Whether global rules have been extracted. */
   global?: true;
   /** Precompiled base class names. */
@@ -74,7 +76,9 @@ type StyleAccessor<V extends VariantSheet<any> | undefined> = ((variants?: Varia
 };
 
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
+const RUNTIME_IMPORT_TAG_ID = "__css_ts_runtime_imports";
 const injectedRules = new Set<string>();
+const injectedImportRules = new Set<string>();
 
 type StyleTag = {
   id: string;
@@ -105,8 +109,30 @@ function injectRule(rule: string): void {
   injectedRules.add(rule);
 }
 
+function injectImportRule(rule: string): void {
+  const doc = (globalThis as unknown as { document?: DocumentLike }).document;
+  if (!doc || injectedImportRules.has(rule)) {
+    return;
+  }
+
+  let tag = doc.getElementById(RUNTIME_IMPORT_TAG_ID);
+  if (!tag) {
+    tag = doc.createElement("style");
+    tag.id = RUNTIME_IMPORT_TAG_ID;
+    doc.head.appendChild(tag);
+  }
+
+  tag.appendChild(doc.createTextNode(rule));
+  injectedImportRules.add(rule);
+}
+
 function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
-  if (typeof value !== "object" || value === null || Array.isArray(value) || isCssVarRef(value)) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    isCssVarRef(value)
+  ) {
     return false;
   }
 
@@ -153,6 +179,7 @@ function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration):
 function normalizeStyleDeclarationInput(
   input: StyleDeclarationInput,
   options: {
+    imports?: Set<string>;
     utilities?: StyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
   } = {},
@@ -203,6 +230,7 @@ function normalizeStyleDeclarationInput(
 function normalizeApplyInput(
   value: unknown,
   options: {
+    imports?: Set<string>;
     utilities?: StyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
   },
@@ -270,17 +298,41 @@ function normalizeSetInput(
 function normalizeStyleSheetInput(
   styles: StyleSheetInput | undefined,
   options: {
+    imports?: Set<string>;
     utilities?: StyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
   } = {},
 ): StyleSheet {
   const normalized: StyleSheet = {};
 
+  function addImportPaths(value: unknown): void {
+    const entries = typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === "string")
+        : [];
+
+    for (const entry of entries) {
+      const trimmed = entry.trim();
+      if (trimmed.length > 0) {
+        options.imports?.add(trimmed);
+      }
+    }
+  }
+
   if (!styles) {
     return normalized;
   }
 
   for (const [key, declaration] of Object.entries(styles)) {
+    if (key === "@import") {
+      addImportPaths(declaration);
+      continue;
+    }
+    if (key === "@apply") {
+      normalizeApplyInput(declaration, options);
+      continue;
+    }
     normalized[key] = normalizeStyleDeclarationInput(declaration, options);
   }
 
@@ -316,6 +368,7 @@ function toInlineStyleString(...declarations: readonly StyleDeclaration[]): stri
 function normalizeVariantSheetInput<T extends StyleSheetInput>(
   variants: VariantSheet<T> | undefined,
   options: {
+    imports?: Set<string>;
     utilities?: StyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
   } = {},
@@ -354,10 +407,14 @@ function compileConfig<
   compiled?: CompiledConfig<T>,
   runtimeOptions: CtRuntimeOptions = {},
 ): () => Accessor<T, V> {
+  const imports = new Set<string>();
   const utilities = runtimeOptions.utilities
-    ? normalizeStyleSheetInput(runtimeOptions.utilities)
+    ? normalizeStyleSheetInput(runtimeOptions.utilities, {
+      imports,
+      containers: runtimeOptions.containers,
+    })
     : undefined;
-  const normalizeOptions = { utilities, containers: runtimeOptions.containers };
+  const normalizeOptions = { imports, utilities, containers: runtimeOptions.containers };
   const cssOptions: CssSerializationOptions = {
     breakpoints: runtimeOptions.breakpoints,
     containers: runtimeOptions.containers,
@@ -370,6 +427,12 @@ function compileConfig<
     normalizeOptions,
   );
   const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
+
+  if (imports.size > 0 && !compiled?.imports) {
+    for (const importPath of imports) {
+      injectImportRule(`@import "${importPath}";`);
+    }
+  }
 
   if (Object.keys(globalStyles).length > 0 && !compiled?.global) {
     for (const rule of toCssGlobalRules(globalStyles, cssOptions)) {

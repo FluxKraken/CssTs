@@ -27,6 +27,7 @@ type CtRuntimeOptions = {
   utilities?: StyleSheetInput;
 };
 type CompiledConfig<T extends StyleSheetInput> = {
+  imports?: true;
   global?: true;
   base?: CompiledMap<T>;
   variant?: VariantClassMap<T>;

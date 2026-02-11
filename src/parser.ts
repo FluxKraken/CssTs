@@ -1,4 +1,10 @@
-import { cv, isCssVarRef, type StyleDeclaration, type StyleSheet, type StyleValue } from "./shared.js";
+import {
+  cv,
+  isCssVarRef,
+  type StyleDeclaration,
+  type StyleSheet,
+  type StyleValue,
+} from "./shared.js";
 
 interface ParseResult {
   value: ParsedObject;
@@ -8,12 +14,14 @@ interface ParseResult {
 type VariantSheet = Record<string, Record<string, StyleSheet>>;
 type VariantSelection = Record<string, string>;
 type CtConfig = {
+  imports?: string[];
   global?: StyleSheet;
   base: StyleSheet;
   variant?: VariantSheet;
   defaults?: VariantSelection;
 };
 type ParseCtOptions = {
+  imports?: Set<string>;
   utilities?: StyleSheet;
   containers?: Record<string, { type?: string; rule: string }>;
 };
@@ -203,37 +211,37 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
-    if (identifier !== "cv") {
-      return parseIdentifierReference(input, identifier, identifierEnd);
-    }
-
     let cursor = skipWhitespace(input, identifierEnd);
     if (input[cursor] !== "(") {
       return parseIdentifierReference(input, identifier, identifierEnd);
     }
     cursor = skipWhitespace(input, cursor + 1);
 
-    if (input[cursor] !== '"' && input[cursor] !== "'") {
-      throw new Error("cv() expects a string variable name");
-    }
-    const [variableName, variableEnd] = parseString(input, cursor);
-    cursor = skipWhitespace(input, variableEnd);
-
-    let fallback: string | number | undefined;
-    if (input[cursor] === ",") {
-      const [fallbackValue, fallbackEnd] = parseValue(input, cursor + 1);
-      if (typeof fallbackValue !== "string" && typeof fallbackValue !== "number") {
-        throw new Error("cv() fallback must be a string or number");
+    if (identifier === "cv") {
+      if (input[cursor] !== '"' && input[cursor] !== "'") {
+        throw new Error("cv() expects a string variable name");
       }
-      fallback = fallbackValue;
-      cursor = skipWhitespace(input, fallbackEnd);
+      const [variableName, variableEnd] = parseString(input, cursor);
+      cursor = skipWhitespace(input, variableEnd);
+
+      let fallback: string | number | undefined;
+      if (input[cursor] === ",") {
+        const [fallbackValue, fallbackEnd] = parseValue(input, cursor + 1);
+        if (typeof fallbackValue !== "string" && typeof fallbackValue !== "number") {
+          throw new Error("cv() fallback must be a string or number");
+        }
+        fallback = fallbackValue;
+        cursor = skipWhitespace(input, fallbackEnd);
+      }
+
+      if (input[cursor] !== ")") {
+        throw new Error("Expected ')' after cv() call");
+      }
+
+      return [cv(variableName, fallback), cursor + 1];
     }
 
-    if (input[cursor] !== ")") {
-      throw new Error("Expected ')' after cv() call");
-    }
-
-    return [cv(variableName, fallback), cursor + 1];
+    return parseIdentifierReference(input, identifier, identifierEnd);
   }
 
   throw new Error(`Unsupported value at ${index}`);
@@ -465,7 +473,45 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   }
 
   const sheet: StyleSheet = {};
+
+  function addImportPaths(importValue: unknown): boolean {
+    const entries = typeof importValue === "string"
+      ? [importValue]
+      : Array.isArray(importValue)
+        ? importValue
+        : null;
+    if (!entries) {
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (typeof entry !== "string") {
+        return false;
+      }
+      const trimmed = entry.trim();
+      if (trimmed.length === 0) {
+        return false;
+      }
+      options.imports?.add(trimmed);
+    }
+    return true;
+  }
+
   for (const [key, declaration] of Object.entries(value)) {
+    if (key === "@import") {
+      if (!addImportPaths(declaration)) {
+        return null;
+      }
+      continue;
+    }
+
+    if (key === "@apply") {
+      const normalizedApply = normalizeApplyValue(declaration, options);
+      if (!normalizedApply) {
+        return null;
+      }
+      continue;
+    }
     const normalized = normalizeStyleDeclaration(declaration, options);
     if (!normalized) {
       return null;
@@ -543,13 +589,19 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
     }
   }
 
+  const imports = options.imports ?? new Set<string>();
+  const parseOptions: ParseCtOptions = {
+    ...options,
+    imports,
+  };
+
   let global: StyleSheet | undefined;
   let base: StyleSheet = {};
   let variant: VariantSheet | undefined;
   let defaults: VariantSelection | undefined;
 
   if ("global" in value) {
-    const normalized = normalizeStyleSheet(value.global, options);
+    const normalized = normalizeStyleSheet(value.global, parseOptions);
     if (!normalized) {
       return null;
     }
@@ -557,7 +609,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   if ("base" in value) {
-    const normalized = normalizeStyleSheet(value.base, options);
+    const normalized = normalizeStyleSheet(value.base, parseOptions);
     if (!normalized) {
       return null;
     }
@@ -565,7 +617,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   if ("variant" in value) {
-    const normalized = normalizeVariantSheet(value.variant, options);
+    const normalized = normalizeVariantSheet(value.variant, parseOptions);
     if (!normalized) {
       return null;
     }
@@ -582,6 +634,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   return {
+    imports: imports.size > 0 ? Array.from(imports) : undefined,
     global,
     base,
     variant,

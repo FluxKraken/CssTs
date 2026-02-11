@@ -354,6 +354,24 @@ Deno.test("parser supports @apply merge lists with local declarations", () => {
   assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
 });
 
+Deno.test("parser collects @import paths from stylesheet blocks", () => {
+  const parsed = parseCtCallArguments(`{
+    global: {
+      "@import": ["./styles/reset.css", "$lib/styles/theme.css"]
+    },
+    base: {
+      pageWrapper: {
+        display: "grid"
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.imports, ["./styles/reset.css", "$lib/styles/theme.css"]);
+  assertEquals(parsed.global, {});
+  assertEquals((parsed.base.pageWrapper as Record<string, unknown>).display, "grid");
+});
+
 Deno.test("parser supports @set with configured containers", () => {
   const parsed = parseCtCallArguments(
     `{
@@ -534,6 +552,80 @@ Deno.test("extracts @apply merge lists at build time", () => {
     css,
     /\.ct_[a-z0-9]+\{display:grid;background-color:#4f4f4f;color:#00aaff;grid-template-rows:auto 1fr auto\}/,
   );
+});
+
+Deno.test("extracts @import stylesheet imports with relative paths", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/styles`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/src/styles/reset.css`, "/* reset */\n");
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  global: {\n` +
+      `    "@import": ["./styles/reset.css"],\n` +
+      `  },\n` +
+      `  base: { page: { display: "grid" } },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/styles/reset.css";'));
+    assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("extracts @import stylesheet imports with aliased paths", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib/styles`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/src/lib/styles/reset.css`, "/* reset */\n");
+
+    configResolved({
+      root,
+      resolve: {
+        alias: [
+          {
+            find: "@styles",
+            replacement: `${root}/src/lib/styles`,
+          },
+        ],
+      },
+    });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  global: {\n` +
+      `    "@import": ["@styles/reset.css", "$lib/styles/reset.css"],\n` +
+      `  },\n` +
+      `  base: { page: { display: "grid" } },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/lib/styles/reset.css";'));
+    assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
 });
 
 Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
