@@ -67,6 +67,46 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
   );
 });
 
+Deno.test("injects virtual stylesheet import and extracts css for direct ct usage in astro", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const source =
+    `---\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
+    `---\n\n` +
+    `<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, "/app/src/pages/index.astro");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assertMatch(code, /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/);
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("injects virtual stylesheet import in astro files that only import ct styles", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source =
+    `---\n` +
+    `import { styles } from "./styles.ts";\n` +
+    `---\n\n` +
+    `<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, "/app/src/pages/home.astro");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes('---\nimport "virtual:css-ts/styles.css";\nimport { styles } from "./styles.ts";'));
+});
+
 Deno.test("limits transforms to src by default", () => {
   const root = Deno.makeTempDirSync();
 

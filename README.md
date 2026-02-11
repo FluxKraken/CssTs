@@ -35,6 +35,7 @@ export default defineConfig({
 ```
 
 By default, `ctVite()` only transforms modules inside `<project-root>/src/**`. This avoids transforming third-party code in `node_modules`.
+Supported file types include `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte`, and `.astro`.
 
 To include extra directories, add `include` paths in root `css.config.ts`:
 
@@ -45,6 +46,25 @@ export default {
 ```
 
 If you need full control, pass `ctVite({ include: /.../ })` to override the default scope matcher.
+
+## Astro setup
+
+Astro projects usually do not have a `vite.config.ts`. Configure the plugin in `astro.config.mjs` via Astro's `vite` field:
+
+```js
+// @ts-check
+import { defineConfig } from "astro/config";
+import ctVite from "@kt-tools/css-ts/vite";
+
+// https://astro.build/config
+export default defineConfig({
+  vite: {
+    plugins: [ctVite()],
+  },
+});
+```
+
+Your existing Astro `tsconfig.json` can stay unchanged for this integration.
 
 ## SvelteKit setup workflow (Python + uv)
 
@@ -707,6 +727,7 @@ The Vite plugin statically extracts `new ct()` declarations the same way it hand
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
 - Svelte files automatically import the virtual CSS module when static styles are detected.
+- Astro files automatically import the virtual CSS module in frontmatter when static styles are detected.
 - `new ct()` declarations are rewritten to equivalent precompiled `ct()` calls, and the property assignments are blanked out.
 
 ## Current parser limitations

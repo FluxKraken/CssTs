@@ -215,7 +215,7 @@ function cleanId(id: string): string {
 }
 
 function supportsTransform(id: string): boolean {
-  return /\.(?:[jt]sx?|svelte)$/.test(cleanId(id));
+  return /\.(?:[jt]sx?|svelte|astro)$/.test(cleanId(id));
 }
 
 const CSS_TS_IMPORT_SOURCES = [
@@ -331,6 +331,24 @@ function addVirtualImportToSvelte(code: string): string {
     `\nimport "${PUBLIC_VIRTUAL_ID}";` +
     code.slice(insertAt)
   );
+}
+
+function addVirtualImportToAstro(code: string): string {
+  if (code.includes(PUBLIC_VIRTUAL_ID)) {
+    return code;
+  }
+
+  const frontmatterMatch = code.match(/^---[ \t]*\r?\n/);
+  if (frontmatterMatch) {
+    const insertAt = frontmatterMatch[0].length;
+    return (
+      code.slice(0, insertAt) +
+      `import "${PUBLIC_VIRTUAL_ID}";\n` +
+      code.slice(insertAt)
+    );
+  }
+
+  return `---\nimport "${PUBLIC_VIRTUAL_ID}";\n---\n${code}`;
 }
 
 function mergeCss(rules: Iterable<string>): string {
@@ -1848,16 +1866,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return null;
       }
       const isSvelte = normalizedId.endsWith(".svelte");
+      const isAstro = normalizedId.endsWith(".astro");
       let nextCode = code;
 
-      if (!isSvelte && !hasCssTsImport(code)) {
+      if (!isSvelte && !isAstro && !hasCssTsImport(code)) {
         return null;
       }
 
       const calls = findCtCalls(nextCode);
       const newCtDecls = findNewCtDeclarations(nextCode);
       if (calls.length === 0 && newCtDecls.length === 0) {
-        if (!isSvelte) {
+        if (!isSvelte && !isAstro) {
           return null;
         }
 
@@ -1866,7 +1885,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           return null;
         }
 
-        nextCode = addVirtualImportToSvelte(nextCode);
+        nextCode = isSvelte ? addVirtualImportToSvelte(nextCode) : addVirtualImportToAstro(nextCode);
         return {
           code: nextCode,
           map: null,
@@ -2446,7 +2465,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           didVirtualCssChange = true;
         }
       } else {
-        nextCode = addVirtualImport(nextCode);
+        nextCode = isAstro ? addVirtualImportToAstro(nextCode) : addVirtualImport(nextCode);
         const nextImports = Array.from(importRules);
         const prevImports = moduleImports.get(normalizedId) ?? [];
         const importsChanged = nextImports.length !== prevImports.length ||
