@@ -286,10 +286,8 @@ function toSvelteGlobalRule(rule: string): string {
   return `${next}${suffix}`;
 }
 
-function addSvelteStyleBlock(code: string, imports: Iterable<string>, rules: Iterable<string>): string {
-  const importLines = Array.from(imports).map((value) => `@import "${value}";`);
-  const ruleLines = Array.from(rules).map(toSvelteGlobalRule);
-  const css = [...importLines, ...ruleLines].join("\n");
+function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
+  const css = Array.from(rules).map(toSvelteGlobalRule).join("\n");
 
   if (!css) {
     return code;
@@ -2277,8 +2275,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
       if (isSvelte) {
         nextCode = addVirtualImportToSvelte(nextCode);
-        nextCode = addSvelteStyleBlock(nextCode, importRules, rules);
-        if (moduleImports.delete(normalizedId)) {
+        nextCode = addSvelteStyleBlock(nextCode, rules);
+        const nextImports = Array.from(importRules);
+        const prevImports = moduleImports.get(normalizedId) ?? [];
+        const importsChanged = nextImports.length !== prevImports.length ||
+          nextImports.some((entry, index) => entry !== prevImports[index]);
+        if (importsChanged) {
+          if (nextImports.length > 0) {
+            moduleImports.set(normalizedId, nextImports);
+          } else {
+            moduleImports.delete(normalizedId);
+          }
           didVirtualCssChange = true;
         }
         if (moduleCss.delete(normalizedId)) {

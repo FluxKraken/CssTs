@@ -628,6 +628,47 @@ Deno.test("extracts @import stylesheet imports with aliased paths", () => {
   }
 });
 
+Deno.test("extracts @import from svelte ct() into virtual global stylesheet", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib/styles`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/src/lib/styles/reset.css`, "/* reset */\n");
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const source =
+      `<script lang="ts">\n` +
+      `import ct from "css-ts";\n` +
+      `const styles = ct({\n` +
+      `  global: {\n` +
+      `    "@import": ["$lib/styles/reset.css"],\n` +
+      `  },\n` +
+      `  base: {\n` +
+      `    page: { display: "grid" },\n` +
+      `  },\n` +
+      `});\n` +
+      `</script>\n\n` +
+      `<main class={styles().page()}></main>`;
+
+    const transformed = transform(source, `${root}/src/routes/+layout.svelte`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    const code = transformed.code as string;
+    assert(code.includes('import "virtual:css-ts/styles.css";'));
+    assert(!code.includes('@import "/src/lib/styles/reset.css";'));
+    assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid\}/);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/lib/styles/reset.css";'));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
   const root = Deno.makeTempDirSync();
 
