@@ -5,6 +5,11 @@ import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
 import { cv, toCssDeclaration, toCssRules } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
+
+function scopedVirtualId(moduleId: string): string {
+  return `${VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(moduleId)}`;
+}
 
 function asHook(
   hook: unknown,
@@ -90,6 +95,30 @@ Deno.test("injects virtual stylesheet import and extracts css for direct ct usag
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
 });
 
+Deno.test("injects module-scoped virtual stylesheet imports for astro ct usage", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const id = "/app/src/components/card.astro";
+
+  const source =
+    `---\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
+    `---\n\n` +
+    `<div class={styles().card()}>hi</div>`;
+
+  const transformed = transform(source, id);
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes(`virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(id)}`));
+
+  const scopedCss = load(scopedVirtualId(id));
+  assertEquals(typeof scopedCss, "string");
+  assertMatch(scopedCss as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
 Deno.test("injects virtual stylesheet import in astro files that only import ct styles", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -166,6 +195,49 @@ Deno.test("injects plain virtual import when JS-shaped astro input uses new ct()
   assert(code.startsWith('import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }'));
   assert(!code.startsWith("---\n"));
   assert(!code.includes("new ct()"));
+});
+
+Deno.test("module-scoped virtual CSS survives early shared virtual load ordering", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const layoutId = "/app/src/layouts/main.astro";
+  const componentId = "/app/src/components/header.astro";
+
+  const layoutSource =
+    `---\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.global = { body: { color: "white" } };\n` +
+    `---\n\n` +
+    `<slot />`;
+
+  const componentSource =
+    `---\n` +
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { card: { display: "grid", gap: "1rem" } };\n` +
+    `---\n\n` +
+    `<div class={styles().card()}>hi</div>`;
+
+  const transformedLayout = transform(layoutSource, layoutId);
+  assert(transformedLayout && typeof transformedLayout === "object" && "code" in transformedLayout);
+
+  const earlySharedCss = load(VIRTUAL_ID);
+  assertEquals(typeof earlySharedCss, "string");
+  assert((earlySharedCss as string).includes("body{color:white}"));
+
+  const transformedComponent = transform(componentSource, componentId);
+  assert(transformedComponent && typeof transformedComponent === "object" && "code" in transformedComponent);
+
+  const componentCode = transformedComponent.code as string;
+  assert(componentCode.includes(
+    `virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(componentId)}`,
+  ));
+
+  const scopedCss = load(scopedVirtualId(componentId));
+  assertEquals(typeof scopedCss, "string");
+  assertMatch(scopedCss as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
 });
 
 Deno.test("limits transforms to src by default", () => {

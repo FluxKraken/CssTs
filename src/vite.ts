@@ -11,6 +11,7 @@ import { camelToKebab, createClassName, type StyleSheet, toCssGlobalRules, toCss
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
 const STATIC_STYLE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 
 type ImportBinding =
@@ -308,34 +309,34 @@ function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
   return `${code}\n<style>\n${css}\n</style>\n`;
 }
 
-function addVirtualImport(code: string): string {
-  if (code.includes(PUBLIC_VIRTUAL_ID)) {
+function addVirtualImport(code: string, importId = PUBLIC_VIRTUAL_ID): string {
+  if (code.includes(importId)) {
     return code;
   }
 
-  return `import "${PUBLIC_VIRTUAL_ID}";\n${code}`;
+  return `import "${importId}";\n${code}`;
 }
 
-function addVirtualImportToSvelte(code: string): string {
-  if (code.includes(PUBLIC_VIRTUAL_ID)) {
+function addVirtualImportToSvelte(code: string, importId = PUBLIC_VIRTUAL_ID): string {
+  if (code.includes(importId)) {
     return code;
   }
 
   const match = code.match(/<script\b[^>]*>/);
   if (!match || match.index === undefined) {
-    return `<script>\nimport "${PUBLIC_VIRTUAL_ID}";\n</script>\n${code}`;
+    return `<script>\nimport "${importId}";\n</script>\n${code}`;
   }
 
   const insertAt = match.index + match[0].length;
   return (
     code.slice(0, insertAt) +
-    `\nimport "${PUBLIC_VIRTUAL_ID}";` +
+    `\nimport "${importId}";` +
     code.slice(insertAt)
   );
 }
 
-function addVirtualImportToAstro(code: string): string {
-  if (code.includes(PUBLIC_VIRTUAL_ID)) {
+function addVirtualImportToAstro(code: string, importId = PUBLIC_VIRTUAL_ID): string {
+  if (code.includes(importId)) {
     return code;
   }
 
@@ -344,17 +345,52 @@ function addVirtualImportToAstro(code: string): string {
     const insertAt = frontmatterMatch[0].length;
     return (
       code.slice(0, insertAt) +
-      `import "${PUBLIC_VIRTUAL_ID}";\n` +
+      `import "${importId}";\n` +
       code.slice(insertAt)
     );
   }
 
   const trimmed = code.trimStart();
   if (/^(?:import|export|const|let|var|function|class)\b/.test(trimmed)) {
-    return addVirtualImport(code);
+    return addVirtualImport(code, importId);
   }
 
-  return `---\nimport "${PUBLIC_VIRTUAL_ID}";\n---\n${code}`;
+  return `---\nimport "${importId}";\n---\n${code}`;
+}
+
+function addModuleVirtualImportToAstro(code: string, importId: string): string {
+  if (code.includes(importId)) {
+    return code;
+  }
+
+  const frontmatterMatch = code.match(/^---[ \t]*\r?\n/);
+  if (!frontmatterMatch) {
+    return `${code}\nimport "${importId}";\n`;
+  }
+
+  const frontmatterBody = code.slice(frontmatterMatch[0].length);
+  const closeMatch = frontmatterBody.match(/\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (!closeMatch || closeMatch.index === undefined) {
+    return `${code}\nimport "${importId}";\n`;
+  }
+
+  const insertAt = frontmatterMatch[0].length + closeMatch.index;
+  return code.slice(0, insertAt) + `\nimport "${importId}";` + code.slice(insertAt);
+}
+
+function moduleVirtualImportId(moduleId: string): string {
+  return `${PUBLIC_VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(moduleId)}`;
+}
+
+function readModuleVirtualImportId(id: string): string | null {
+  const queryIndex = id.indexOf("?");
+  if (queryIndex === -1) {
+    return null;
+  }
+
+  const params = new URLSearchParams(id.slice(queryIndex + 1));
+  const moduleId = params.get(MODULE_VIRTUAL_QUERY_KEY);
+  return moduleId && moduleId.length > 0 ? moduleId : null;
 }
 
 function mergeCss(rules: Iterable<string>): string {
@@ -1829,6 +1865,19 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     return parts.filter((part) => part.length > 0).join("\n");
   }
 
+  function moduleScopedCss(moduleId: string): string {
+    const parts: string[] = [];
+    const imports = moduleImports.get(moduleId) ?? [];
+    for (const cssImport of imports) {
+      parts.push(`@import "${cssImport}";`);
+    }
+    const rules = moduleCss.get(moduleId);
+    if (rules && rules.length > 0) {
+      parts.push(rules);
+    }
+    return parts.join("\n");
+  }
+
   function invalidateVirtualModule(): void {
     if (!server) return;
     const module = server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
@@ -1861,6 +1910,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
     load(id: string) {
       if (cleanId(id) === RESOLVED_VIRTUAL_ID) {
+        const moduleId = readModuleVirtualImportId(id);
+        if (moduleId) {
+          return moduleScopedCss(moduleId);
+        }
         return combinedCss();
       }
       return null;
@@ -2467,6 +2520,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       let didVirtualCssChange = false;
+      let scopedVirtualImport: string | null = null;
 
       if (isSvelte) {
         nextCode = addVirtualImportToSvelte(nextCode);
@@ -2511,6 +2565,16 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           }
           didVirtualCssChange = true;
         }
+
+        if (nextImports.length > 0 || nextCss.length > 0) {
+          scopedVirtualImport = moduleVirtualImportId(normalizedId);
+        }
+      }
+
+      if (scopedVirtualImport) {
+        nextCode = isAstro
+          ? addModuleVirtualImportToAstro(nextCode, scopedVirtualImport)
+          : addVirtualImport(nextCode, scopedVirtualImport);
       }
       if (didVirtualCssChange) {
         invalidateVirtualModule();
