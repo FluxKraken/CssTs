@@ -540,7 +540,7 @@ Deno.test("parser collects @import paths from stylesheet blocks", () => {
   }`);
 
   assert(parsed !== null);
-  assertEquals(parsed.imports, ["./styles/reset.css", "$lib/styles/theme.css"]);
+  assertEquals(parsed.imports, [`"./styles/reset.css"`, `"$lib/styles/theme.css"`]);
   assertEquals(parsed.global, {});
   assertEquals((parsed.base.pageWrapper as Record<string, unknown>).display, "grid");
 });

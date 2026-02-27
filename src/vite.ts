@@ -873,9 +873,18 @@ function toBrowserStylesheetPath(
   importerPath: string,
   options: ImportResolverOptions,
 ): string | null {
-  const queryIndex = importPath.indexOf("?");
-  const bareImportPath = queryIndex === -1 ? importPath : importPath.slice(0, queryIndex);
-  const querySuffix = queryIndex === -1 ? "" : importPath.slice(queryIndex);
+  const match = importPath.match(/^"([^"]+)"(.*)$/);
+  const bareImportPathRaw = match ? match[1] : importPath;
+  const suffix = match ? match[2] : "";
+
+  const queryIndex = bareImportPathRaw.indexOf("?");
+  const bareImportPath = queryIndex === -1 ? bareImportPathRaw : bareImportPathRaw.slice(0, queryIndex);
+  const querySuffix = queryIndex === -1 ? "" : bareImportPathRaw.slice(queryIndex);
+
+  const formatResult = (resolvedValue: string | null): string | null => {
+    if (!resolvedValue) return null;
+    return match ? `"${resolvedValue}"${suffix}` : resolvedValue;
+  }
 
   const toProjectPath = (resolvedFile: string): string | null => {
     const relative = getNodePath().relative(options.projectRoot, resolvedFile).split(getNodePath().sep).join("/");
@@ -885,32 +894,32 @@ function toBrowserStylesheetPath(
     return `/${relative}${querySuffix}`;
   };
 
-  if (/^(?:https?:)?\/\//.test(importPath) || importPath.startsWith("data:")) {
-    return importPath;
+  if (/^(?:https?:)?\/\//.test(bareImportPath) || bareImportPath.startsWith("data:")) {
+    return formatResult(bareImportPathRaw);
   }
   if (bareImportPath.startsWith("/")) {
-    return importPath;
+    return formatResult(bareImportPathRaw);
   }
 
   if (bareImportPath.startsWith(".")) {
     const resolved = resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath));
     if (resolved) {
-      return toProjectPath(resolved);
+      return formatResult(toProjectPath(resolved));
     }
 
     const fallback = getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath);
-    return toProjectPath(fallback);
+    return formatResult(toProjectPath(fallback));
   }
 
   const resolved = resolveImportToFile(importerPath, bareImportPath, options);
   if (resolved) {
     const projectPath = toProjectPath(resolved);
     if (projectPath) {
-      return projectPath;
+      return formatResult(projectPath);
     }
   }
 
-  return importPath;
+  return formatResult(bareImportPathRaw);
 }
 
 function loadCssConfig(
@@ -944,7 +953,7 @@ function loadCssConfig(
   const sideEffectImports: string[] = [];
   const cssImportMatcher = /import\s*["']([^"']+\.css(?:\?[^"']*)?)["']\s*;?/g;
   for (let match = cssImportMatcher.exec(source); match; match = cssImportMatcher.exec(source)) {
-    sideEffectImports.push(match[1]);
+    sideEffectImports.push(`"${match[1]}"`);
   }
 
   const moduleInfoCache = new Map<string, ModuleStaticInfo>();
@@ -1157,7 +1166,9 @@ function loadCssConfig(
   }
 
   const importsFromObject = Array.isArray(configObject.imports)
-    ? configObject.imports.filter((entry): entry is string => typeof entry === "string")
+    ? configObject.imports
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => (entry.startsWith('"') && entry.endsWith('"') ? entry : `"${entry}"`))
     : [];
   const hasExplicitResolution = Object.prototype.hasOwnProperty.call(configObject, "resolution");
   const resolution = normalizeResolution(configObject.resolution);
@@ -1847,7 +1858,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   function combinedCss(): string {
     const parts: string[] = [];
     for (const cssImport of cssConfig.imports) {
-      parts.push(`@import "${cssImport}";`);
+      parts.push(`@import ${cssImport};`);
     }
     const dedupedModuleImports = new Set<string>();
     for (const imports of moduleImports.values()) {
@@ -1856,7 +1867,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
     }
     for (const cssImport of dedupedModuleImports) {
-      parts.push(`@import "${cssImport}";`);
+      parts.push(`@import ${cssImport};`);
     }
     if (cssConfig.utilityCss) {
       parts.push(cssConfig.utilityCss);
@@ -1869,7 +1880,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     const parts: string[] = [];
     const imports = moduleImports.get(moduleId) ?? [];
     for (const cssImport of imports) {
-      parts.push(`@import "${cssImport}";`);
+      parts.push(`@import ${cssImport};`);
     }
     const rules = moduleCss.get(moduleId);
     if (rules && rules.length > 0) {

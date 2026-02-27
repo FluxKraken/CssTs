@@ -8,7 +8,7 @@ import { cssTsPlugin } from "./vite.js";
 import { cv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
-  new (): CtBuilder;
+  new(): CtBuilder;
   vite: typeof cssTsPlugin;
   cv: typeof cv;
   var: typeof cv;
@@ -41,3 +41,5 @@ export type { StyleDeclaration } from "./shared.js";
 export type { StyleSheet } from "./shared.js";
 /** CSS value accepted by style declarations. */
 export type { StyleValue } from "./shared.js";
+/** Valid input for importing external styles or global style objects. */
+export type { ImportInput } from "./shared.js";

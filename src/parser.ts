@@ -35,7 +35,7 @@ interface ParsedObject {
   [key: string]: ParsedValue;
 }
 
-interface ParsedArray extends Array<ParsedValue> {}
+interface ParsedArray extends Array<ParsedValue> { }
 
 type ParsedValue =
   | string
@@ -475,7 +475,7 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   const sheet: StyleSheet = {};
 
   function addImportPaths(importValue: unknown): boolean {
-    const entries = typeof importValue === "string"
+    const entries = typeof importValue === "string" || isPlainObject(importValue)
       ? [importValue]
       : Array.isArray(importValue)
         ? importValue
@@ -485,14 +485,25 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
     }
 
     for (const entry of entries) {
-      if (typeof entry !== "string") {
+      if (typeof entry === "string") {
+        const trimmed = entry.trim();
+        if (trimmed.length === 0) {
+          return false;
+        }
+        options.imports?.add(`"${trimmed}"`);
+      } else if (isPlainObject(entry) && "path" in entry && typeof entry.path === "string") {
+        const trimmed = entry.path.trim();
+        if (trimmed.length === 0) {
+          return false;
+        }
+        if ("layer" in entry && typeof entry.layer === "string" && entry.layer.trim().length > 0) {
+          options.imports?.add(`"${trimmed}" layer(${entry.layer.trim()})`);
+        } else {
+          options.imports?.add(`"${trimmed}"`);
+        }
+      } else {
         return false;
       }
-      const trimmed = entry.trim();
-      if (trimmed.length === 0) {
-        return false;
-      }
-      options.imports?.add(trimmed);
     }
     return true;
   }

@@ -317,16 +317,30 @@ function normalizeStyleSheetInput(
   const normalized: StyleSheet = {};
 
   function addImportPaths(value: unknown): void {
-    const entries = typeof value === "string"
+    const entries = typeof value === "string" || (typeof value === "object" && value !== null && !Array.isArray(value))
       ? [value]
       : Array.isArray(value)
-        ? value.filter((entry): entry is string => typeof entry === "string")
+        ? value
         : [];
 
     for (const entry of entries) {
-      const trimmed = entry.trim();
-      if (trimmed.length > 0) {
-        options.imports?.add(trimmed);
+      if (typeof entry === "string") {
+        const trimmed = entry.trim();
+        if (trimmed.length > 0) {
+          options.imports?.add(`"${trimmed}"`);
+        }
+      } else if (typeof entry === "object" && entry !== null && "path" in entry) {
+        const pathEntry = entry as { path: string; layer?: string };
+        if (typeof pathEntry.path === "string") {
+          const trimmed = pathEntry.path.trim();
+          if (trimmed.length > 0) {
+            if (typeof pathEntry.layer === "string" && pathEntry.layer.trim().length > 0) {
+              options.imports?.add(`"${trimmed}" layer(${pathEntry.layer.trim()})`);
+            } else {
+              options.imports?.add(`"${trimmed}"`);
+            }
+          }
+        }
       }
     }
   }
@@ -456,12 +470,12 @@ function compileConfig<
       throw new Error("css-ts resolution=\"static\" requires @import rules to be statically extracted.");
     }
     for (const importPath of imports) {
-      injectImportRule(`@import "${importPath}";`);
-      log("dynamic", `@import "${importPath}"`);
+      injectImportRule(`@import ${importPath};`);
+      log("dynamic", `@import ${importPath}`);
     }
   } else if (imports.size > 0) {
     for (const importPath of imports) {
-      log("static", `@import "${importPath}"`);
+      log("static", `@import ${importPath}`);
     }
   }
 
@@ -635,6 +649,8 @@ type CtBuilder<
   defaults: VariantSelection<V> | undefined;
   /** Register a container preset for `@set` and `@<name>` shorthand at runtime. */
   addContainer(container: ContainerDefinitionInput): CtBuilder<T, V>;
+  /** Add styles or external CSS files to the global stylesheet. */
+  import(inputs: import("./shared.js").ImportInput): CtBuilder<T, V>;
 } & Accessor<T, V>;
 
 function createCtBuilder<
@@ -694,6 +710,37 @@ function createCtBuilder<
       type: typeof container.type === "string" ? container.type : "inline-size",
       rule: container.rule,
     };
+    cachedFactory = null;
+    return proxy;
+  };
+
+  proxy.import = (inputs: import("./shared.js").ImportInput) => {
+    const entries = Array.isArray(inputs) ? inputs : [inputs];
+    config.global = config.global ?? {};
+    const currentGlobal = config.global;
+
+    for (const entry of entries) {
+      if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
+        currentGlobal["@import"] = currentGlobal["@import"] ?? [];
+        if (Array.isArray(currentGlobal["@import"])) {
+          (currentGlobal["@import"] as unknown as string[]).push(entry as string);
+        } else {
+          currentGlobal["@import"] = [currentGlobal["@import"], entry as string] as unknown as import("./shared.js").StyleDeclaration;
+        }
+      } else if (typeof entry === "object" && entry !== null) {
+        if ("rules" in entry) {
+          const ruleObj = entry as import("./shared.js").ImportRuleObject;
+          if (ruleObj.layer && typeof ruleObj.layer === "string") {
+            currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
+          } else {
+            Object.assign(currentGlobal, ruleObj.rules);
+          }
+        } else {
+          Object.assign(currentGlobal, entry);
+        }
+      }
+    }
+
     cachedFactory = null;
     return proxy;
   };

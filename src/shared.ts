@@ -23,6 +23,33 @@ export type StyleDeclaration = NestedStyleDeclaration;
 /** Map of class keys to their style declarations. */
 export type StyleSheet = Record<string, StyleDeclaration>;
 
+/** Base shape for importing global style objects with a layer. */
+export interface ImportRuleObject {
+  /** The CSS style object to import as global rules. */
+  rules: StyleSheet;
+  /** Optional layer name for the imported styles. */
+  layer?: string;
+}
+
+/** Base shape for importing external CSS files with a layer. */
+export interface ImportPathObject {
+  /** The external CSS string path to import. */
+  path: string;
+  /** Optional layer name for the imported styles. */
+  layer?: string;
+}
+
+/** Singular import input item. */
+export type SingularImportInput =
+  | string
+  | StyleSheet
+  | ImportPathObject
+  | ImportRuleObject;
+
+/** Import shapes accepted by the `.import()` method. */
+export type ImportInput = SingularImportInput | readonly SingularImportInput[];
+
+
 /** Optional serialization settings shared by runtime and build-time extraction. */
 export interface CssSerializationOptions {
   /** Named breakpoint aliases (for example `{ md: "48rem" }` used as `"@md"`). */
