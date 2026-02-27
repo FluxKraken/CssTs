@@ -280,8 +280,8 @@ Deno.test("extends transform scope with css.config.ts include paths", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  include: ["./packages/ui"],\n` +
-        `};\n`,
+      `  include: ["./packages/ui"],\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -699,6 +699,28 @@ Deno.test("extracts space-delimited property arrays at build time", () => {
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;grid-template-rows:auto 1fr auto\}/);
 });
 
+Deno.test("extracts comma-delimited property arrays at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    textEl: {\n` +
+    `      fontFamily: ["system-ui", "sans-serif"],\n` +
+    `      transition: ["opacity 0.2s", "color 0.3s"],\n` +
+    `    }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/comma-props.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{font-family:system-ui, sans-serif;transition:opacity 0\.2s, color 0\.3s\}/);
+});
+
 Deno.test("extracts @apply merge lists at build time", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -850,8 +872,8 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  resolution: "static",\n` +
-        `};\n`,
+      `  resolution: "static",\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -957,8 +979,8 @@ Deno.test("resolution=dynamic disables static extraction", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  resolution: "dynamic",\n` +
-        `};\n`,
+      `  resolution: "dynamic",\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1008,8 +1030,8 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  resolution: "static",\n` +
-        `};\n`,
+      `  resolution: "static",\n` +
+      `};\n`,
     );
 
     const staticPlugin = cssTsPlugin();
@@ -1033,8 +1055,8 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  resolution: "dynamic",\n` +
-        `};\n`,
+      `  resolution: "dynamic",\n` +
+      `};\n`,
     );
 
     const dynamicPlugin = cssTsPlugin();
@@ -1069,10 +1091,10 @@ Deno.test("debug.logStatic only logs in dev server mode", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  debug: {\n` +
-        `    logStatic: true,\n` +
-        `  },\n` +
-        `};\n`,
+      `  debug: {\n` +
+      `    logStatic: true,\n` +
+      `  },\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1139,16 +1161,16 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import "./src/global.css";\n` +
-        `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
-        `export default {\n` +
-        `  breakpoints: { md: "48rem" },\n` +
-        `  utilities: {\n` +
-        `    cardBase: {\n` +
-        `      "@apply": [baseColors],\n` +
-        `      borderRadius: "8px",\n` +
-        `    },\n` +
-        `  },\n` +
-        `};\n`,
+      `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
+      `export default {\n` +
+      `  breakpoints: { md: "48rem" },\n` +
+      `  utilities: {\n` +
+      `    cardBase: {\n` +
+      `      "@apply": [baseColors],\n` +
+      `      borderRadius: "8px",\n` +
+      `    },\n` +
+      `  },\n` +
+      `};\n`,
     );
     Deno.writeTextFileSync(`${root}/src/global.css`, "/* global */\n");
 
@@ -1197,11 +1219,11 @@ Deno.test("loads css.config.ts breakpoint ranges with @(from,to) shorthand", () 
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  breakpoints: {\n` +
-        `    xs: "30rem",\n` +
-        `    xl: "80rem",\n` +
-        `  },\n` +
-        `};\n`,
+      `  breakpoints: {\n` +
+      `    xs: "30rem",\n` +
+      `    xl: "80rem",\n` +
+      `  },\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1241,10 +1263,10 @@ Deno.test("loads css.config.ts containers and supports @set/@container shorthand
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  containers: {\n` +
-        `    card: { type: "inline-size", rule: "width < 20rem" },\n` +
-        `  },\n` +
-        `};\n`,
+      `  containers: {\n` +
+      `    card: { type: "inline-size", rule: "width < 20rem" },\n` +
+      `  },\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1292,9 +1314,9 @@ Deno.test("loads css.config.ts breakpoints from imported constants", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import { pageWidth } from "./src/lib/styles/tokens";\n` +
-        `export default {\n` +
-        `  breakpoints: { sm: pageWidth },\n` +
-        `};\n`,
+      `export default {\n` +
+      `  breakpoints: { sm: pageWidth },\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1340,10 +1362,10 @@ Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alia
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import "@theme/global.css";\n` +
-        `import { pageWidth } from "@theme/layout";\n` +
-        `export default {\n` +
-        `  breakpoints: { sm: pageWidth },\n` +
-        `};\n`,
+      `import { pageWidth } from "@theme/layout";\n` +
+      `export default {\n` +
+      `  breakpoints: { sm: pageWidth },\n` +
+      `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1399,14 +1421,14 @@ Deno.test("resolves imported style objects and precompiles them", () => {
     Deno.writeTextFileSync(
       `${libDir}/styles.ts`,
       `export const commonColors = {\n` +
-        `  background: "black",\n` +
-        `  color: "white",\n` +
-        `};\n` +
-        `export const buttonStyles = {\n` +
-        `  fontSize: "1.25rem",\n` +
-        `  fontWeight: 600,\n` +
-        `  padding: "1rem",\n` +
-        `};\n`,
+      `  background: "black",\n` +
+      `  color: "white",\n` +
+      `};\n` +
+      `export const buttonStyles = {\n` +
+      `  fontSize: "1.25rem",\n` +
+      `  fontWeight: 600,\n` +
+      `  padding: "1rem",\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1446,13 +1468,13 @@ Deno.test("resolves namespace-imported style objects and precompiles them", () =
     Deno.writeTextFileSync(
       `${libDir}/styles.ts`,
       `export const darkBar = {\n` +
-        `  backgroundColor: "oklch(from #00aaff 20% c h)",\n` +
-        `  color: "white",\n` +
-        `};\n` +
-        `export const lightBar = {\n` +
-        `  backgroundColor: "black",\n` +
-        `  color: "white",\n` +
-        `};\n`,
+      `  backgroundColor: "oklch(from #00aaff 20% c h)",\n` +
+      `  color: "white",\n` +
+      `};\n` +
+      `export const lightBar = {\n` +
+      `  backgroundColor: "black",\n` +
+      `  color: "white",\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1494,8 +1516,8 @@ Deno.test("resolves imported constants through Vite resolve.alias", () => {
     Deno.writeTextFileSync(
       `${themeDir}/colors.ts`,
       `export const light = {\n` +
-        `  blue: "#00aaff",\n` +
-        `};\n`,
+      `  blue: "#00aaff",\n` +
+      `};\n`,
     );
 
     configResolved({
@@ -1544,20 +1566,20 @@ Deno.test("resolves imported constants through tsconfig paths aliases", () => {
     Deno.writeTextFileSync(
       `${themeDir}/colors.ts`,
       `export const light = {\n` +
-        `  blue: "#00aaff",\n` +
-        `};\n`,
+      `  blue: "#00aaff",\n` +
+      `};\n`,
     );
     Deno.writeTextFileSync(
       `${root}/tsconfig.json`,
       `{\n` +
-        `  // comment to ensure JSONC parsing works\n` +
-        `  "compilerOptions": {\n` +
-        `    "baseUrl": ".",\n` +
-        `    "paths": {\n` +
-        `      "@theme/*": ["src/custom-theme/*",]\n` +
-        `    },\n` +
-        `  },\n` +
-        `}\n`,
+      `  // comment to ensure JSONC parsing works\n` +
+      `  "compilerOptions": {\n` +
+      `    "baseUrl": ".",\n` +
+      `    "paths": {\n` +
+      `      "@theme/*": ["src/custom-theme/*",]\n` +
+      `    },\n` +
+      `  },\n` +
+      `}\n`,
     );
 
     const moduleCode =
@@ -1597,37 +1619,37 @@ Deno.test("resolves tsconfig paths aliases when extends chain does not define ba
     Deno.writeTextFileSync(
       `${tsconfigDir}/base.json`,
       `{\n` +
-        `  "compilerOptions": {\n` +
-        `    "strict": true\n` +
-        `  }\n` +
-        `}\n`,
+      `  "compilerOptions": {\n` +
+      `    "strict": true\n` +
+      `  }\n` +
+      `}\n`,
     );
     Deno.writeTextFileSync(
       `${tsconfigDir}/strict.json`,
       `{\n` +
-        `  "extends": "./base.json",\n` +
-        `  "compilerOptions": {\n` +
-        `    "noUncheckedIndexedAccess": true\n` +
-        `  }\n` +
-        `}\n`,
+      `  "extends": "./base.json",\n` +
+      `  "compilerOptions": {\n` +
+      `    "noUncheckedIndexedAccess": true\n` +
+      `  }\n` +
+      `}\n`,
     );
     Deno.writeTextFileSync(
       `${root}/tsconfig.json`,
       `{\n` +
-        `  "extends": "astro/tsconfigs/strict",\n` +
-        `  "compilerOptions": {\n` +
-        `    "paths": {\n` +
-        `      "@/*": ["./src/*"]\n` +
-        `    }\n` +
-        `  }\n` +
-        `}\n`,
+      `  "extends": "astro/tsconfigs/strict",\n` +
+      `  "compilerOptions": {\n` +
+      `    "paths": {\n` +
+      `      "@/*": ["./src/*"]\n` +
+      `    }\n` +
+      `  }\n` +
+      `}\n`,
     );
 
     Deno.writeTextFileSync(
       `${libDir}/theme.ts`,
       `export const palette = {\n` +
-        `  accent: "#00aaff",\n` +
-        `};\n`,
+      `  accent: "#00aaff",\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1664,11 +1686,11 @@ Deno.test("resolves imported constants computed by static helper function calls"
     Deno.writeTextFileSync(
       `${libDir}/stylesheet.ts`,
       `const colorUtils = {\n` +
-        `  oklch: (l: number, c: number, h: number) => \`oklch(\${l}% \${c} \${h})\`,\n` +
-        `};\n` +
-        `export const blue = {\n` +
-        `  l300: colorUtils.oklch(70, 0.1679, 242.04),\n` +
-        `};\n`,
+      `  oklch: (l: number, c: number, h: number) => \`oklch(\${l}% \${c} \${h})\`,\n` +
+      `};\n` +
+      `export const blue = {\n` +
+      `  l300: colorUtils.oklch(70, 0.1679, 242.04),\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1708,11 +1730,11 @@ Deno.test("resolves imported constants computed by function declarations", () =>
     Deno.writeTextFileSync(
       `${libDir}/stylesheet.ts`,
       `function oklch(l: number, c: number, h: number) {\n` +
-        `  return \`oklch(\${l}% \${c} \${h})\`;\n` +
-        `}\n` +
-        `export const blue = {\n` +
-        `  l300: oklch(70, 0.1679, 242.04),\n` +
-        `};\n`,
+      `  return \`oklch(\${l}% \${c} \${h})\`;\n` +
+      `}\n` +
+      `export const blue = {\n` +
+      `  l300: oklch(70, 0.1679, 242.04),\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1752,21 +1774,21 @@ Deno.test("new ct() resolves imported default objects without null-cache poisoni
     Deno.writeTextFileSync(
       `${libDir}/theme.ts`,
       `function createPalette(color: string) {\n` +
-        `  return { base: color };\n` +
-        `}\n` +
-        `function fontRegular() {\n` +
-        `  return { fontWeight: 400 };\n` +
-        `}\n` +
-        `const fonts = {\n` +
-        `  regular: fontRegular,\n` +
-        `};\n` +
-        `const colors = {\n` +
-        `  primary: createPalette("#00aaff"),\n` +
-        `};\n` +
-        `export default {\n` +
-        `  font: fonts,\n` +
-        `  color: colors,\n` +
-        `};\n`,
+      `  return { base: color };\n` +
+      `}\n` +
+      `function fontRegular() {\n` +
+      `  return { fontWeight: 400 };\n` +
+      `}\n` +
+      `const fonts = {\n` +
+      `  regular: fontRegular,\n` +
+      `};\n` +
+      `const colors = {\n` +
+      `  primary: createPalette("#00aaff"),\n` +
+      `};\n` +
+      `export default {\n` +
+      `  font: fonts,\n` +
+      `  color: colors,\n` +
+      `};\n`,
     );
 
     const moduleCode =
@@ -1853,7 +1875,7 @@ Deno.test("new ct() extracts styles computed by imported default const arrow fun
     Deno.writeTextFileSync(
       `${libDir}/responsive.ts`,
       `const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n` +
-        `export default responsiveWidth;\n`,
+      `export default responsiveWidth;\n`,
     );
 
     const moduleCode =
@@ -1961,7 +1983,7 @@ Deno.test("does not trigger a websocket full-reload during transform", () => {
   configureServer({
     moduleGraph: {
       getModuleById: () => ({}),
-      invalidateModule: () => {},
+      invalidateModule: () => { },
     },
     ws: {
       send: (payload: { type?: string }) => {

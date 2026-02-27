@@ -44,6 +44,43 @@ const UNITLESS_PROPERTIES = new Set([
   "grid-column",
 ]);
 
+const COMMA_DELIMITED_PROPERTIES = new Set([
+  "animation",
+  "animation-delay",
+  "animation-direction",
+  "animation-duration",
+  "animation-fill-mode",
+  "animation-iteration-count",
+  "animation-name",
+  "animation-play-state",
+  "animation-timing-function",
+  "background",
+  "background-attachment",
+  "background-clip",
+  "background-image",
+  "background-origin",
+  "background-position",
+  "background-repeat",
+  "background-size",
+  "box-shadow",
+  "font-family",
+  "mask",
+  "mask-clip",
+  "mask-composite",
+  "mask-image",
+  "mask-mode",
+  "mask-origin",
+  "mask-position",
+  "mask-repeat",
+  "mask-size",
+  "text-shadow",
+  "transition",
+  "transition-delay",
+  "transition-duration",
+  "transition-property",
+  "transition-timing-function",
+]);
+
 /** Convert a camelCased property name to kebab-case. */
 export function camelToKebab(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
@@ -391,7 +428,8 @@ function formatPrimitiveStyleValue(property: string, value: PrimitiveStyleValue)
 
 function formatStyleValue(property: string, value: StyleValue): string {
   if (Array.isArray(value)) {
-    return value.map((entry) => formatStyleValue(property, entry)).join(" ");
+    const separator = COMMA_DELIMITED_PROPERTIES.has(property) ? ", " : " ";
+    return value.map((entry) => formatStyleValue(property, entry)).join(separator);
   }
 
   if (isCssVarRef(value)) {

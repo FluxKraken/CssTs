@@ -388,9 +388,9 @@ const styles = ct({
 
 When these references resolve to static `const` objects at build time, the Vite plugin precompiles them into CSS.
 
-### Space-delimited CSS values with arrays
+### Array property values
 
-Property values can be arrays to produce space-delimited CSS values:
+Property values can be arrays to produce space-delimited or comma-delimited CSS values depending on the CSS property:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -399,7 +399,9 @@ const styles = ct({
   base: {
     pageWrapper: {
       display: "grid",
-      gridTemplateRows: ["auto", "1fr", "auto"],
+      gridTemplateRows: ["auto", "1fr", "auto"], // space-delimited
+      fontFamily: ["system-ui", "sans-serif"], // comma-delimited
+      transition: ["opacity 0.2s", "color 0.3s"], // comma-delimited
     },
   },
 });
