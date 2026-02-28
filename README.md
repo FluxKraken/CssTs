@@ -390,7 +390,7 @@ When these references resolve to static `const` objects at build time, the Vite 
 
 ### Array property values
 
-Property values can be arrays to produce space-delimited or comma-delimited CSS values depending on the CSS property:
+Property values can be arrays to produce space-delimited or comma-delimited CSS values depending on the CSS property.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -402,9 +402,43 @@ const styles = ct({
       gridTemplateRows: ["auto", "1fr", "auto"], // space-delimited
       fontFamily: ["system-ui", "sans-serif"], // comma-delimited
       transition: ["opacity 0.2s", "color 0.3s"], // comma-delimited
+      boxShadow: ["0 0 10px black", "inset 0 0 5px white"], // comma-delimited
     },
   },
 });
+```
+
+Commonly used comma-delimited properties like `transition`, `boxShadow`, `animation`, `fontFamily`, and `background` are automatically handled. For all other properties, arrays produce space-delimited values.
+
+### Global stylesheet and rule imports with `.import()`
+
+Use `.import()` to register global styles, external CSS files, or layered imports. This is an alternative to the `@import` key in `global` blocks and provides more control over layers.
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct();
+
+// 1. Import external CSS files
+styles.import("./src/theme.css");
+
+// 2. Import with a layer
+styles.import({ path: "./src/reset.css", layer: "base" });
+
+// 3. Import global style objects
+styles.import({
+  layer: "utilities",
+  rules: {
+    ".u-full-width": { width: "100%" },
+    ".u-hidden": { display: "none" },
+  }
+});
+
+// 4. Batch imports
+styles.import([
+  "./src/global.css",
+  { path: "./src/extra.css", layer: "extra" }
+]);
 ```
 
 ### `@apply` merge lists inside class declarations
@@ -740,7 +774,7 @@ The build-time extractor supports `ct(...)` calls and `new ct()` declarations wi
 
 - style keys as identifiers/quoted keys
 - property values as strings, numbers, or `cv("--token")`
-- property values as arrays for space-delimited CSS values
+- property values as arrays for space-delimited or comma-delimited CSS values
 - declaration arrays (merged left-to-right)
 - `@apply` merge lists inside declarations
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
@@ -750,5 +784,6 @@ The build-time extractor supports `ct(...)` calls and `new ct()` declarations wi
 - imported/local `const` objects computed by statically evaluable helper function calls
 - namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)
 - `new ct()` with subsequent `const`/`let`-scoped property assignments (`styles.base = ...`, etc.)
+- `.import()` calls on `new ct()` instances (extracted to global styles and layers)
 
 It skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls. For `new ct()` patterns, only module-level assignments are extracted — assignments inside conditionals, loops, or functions fall back to runtime.

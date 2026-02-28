@@ -266,9 +266,11 @@ const styles = ct({
 });
 ```
 
-## Feature: Space-delimited property arrays
+## Feature: Property arrays
 
-Property arrays serialize to space-delimited CSS values:
+Property arrays serialize to space-delimited or comma-delimited CSS values depending on the property.
+
+### Space-delimited (default)
 
 ```ts
 const styles = ct({
@@ -284,6 +286,43 @@ const styles = ct({
 Output:
 ```css
 grid-template-rows: auto 1fr auto;
+```
+
+### Comma-delimited (specific properties)
+
+Properties like `transition`, `boxShadow`, `fontFamily`, etc., use comma delimitation:
+
+```ts
+const styles = ct({
+  base: {
+    card: {
+      transition: ["opacity 0.2s", "transform 0.3s"],
+      fontFamily: ["Inter", "sans-serif"],
+    },
+  },
+});
+```
+
+## Feature: `.import()` method
+
+The `.import()` method on a `ct` instance allows importing external CSS files or global style objects, optionally into specific layers.
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct();
+
+// Import paths
+styles.import("./reset.css");
+styles.import({ path: "./theme.css", layer: "theme" });
+
+// Import global rule objects
+styles.import({
+  layer: "tools",
+  rules: {
+    ".debug": { outline: "1px solid red" }
+  }
+});
 ```
 
 ## Notes
