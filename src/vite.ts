@@ -2411,47 +2411,56 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           configParts.global = configParts.global ?? {};
           const currentGlobal = configParts.global as Record<string, unknown>;
 
-          for (const entry of importParts) {
-            if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
-              currentGlobal["@import"] = currentGlobal["@import"] ?? [];
-              if (Array.isArray(currentGlobal["@import"])) {
-                currentGlobal["@import"].push(entry);
-              } else {
-                currentGlobal["@import"] = [currentGlobal["@import"], entry];
-              }
-            } else if (typeof entry === "object" && entry !== null) {
-              if ("rules" in entry) {
-                const ruleObj = entry as { layer?: string; rules: unknown };
-                if (ruleObj.layer && typeof ruleObj.layer === "string") {
-                  currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
-                } else if (ruleObj.rules && typeof ruleObj.rules === "object") {
-                  Object.assign(currentGlobal, ruleObj.rules);
+          for (const entryGroup of importParts) {
+            const entries = Array.isArray(entryGroup) ? entryGroup : [entryGroup];
+            for (const entry of entries) {
+              if (
+                typeof entry === "string" ||
+                (typeof entry === "object" && entry !== null && "path" in entry)
+              ) {
+                currentGlobal["@import"] = currentGlobal["@import"] ?? [];
+                if (Array.isArray(currentGlobal["@import"])) {
+                  currentGlobal["@import"].push(entry);
+                } else {
+                  currentGlobal["@import"] = [currentGlobal["@import"], entry];
                 }
-              } else {
-                Object.assign(currentGlobal, entry);
+              } else if (typeof entry === "object" && entry !== null) {
+                if ("rules" in entry) {
+                  const ruleObj = entry as { layer?: string; rules: unknown };
+                  if (ruleObj.layer && typeof ruleObj.layer === "string") {
+                    currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
+                  } else if (ruleObj.rules && typeof ruleObj.rules === "object") {
+                    Object.assign(currentGlobal, ruleObj.rules);
+                  }
+                } else {
+                  Object.assign(currentGlobal, entry);
+                }
               }
             }
           }
 
           rawParts.global = `(function() {
             const g = ${rawParts.global || "{}"};
-            for (const entry of [${rawImportParts.join(", ")}]) {
-              if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
-                g["@import"] = g["@import"] || [];
-                if (Array.isArray(g["@import"])) {
-                  g["@import"].push(entry);
-                } else {
-                  g["@import"] = [g["@import"], entry];
-                }
-              } else if (typeof entry === "object" && entry !== null) {
-                if ("rules" in entry) {
-                  if (entry.layer) {
-                    g[\`@layer \${entry.layer}\`] = entry.rules;
+            for (const entryGroup of [${rawImportParts.join(", ")}]) {
+              const entries = Array.isArray(entryGroup) ? entryGroup : [entryGroup];
+              for (const entry of entries) {
+                if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
+                  g["@import"] = g["@import"] || [];
+                  if (Array.isArray(g["@import"])) {
+                    g["@import"].push(entry);
                   } else {
-                    Object.assign(g, entry.rules);
+                    g["@import"] = [g["@import"], entry];
                   }
-                } else {
-                  Object.assign(g, entry);
+                } else if (typeof entry === "object" && entry !== null) {
+                  if ("rules" in entry) {
+                    if (entry.layer) {
+                      g[\`@layer \${entry.layer}\`] = entry.rules;
+                    } else {
+                      Object.assign(g, entry.rules);
+                    }
+                  } else {
+                    Object.assign(g, entry);
+                  }
                 }
               }
             }

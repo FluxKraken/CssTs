@@ -864,6 +864,37 @@ Deno.test("extracts @import from svelte ct() into virtual global stylesheet", ()
   }
 });
 
+Deno.test("extracts imported rules passed as array to import()", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.import([\n` +
+      `  { rules: { testRule: { color: "red" } }, layer: "test" },\n` +
+      `  { "@import": ["./foo.css"] }\n` +
+      `]);`;
+
+    const transformed = transform(moduleCode, `${root}/src/lib/array-import.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes('@import "/src/lib/foo.css";'));
+    assert(css.includes('@layer test{testRule{color:red}}'));
+    assert(!css.includes('0 rules *'));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("resolution=static throws when ct() cannot be statically resolved", () => {
   const root = Deno.makeTempDirSync();
 
