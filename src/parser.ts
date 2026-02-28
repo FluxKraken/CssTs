@@ -1007,6 +1007,36 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
       assignmentMatcher.lastIndex = end;
     }
 
+    const importMatcher = new RegExp(
+      `\\b${varName}\\.import\\s*(?=\\()`,
+      "g",
+    );
+    importMatcher.lastIndex = declEnd;
+
+    for (
+      let iMatch = importMatcher.exec(code);
+      iMatch;
+      iMatch = importMatcher.exec(code)
+    ) {
+      const assignStart = iMatch.index;
+      const valueStart = iMatch.index + iMatch[0].length;
+      const valueEnd = findExpressionTerminator(code, valueStart);
+      let valueSource = code.slice(valueStart, valueEnd).trim();
+
+      if (valueSource.startsWith("(") && valueSource.endsWith(");")) {
+        valueSource = valueSource.slice(1, -2).trim();
+      } else if (valueSource.startsWith("(") && valueSource.endsWith(")")) {
+        valueSource = valueSource.slice(1, -1).trim();
+      }
+
+      const end = valueEnd < code.length && code[valueEnd] === ";"
+        ? valueEnd + 1
+        : valueEnd;
+
+      assignments.push({ property: "import", start: assignStart, end, valueSource });
+      importMatcher.lastIndex = end;
+    }
+
     declarations.push({ varName, start: declStart, end: declEnd, assignments });
   }
 

@@ -2356,6 +2356,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const configParts: Record<string, unknown> = {};
         const rawParts: Record<string, string> = {};
+        const importParts: unknown[] = [];
+        const rawImportParts: string[] = [];
         let allParsed = true;
 
         for (const assignment of decl.assignments) {
@@ -2395,8 +2397,66 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             allParsed = false;
             break;
           }
-          configParts[assignment.property] = value;
-          rawParts[assignment.property] = assignment.valueSource;
+
+          if (assignment.property === "import") {
+            importParts.push(value);
+            rawImportParts.push(assignment.valueSource);
+          } else {
+            configParts[assignment.property] = value;
+            rawParts[assignment.property] = assignment.valueSource;
+          }
+        }
+
+        if (importParts.length > 0) {
+          configParts.global = configParts.global ?? {};
+          const currentGlobal = configParts.global as Record<string, unknown>;
+
+          for (const entry of importParts) {
+            if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
+              currentGlobal["@import"] = currentGlobal["@import"] ?? [];
+              if (Array.isArray(currentGlobal["@import"])) {
+                currentGlobal["@import"].push(entry);
+              } else {
+                currentGlobal["@import"] = [currentGlobal["@import"], entry];
+              }
+            } else if (typeof entry === "object" && entry !== null) {
+              if ("rules" in entry) {
+                const ruleObj = entry as { layer?: string; rules: unknown };
+                if (ruleObj.layer && typeof ruleObj.layer === "string") {
+                  currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
+                } else if (ruleObj.rules && typeof ruleObj.rules === "object") {
+                  Object.assign(currentGlobal, ruleObj.rules);
+                }
+              } else {
+                Object.assign(currentGlobal, entry);
+              }
+            }
+          }
+
+          rawParts.global = `(function() {
+            const g = ${rawParts.global || "{}"};
+            for (const entry of [${rawImportParts.join(", ")}]) {
+              if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
+                g["@import"] = g["@import"] || [];
+                if (Array.isArray(g["@import"])) {
+                  g["@import"].push(entry);
+                } else {
+                  g["@import"] = [g["@import"], entry];
+                }
+              } else if (typeof entry === "object" && entry !== null) {
+                if ("rules" in entry) {
+                  if (entry.layer) {
+                    g[\`@layer \${entry.layer}\`] = entry.rules;
+                  } else {
+                    Object.assign(g, entry.rules);
+                  }
+                } else {
+                  Object.assign(g, entry);
+                }
+              }
+            }
+            return g;
+          })()`;
         }
 
         if (!allParsed) {
