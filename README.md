@@ -64,38 +64,6 @@ export default defineConfig({
 });
 ```
 
-Your existing Astro `tsconfig.json` can stay unchanged for this integration.
-
-## SvelteKit setup workflow (Python + uv)
-
-This repo includes a local setup CLI built with Python (`click` + `rich`).
-
-1. Install the tool from this monorepo:
-
-```bash
-uv tool install --editable .
-```
-
-2. Run it against your project:
-
-```bash
-css-ts-setup --npm --cwd /path/to/project
-```
-
-or for Deno projects:
-
-```bash
-css-ts-setup --deno --cwd /path/to/project
-```
-
-If you prefer not to install globally:
-
-```bash
-uv run css-ts-setup --npm --cwd /path/to/project
-```
-
-This updates `vite.config.*`, plus `package.json` (npm mode) or `deno.json` (deno mode), and installs `@kt-tools/css-ts`.
-
 ---
 
 ### Deno + Vite configuration (no package.json)
