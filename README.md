@@ -13,11 +13,11 @@ npx jsr add @kt-tools/css-ts
 ```
 
 ```bash
-npx jsr add --pnpm @kt-tools/css-ts
+pnpm dlx jsr add @kt-tools/css-ts
 ```
 
 ```bash
-npx jsr add --yarn @kt-tools/css-ts
+deno add jsr:@kt-tools/css-ts
 ```
 
 ## Vite setup
