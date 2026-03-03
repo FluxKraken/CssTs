@@ -703,6 +703,36 @@ function createCtBuilder<
       }
       return Reflect.get(target, prop, receiver);
     },
+    has(target, prop) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        return true;
+      }
+      if (typeof prop === "string" && !Reflect.has(target, prop)) {
+        const accessor = ensureCompiled()();
+        if (prop in accessor) {
+          return true;
+        }
+      }
+      return Reflect.has(target, prop);
+    },
+    ownKeys(target) {
+      const accessor = ensureCompiled()();
+      return Array.from(new Set([
+        ...Reflect.ownKeys(target),
+        ...CONFIG_KEYS,
+        ...Object.keys(accessor)
+      ]));
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (typeof prop === "string" && (CONFIG_KEYS.has(prop) || prop in ensureCompiled()())) {
+        return {
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
   }) as unknown as CtBuilder<T, V>;
 
   proxy.addContainer = (container: ContainerDefinitionInput) => {
