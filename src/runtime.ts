@@ -381,11 +381,14 @@ function mergeInlineDeclarations(...declarations: readonly StyleDeclaration[]): 
   return merged;
 }
 
-function toInlineStyleString(...declarations: readonly StyleDeclaration[]): string {
+function toInlineStyleString(
+  declarations: readonly StyleDeclaration[],
+  options?: CssSerializationOptions,
+): string {
   const merged = mergeInlineDeclarations(...declarations);
   const parts: string[] = [];
   for (const [name, value] of Object.entries(merged)) {
-    parts.push(toCssDeclaration(name, value));
+    parts.push(toCssDeclaration(name, value, options));
   }
   return parts.join(";");
 }
@@ -455,6 +458,7 @@ function compileConfig<
   const cssOptions: CssSerializationOptions = {
     breakpoints: runtimeOptions.breakpoints,
     containers: runtimeOptions.containers,
+    defaultUnit: runtimeOptions.defaultUnit,
   };
 
   const globalStyles = normalizeStyleSheetInput(config.global, normalizeOptions);
@@ -572,7 +576,7 @@ function compileConfig<
     const accessor = classAccessor as StyleAccessor<V>;
     accessor.class = classAccessor;
     accessor.style = (selection?: VariantSelection<V>) =>
-      toInlineStyleString(declaration, ...resolveVariantDeclarations(selection));
+      toInlineStyleString([declaration, ...resolveVariantDeclarations(selection)], cssOptions);
 
     accessors[key] = accessor as Accessor<T, V>[keyof T];
   }

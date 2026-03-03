@@ -24,6 +24,7 @@ type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> 
 type CtRuntimeOptions = {
   breakpoints?: Record<string, string>;
   containers?: Record<string, { type?: string; rule: string }>;
+  defaultUnit?: string;
   utilities?: StyleSheetInput;
   resolution?: "static" | "dynamic" | "hybrid";
   debug?: {

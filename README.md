@@ -514,6 +514,7 @@ import "./src/global.css";
 export default {
   include: ["./packages/ui"],
   imports: ["./src/theme.css"],
+  defaultUnit: "px", // optional; used for numeric style values
   resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default for non-Astro files)
   debug: {
     logDynamic: false, // dev server only
@@ -592,6 +593,24 @@ export default {
 #### Global stylesheet imports
 
 Both `import "./file.css"` side-effect imports and the `imports: [...]` array add global stylesheet imports to the virtual CSS bundle as `@import` rules.
+
+#### Default numeric unit
+
+Numeric style values append `px` by default:
+
+```ts
+fontSize: 1 // -> "1px"
+```
+
+Set `defaultUnit` in `css.config.*` to use another unit for numeric style values:
+
+```ts
+export default {
+  defaultUnit: "rem",
+};
+
+// fontSize: 1 -> "1rem"
+```
 
 #### Breakpoint aliases
 

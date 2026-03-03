@@ -324,6 +324,24 @@ Deno.test("cv() formats css variable references", () => {
   );
 });
 
+Deno.test("toCssDeclaration and toCssRules support configurable defaultUnit", () => {
+  assertEquals(
+    toCssDeclaration("fontSize", 1, { defaultUnit: "rem" }),
+    "font-size:1rem",
+  );
+  assertEquals(
+    toCssDeclaration("lineHeight", 1.4, { defaultUnit: "rem" }),
+    "line-height:1.4",
+  );
+  assertEquals(
+    toCssDeclaration("padding", cv("--space", 2), { defaultUnit: "rem" }),
+    "padding:var(--space, 2rem)",
+  );
+
+  const rules = toCssRules("test", { marginBlock: 2 }, { defaultUnit: "ch" });
+  assert(rules.includes(".test{margin-block:2ch}"));
+});
+
 Deno.test("toCssRules supports nested selectors and nested @media/@container blocks", () => {
   const rules = toCssRules("test", {
     fontSize: "1.25rem",
@@ -1237,6 +1255,58 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/);
     assertMatch(css, /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
     assertMatch(css, /@media \(width <= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr\}\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+      `  defaultUnit: "rem",\n` +
+      `  utilities: {\n` +
+      `    cardBase: {\n` +
+      `      marginBlock: 1,\n` +
+      `    },\n` +
+      `  },\n` +
+      `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      "@apply": ["cardBase"],\n` +
+      `      fontSize: 1,\n` +
+      `      padding: 2,\n` +
+      `      lineHeight: 1.2,\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+
+    const transformed = transform(moduleCode, `${root}/src/app-default-unit.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert((transformed.code as string).includes('"defaultUnit":"rem"'));
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.u-card-base\{margin-block:1rem\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{margin-block:1rem;font-size:1rem;padding:2rem;line-height:1\.2\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -2169,6 +2239,24 @@ Deno.test("runtime accepts variant keys not present in base", () => {
   } as any);
 
   assertMatch(styles().myButton({ size: "sm" }), /^ct_[a-z0-9]+$/);
+});
+
+Deno.test("runtime style() respects defaultUnit", () => {
+  const styles = ct(
+    {
+      base: {
+        card: {
+          fontSize: 1,
+          marginBlock: 2,
+          lineHeight: 1.25,
+        },
+      },
+    } as any,
+    undefined,
+    { defaultUnit: "rem" },
+  );
+
+  assertEquals(styles().card.style(), "font-size:1rem;margin-block:2rem;line-height:1.25");
 });
 
 Deno.test("runtime works without a document global", () => {

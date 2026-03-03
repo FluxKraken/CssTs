@@ -56,6 +56,8 @@ export interface CssSerializationOptions {
   breakpoints?: Record<string, string>;
   /** Named container presets (for example `{ card: { type: "inline-size", rule: "width < 20rem" } }`). */
   containers?: Record<string, { type?: string; rule: string }>;
+  /** Default unit for numeric style values (for example `"px"` or `"rem"`). */
+  defaultUnit?: string;
 }
 
 const UNITLESS_PROPERTIES = new Set([
@@ -141,10 +143,11 @@ export function createClassName(
  * Convert a style property to a CSS declaration string.
  * @param name Property name in camelCase.
  * @param value Style value to serialize.
+ * @param options Optional serialization settings (breakpoints, containers, default unit).
  */
-export function toCssDeclaration(name: string, value: StyleValue): string {
+export function toCssDeclaration(name: string, value: StyleValue, options?: CssSerializationOptions): string {
   const property = camelToKebab(name);
-  return `${property}:${formatStyleValue(property, value)}`;
+  return `${property}:${formatStyleValue(property, value, options)}`;
 }
 
 const PSEUDO_ELEMENT_KEYS = new Set([
@@ -220,10 +223,14 @@ function toPseudoSelectorIfShorthand(key: string): string | null {
   return null;
 }
 
-function toCssRule(selector: string, declaration: PseudoStyleDeclaration): string {
+function toCssRule(
+  selector: string,
+  declaration: PseudoStyleDeclaration,
+  options?: CssSerializationOptions,
+): string {
   const parts: string[] = [];
   for (const [name, value] of Object.entries(declaration)) {
-    parts.push(toCssDeclaration(name, value));
+    parts.push(toCssDeclaration(name, value, options));
   }
   return `${selector}{${parts.join(";")}}`;
 }
@@ -342,7 +349,7 @@ function collectCssRules(
   }
 
   if (Object.keys(base).length > 0) {
-    rules.push(wrapInAtRules(toCssRule(selector, base), atRules));
+    rules.push(wrapInAtRules(toCssRule(selector, base, options), atRules));
   }
 
   for (const [name, value] of nested) {
@@ -391,7 +398,7 @@ function collectGlobalCssRules(
     }
 
     if (Object.keys(nestedDeclarations).length > 0) {
-      rules.push(wrapInAtRules(toCssRule(selectorOrAtRule, nestedDeclarations), atRules));
+      rules.push(wrapInAtRules(toCssRule(selectorOrAtRule, nestedDeclarations, options), atRules));
     }
 
     return;
@@ -446,25 +453,33 @@ export function isCssVarRef(value: unknown): value is CssVarRef {
   );
 }
 
-function formatPrimitiveStyleValue(property: string, value: PrimitiveStyleValue): string {
+function formatPrimitiveStyleValue(
+  property: string,
+  value: PrimitiveStyleValue,
+  options?: CssSerializationOptions,
+): string {
   if (typeof value === "number" && !UNITLESS_PROPERTIES.has(property)) {
-    return `${value}px`;
+    return `${value}${options?.defaultUnit ?? "px"}`;
   }
   return String(value);
 }
 
-function formatStyleValue(property: string, value: StyleValue): string {
+function formatStyleValue(
+  property: string,
+  value: StyleValue,
+  options?: CssSerializationOptions,
+): string {
   if (Array.isArray(value)) {
     const separator = COMMA_DELIMITED_PROPERTIES.has(property) ? ", " : " ";
-    return value.map((entry) => formatStyleValue(property, entry)).join(separator);
+    return value.map((entry) => formatStyleValue(property, entry, options)).join(separator);
   }
 
   if (isCssVarRef(value)) {
     if (value.fallback === undefined) {
       return `var(${value.name})`;
     }
-    return `var(${value.name}, ${formatPrimitiveStyleValue(property, value.fallback)})`;
+    return `var(${value.name}, ${formatPrimitiveStyleValue(property, value.fallback, options)})`;
   }
 
-  return formatPrimitiveStyleValue(property, value as PrimitiveStyleValue);
+  return formatPrimitiveStyleValue(property, value as PrimitiveStyleValue, options);
 }

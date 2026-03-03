@@ -87,12 +87,14 @@ type LoadedCssConfig = {
   };
   breakpoints: Record<string, string>;
   containers: Record<string, { type?: string; rule: string }>;
+  defaultUnit?: string;
   include: string[];
   utilities: StyleSheet;
   utilityCss: string;
   runtimeOptions: {
     breakpoints?: Record<string, string>;
     containers?: Record<string, { type?: string; rule: string }>;
+    defaultUnit?: string;
     utilities?: StyleSheet;
     resolution?: "static" | "dynamic" | "hybrid";
     debug?: {
@@ -792,6 +794,14 @@ function normalizeBreakpoints(value: unknown): Record<string, string> {
   return normalized;
 }
 
+function normalizeDefaultUnit(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeContainers(
   value: unknown,
 ): Record<string, { type?: string; rule: string }> {
@@ -953,6 +963,7 @@ function loadCssConfig(
       },
       breakpoints: {},
       containers: {},
+      defaultUnit: undefined,
       include: [],
       utilities: {},
       utilityCss: "",
@@ -1195,6 +1206,7 @@ function loadCssConfig(
   const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
   const containers = normalizeContainers(configObject.containers);
+  const defaultUnit = normalizeDefaultUnit(configObject.defaultUnit);
 
   const parsedUtilities = isRecord(configObject.utilities)
     ? parseCtConfig({ base: configObject.utilities }, { containers })
@@ -1216,7 +1228,11 @@ function loadCssConfig(
 
   const utilityRules = Object.entries(utilitiesParsed)
     .flatMap(([name, declaration]) =>
-      toCssRules(`u-${camelToKebab(name)}`, declaration, { breakpoints, containers })
+      toCssRules(`u-${camelToKebab(name)}`, declaration, {
+        breakpoints,
+        containers,
+        defaultUnit,
+      })
     );
   const utilityCss = resolution === "dynamic" ? "" : utilityRules.join("\n");
 
@@ -1226,6 +1242,9 @@ function loadCssConfig(
   }
   if (Object.keys(containers).length > 0) {
     runtimeOptions.containers = containers;
+  }
+  if (defaultUnit) {
+    runtimeOptions.defaultUnit = defaultUnit;
   }
   if (Object.keys(utilitiesParsed).length > 0) {
     runtimeOptions.utilities = utilitiesParsed;
@@ -1240,6 +1259,7 @@ function loadCssConfig(
     debug,
     breakpoints,
     containers,
+    defaultUnit,
     include,
     utilities: utilitiesParsed,
     utilityCss,
@@ -1853,6 +1873,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     },
     breakpoints: {},
     containers: {},
+    defaultUnit: undefined,
     include: [],
     utilities: {},
     utilityCss: "",
@@ -2299,6 +2320,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             const rule of toCssGlobalRules(parsed.global, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
+              defaultUnit: cssConfig.defaultUnit,
             })
           ) {
             rules.add(rule);
@@ -2316,6 +2338,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             const rule of toCssRules(className, declaration, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
+              defaultUnit: cssConfig.defaultUnit,
             })
           ) {
             rules.add(rule);
@@ -2342,6 +2365,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   const rule of toCssRules(className, declaration, {
                     breakpoints: cssConfig.breakpoints,
                     containers: cssConfig.containers,
+                    defaultUnit: cssConfig.defaultUnit,
                   })
                 ) {
                   rules.add(rule);
@@ -2553,6 +2577,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             const rule of toCssGlobalRules(parsed.global, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
+              defaultUnit: cssConfig.defaultUnit,
             })
           ) {
             rules.add(rule);
@@ -2570,6 +2595,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             const rule of toCssRules(className, declaration, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
+              defaultUnit: cssConfig.defaultUnit,
             })
           ) {
             rules.add(rule);
@@ -2596,6 +2622,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   const rule of toCssRules(className, declaration, {
                     breakpoints: cssConfig.breakpoints,
                     containers: cssConfig.containers,
+                    defaultUnit: cssConfig.defaultUnit,
                   })
                 ) {
                   rules.add(rule);
