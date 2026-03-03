@@ -622,7 +622,37 @@ function compileConfig<
     }
   }
 
-  return () => accessors;
+  const factory = () => accessors;
+  return new Proxy(factory, {
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && prop in accessors) {
+        return (accessors as Record<string, unknown>)[prop];
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) {
+      if (typeof prop === "string" && prop in accessors) {
+        return true;
+      }
+      return Reflect.has(target, prop);
+    },
+    ownKeys(target) {
+      return Array.from(new Set([
+        ...Reflect.ownKeys(target),
+        ...Object.keys(accessors)
+      ]));
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (typeof prop === "string" && prop in accessors) {
+        return {
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
+  }) as unknown as () => Accessor<T, V>;
 }
 
 const CONFIG_KEYS = new Set(["base", "global", "variant", "defaults"]);
