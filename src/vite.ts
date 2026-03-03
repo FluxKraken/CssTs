@@ -922,6 +922,17 @@ function toBrowserStylesheetPath(
   return formatResult(bareImportPathRaw);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function identifierMentioned(source: string | undefined, identifier: string): boolean {
+  if (!source || source.trim().length === 0) {
+    return true;
+  }
+  return new RegExp(`\\b${escapeRegExp(identifier)}\\b`).test(source);
+}
+
 function loadCssConfig(
   projectRoot: string,
   resolverOptions: {
@@ -989,13 +1000,14 @@ function loadCssConfig(
     moduleInfo: ModuleStaticInfo,
     moduleId: string,
     excludeName?: string,
+    sourceHint?: string,
   ): Record<string, unknown> {
     const evalScope: Record<string, unknown> = {
       ...STATIC_EVAL_GLOBALS,
     };
 
     for (const localName of moduleInfo.functionDeclarations.keys()) {
-      if (localName === excludeName) {
+      if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
         continue;
       }
       const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -1005,7 +1017,7 @@ function loadCssConfig(
     }
 
     for (const localName of moduleInfo.constInitializers.keys()) {
-      if (localName === excludeName) {
+      if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
         continue;
       }
       const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -1015,6 +1027,9 @@ function loadCssConfig(
     }
 
     for (const localName of moduleInfo.imports.keys()) {
+      if (!identifierMentioned(sourceHint, localName)) {
+        continue;
+      }
       const localValue = resolveIdentifierInModule([localName], moduleId);
       if (localValue !== null) {
         evalScope[localName] = localValue;
@@ -1051,7 +1066,7 @@ function loadCssConfig(
         });
 
         if (value === null) {
-          value = evaluateExpression(initializer, buildEvalScope(moduleInfo, moduleId, head));
+          value = evaluateExpression(initializer, buildEvalScope(moduleInfo, moduleId, head, initializer));
         }
 
         if (value !== null) {
@@ -1062,7 +1077,7 @@ function loadCssConfig(
         if (functionDeclaration !== undefined) {
           const functionValue = evaluateFunctionDeclaration(
             functionDeclaration,
-            buildEvalScope(moduleInfo, moduleId, head),
+            buildEvalScope(moduleInfo, moduleId, head, functionDeclaration),
           );
           if (functionValue !== null) {
             resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
@@ -1124,7 +1139,12 @@ function loadCssConfig(
         } else {
           const evaluatedDefault = evaluateExpression(
             moduleInfo.defaultExportExpression,
-            buildEvalScope(moduleInfo, moduleId),
+            buildEvalScope(
+              moduleInfo,
+              moduleId,
+              undefined,
+              moduleInfo.defaultExportExpression,
+            ),
           );
           if (evaluatedDefault !== null) {
             resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
@@ -1155,7 +1175,7 @@ function loadCssConfig(
       configObject = parsed;
     } else if (configModuleInfo) {
       const evalScope: Record<string, unknown> = {
-        ...buildEvalScope(configModuleInfo, configPath),
+        ...buildEvalScope(configModuleInfo, configPath, undefined, defaultExpr),
         defineCssConfig: (input: unknown) => input,
       };
       const evaluated = evaluateExpression(defaultExpr, evalScope);
@@ -2082,12 +2102,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const moduleInfo = getModuleInfo(moduleId);
         if (moduleInfo) {
-          const buildEvalScope = (excludeName?: string): Record<string, unknown> => {
+          const buildEvalScope = (
+            excludeName?: string,
+            sourceHint?: string,
+          ): Record<string, unknown> => {
             const evalScope: Record<string, unknown> = {
               ...STATIC_EVAL_GLOBALS,
             };
             for (const localName of moduleInfo.functionDeclarations.keys()) {
-              if (localName === excludeName) {
+              if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
                 continue;
               }
               const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -2096,7 +2119,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               }
             }
             for (const localName of moduleInfo.constInitializers.keys()) {
-              if (localName === excludeName) {
+              if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
                 continue;
               }
               const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -2105,6 +2128,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               }
             }
             for (const localName of moduleInfo.imports.keys()) {
+              if (!identifierMentioned(sourceHint, localName)) {
+                continue;
+              }
               const localValue = resolveIdentifierInModule([localName], moduleId);
               if (localValue !== null) {
                 evalScope[localName] = localValue;
@@ -2121,7 +2147,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             });
 
             if (value === null) {
-              value = evaluateExpression(initializer, buildEvalScope(head));
+              value = evaluateExpression(initializer, buildEvalScope(head, initializer));
             }
 
             if (value !== null) {
@@ -2132,7 +2158,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             if (functionDeclaration !== undefined) {
               const functionValue = evaluateFunctionDeclaration(
                 functionDeclaration,
-                buildEvalScope(head),
+                buildEvalScope(head, functionDeclaration),
               );
               if (functionValue !== null) {
                 resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
@@ -2194,7 +2220,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             } else {
               const evaluatedDefault = evaluateExpression(
                 moduleInfo.defaultExportExpression,
-                buildEvalScope(),
+                buildEvalScope(undefined, moduleInfo.defaultExportExpression),
               );
               if (evaluatedDefault !== null) {
                 resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
@@ -2373,18 +2399,27 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ...STATIC_EVAL_GLOBALS,
               };
               for (const localName of moduleInfo.functionDeclarations.keys()) {
+                if (!identifierMentioned(assignment.valueSource, localName)) {
+                  continue;
+                }
                 const localValue = resolveIdentifierInModule([localName], normalizedId);
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
                 }
               }
               for (const localName of moduleInfo.constInitializers.keys()) {
+                if (!identifierMentioned(assignment.valueSource, localName)) {
+                  continue;
+                }
                 const localValue = resolveIdentifierInModule([localName], normalizedId);
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
                 }
               }
               for (const localName of moduleInfo.imports.keys()) {
+                if (!identifierMentioned(assignment.valueSource, localName)) {
+                  continue;
+                }
                 const localValue = resolveIdentifierInModule([localName], normalizedId);
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
