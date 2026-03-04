@@ -300,8 +300,33 @@ function isIdentifierReference(value: unknown): value is IdentifierReference {
   );
 }
 
+function identifierReferenceToCssLiteral(value: unknown): string | null {
+  if (!isIdentifierReference(value) || value.path.length !== 1) {
+    return null;
+  }
+
+  const [identifier] = value.path;
+  if (identifier === "revertLayer") {
+    return "revert-layer";
+  }
+  if (identifier === "currentColor") {
+    return "currentColor";
+  }
+
+  if (!/^[a-z][a-z0-9]*$/.test(identifier)) {
+    return null;
+  }
+
+  return identifier;
+}
+
 function isPrimitiveStyleLeaf(value: unknown): boolean {
-  return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    isCssVarRef(value) ||
+    identifierReferenceToCssLiteral(value) !== null
+  );
 }
 
 function isStyleLeaf(value: unknown): boolean {
@@ -427,6 +452,10 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
     return merged;
   }
 
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
   if (!isPlainObject(value) || isCssVarRef(value)) {
     return null;
   }
@@ -453,7 +482,17 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
     }
 
     if (isStyleLeaf(declarationValue)) {
-      (merged as Record<string, StyleValue>)[key] = declarationValue as StyleValue;
+      const cssIdentifierLiteral = identifierReferenceToCssLiteral(declarationValue);
+      if (cssIdentifierLiteral !== null) {
+        (merged as Record<string, StyleValue>)[key] = cssIdentifierLiteral;
+      } else if (Array.isArray(declarationValue)) {
+        const normalizedArray = declarationValue.map((entry) =>
+          identifierReferenceToCssLiteral(entry) ?? entry
+        ) as StyleValue;
+        (merged as Record<string, StyleValue>)[key] = normalizedArray;
+      } else {
+        (merged as Record<string, StyleValue>)[key] = declarationValue as StyleValue;
+      }
       continue;
     }
 
@@ -468,6 +507,10 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
 }
 
 function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleSheet | null {
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
   if (!isPlainObject(value)) {
     return null;
   }
@@ -534,6 +577,10 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
 }
 
 function normalizeVariantSheet(value: unknown, options: ParseCtOptions): VariantSheet | null {
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
   if (!isPlainObject(value)) {
     return null;
   }
@@ -566,6 +613,10 @@ function normalizeVariantSelection(
   value: unknown,
   variants: VariantSheet | undefined,
 ): VariantSelection | null {
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
   if (!isPlainObject(value)) {
     return null;
   }
@@ -655,16 +706,23 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
 
 const UNRESOLVED = Symbol("ct-parser-unresolved");
 
-function resolveParsedValue(value: ParsedValue, resolveIdentifier: IdentifierResolver): unknown | typeof UNRESOLVED {
+function resolveParsedValue(
+  value: ParsedValue,
+  resolveIdentifier: IdentifierResolver,
+  keepUnresolvedIdentifiers = false,
+): unknown | typeof UNRESOLVED {
   if (isIdentifierReference(value)) {
     const resolved = resolveIdentifier(value.path);
-    return resolved === undefined ? UNRESOLVED : resolved;
+    if (resolved === undefined) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    return resolved;
   }
 
   if (Array.isArray(value)) {
     const resolvedArray: unknown[] = [];
     for (const entry of value) {
-      const resolved = resolveParsedValue(entry, resolveIdentifier);
+      const resolved = resolveParsedValue(entry, resolveIdentifier, keepUnresolvedIdentifiers);
       if (resolved === UNRESOLVED) {
         return UNRESOLVED;
       }
@@ -676,7 +734,11 @@ function resolveParsedValue(value: ParsedValue, resolveIdentifier: IdentifierRes
   if (isPlainObject(value)) {
     const resolvedObject: Record<string, unknown> = {};
     for (const [key, nestedValue] of Object.entries(value)) {
-      const resolved = resolveParsedValue(nestedValue as ParsedValue, resolveIdentifier);
+      const resolved = resolveParsedValue(
+        nestedValue as ParsedValue,
+        resolveIdentifier,
+        keepUnresolvedIdentifiers,
+      );
       if (resolved === UNRESOLVED) {
         return UNRESOLVED;
       }
@@ -737,7 +799,7 @@ function parseCtCallArgumentsInternal(
     return null;
   }
 
-  const resolved = resolveParsedValue(parsed, resolveIdentifier);
+  const resolved = resolveParsedValue(parsed, resolveIdentifier, true);
   if (resolved === UNRESOLVED || !isPlainObject(resolved)) {
     return null;
   }

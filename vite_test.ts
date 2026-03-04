@@ -523,6 +523,26 @@ Deno.test("parser supports space-delimited property arrays", () => {
   assertEquals(rows, ["auto", "1fr", "auto"]);
 });
 
+Deno.test("parser supports bare identifier values in style declarations", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      pageWrapper: {
+        fontSize: revert,
+        borderStyle: solid,
+        color: currentColor,
+        gridTemplateRows: [auto, "1fr", auto]
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  assertEquals(declaration.fontSize, "revert");
+  assertEquals(declaration.borderStyle, "solid");
+  assertEquals(declaration.color, "currentColor");
+  assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
+});
+
 Deno.test("parser supports @apply merge lists with local declarations", () => {
   const parsed = parseCtCallArguments(`{
     base: {
@@ -652,6 +672,26 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   assertMatch(loaded as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("extracts css from bare identifier declaration values in ct() calls", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({ base: { card: { fontSize: revert, borderStyle: solid } } });`;
+  const transformed = transform(moduleCode, "/app/src/lib/bare-identifiers.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes(`"fontSize":"revert"`));
+  assert(code.includes(`"borderStyle":"solid"`));
+
+  const loaded = load(VIRTUAL_ID);
+  assertEquals(typeof loaded, "string");
+  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{font-size:revert;border-style:solid\}/);
 });
 
 Deno.test("extracts css from scoped package imports in ts modules", () => {
@@ -2424,6 +2464,26 @@ Deno.test("vite extracts css from new ct() pattern", () => {
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("vite extracts bare identifier declaration values from new ct() pattern", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { card: { fontSize: revert, borderStyle: solid } };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-bare-identifiers.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(code.includes(`"fontSize":"revert"`));
+  assert(code.includes(`"borderStyle":"solid"`));
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{font-size:revert;border-style:solid\}/);
 });
 
 Deno.test("vite extracts new ct() with variants and global", () => {

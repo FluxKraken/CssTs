@@ -756,7 +756,7 @@ The Vite plugin statically extracts `new ct()` declarations the same way it hand
 The build-time extractor supports `ct(...)` calls and `new ct()` declarations with object literal arguments:
 
 - style keys as identifiers/quoted keys
-- property values as strings, numbers, or `cv("--token")`
+- property values as strings, numbers, `cv("--token")`, or bare CSS identifier literals (for example `revert`, `solid`, `currentColor`)
 - property values as arrays for space-delimited or comma-delimited CSS values
 - declaration arrays (merged left-to-right)
 - `@apply` merge lists inside declarations

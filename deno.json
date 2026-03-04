@@ -1,6 +1,6 @@
 {
   "name": "@kt-tools/css-ts",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "license": "MIT",
   "exports": {
     ".": "./mod.ts",

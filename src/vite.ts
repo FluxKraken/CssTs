@@ -943,6 +943,29 @@ function identifierMentioned(source: string | undefined, identifier: string): bo
   return new RegExp(`\\b${escapeRegExp(identifier)}\\b`).test(source);
 }
 
+function toRuntimeCtConfigLiteral(parsed: {
+  global?: StyleSheet;
+  base: StyleSheet;
+  variant?: Record<string, Record<string, StyleSheet>>;
+  defaults?: Record<string, string>;
+}): string {
+  const runtimeConfig: Record<string, unknown> = {
+    base: parsed.base,
+  };
+
+  if (parsed.global && Object.keys(parsed.global).length > 0) {
+    runtimeConfig.global = parsed.global;
+  }
+  if (parsed.variant && Object.keys(parsed.variant).length > 0) {
+    runtimeConfig.variant = parsed.variant;
+  }
+  if (parsed.defaults && Object.keys(parsed.defaults).length > 0) {
+    runtimeConfig.defaults = parsed.defaults;
+  }
+
+  return JSON.stringify(runtimeConfig);
+}
+
 function loadCssConfig(
   projectRoot: string,
   resolverOptions: {
@@ -2269,18 +2292,18 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
-        const parsed = parseCtCallArguments(call.arg, {
-          utilities: cssConfig.utilities,
-          containers: cssConfig.containers,
-        }) ??
-          parseCtCallArgumentsWithResolver(
-            call.arg,
-            (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
-            {
-              utilities: cssConfig.utilities,
-              containers: cssConfig.containers,
-            },
-          );
+        const parsed = parseCtCallArgumentsWithResolver(
+          call.arg,
+          (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+          {
+            utilities: cssConfig.utilities,
+            containers: cssConfig.containers,
+          },
+        ) ??
+          parseCtCallArguments(call.arg, {
+            utilities: cssConfig.utilities,
+            containers: cssConfig.containers,
+          });
         if (!parsed) {
           if (resolution === "static") {
             throw staticResolutionError(
@@ -2379,7 +2402,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.variant = variantClassMap;
         }
 
-        const replacement = `ct(${call.arg}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
+        const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);
+        const replacement = `ct(${runtimeConfigLiteral}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
         replacements.push({ start: call.start, end: call.end, text: replacement });
       }
 
@@ -2405,9 +2429,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         const configParts: Record<string, unknown> = {};
-        const rawParts: Record<string, string> = {};
         const importParts: unknown[] = [];
-        const rawImportParts: string[] = [];
         let allParsed = true;
 
         for (const assignment of decl.assignments) {
@@ -2453,16 +2475,52 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             }
           }
           if (value === null) {
+            if (
+              assignment.property === "base" ||
+              assignment.property === "global" ||
+              assignment.property === "variant" ||
+              assignment.property === "defaults"
+            ) {
+              const partialParsed = parseCtCallArgumentsWithResolver(
+                `{ ${assignment.property}: ${assignment.valueSource} }`,
+                (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+                {
+                  utilities: cssConfig.utilities,
+                  containers: cssConfig.containers,
+                },
+              ) ?? parseCtCallArguments(
+                `{ ${assignment.property}: ${assignment.valueSource} }`,
+                {
+                  utilities: cssConfig.utilities,
+                  containers: cssConfig.containers,
+                },
+              );
+
+              if (partialParsed) {
+                if (assignment.property === "base") {
+                  configParts.base = partialParsed.base;
+                } else if (assignment.property === "global") {
+                  configParts.global = partialParsed.global ?? {};
+                } else if (assignment.property === "variant" && partialParsed.variant) {
+                  configParts.variant = partialParsed.variant;
+                } else if (assignment.property === "defaults" && partialParsed.defaults) {
+                  configParts.defaults = partialParsed.defaults;
+                }
+                if ((partialParsed.imports?.length ?? 0) > 0) {
+                  importParts.push(partialParsed.imports!);
+                }
+                continue;
+              }
+            }
+
             allParsed = false;
             break;
           }
 
           if (assignment.property === "import") {
             importParts.push(value);
-            rawImportParts.push(assignment.valueSource);
           } else {
             configParts[assignment.property] = value;
-            rawParts[assignment.property] = assignment.valueSource;
           }
         }
 
@@ -2498,33 +2556,6 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             }
           }
 
-          rawParts.global = `(function() {
-            const g = ${rawParts.global || "{}"};
-            for (const entryGroup of [${rawImportParts.join(", ")}]) {
-              const entries = Array.isArray(entryGroup) ? entryGroup : [entryGroup];
-              for (const entry of entries) {
-                if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
-                  g["@import"] = g["@import"] || [];
-                  if (Array.isArray(g["@import"])) {
-                    g["@import"].push(entry);
-                  } else {
-                    g["@import"] = [g["@import"], entry];
-                  }
-                } else if (typeof entry === "object" && entry !== null) {
-                  if ("rules" in entry) {
-                    if (entry.layer) {
-                      g[\`@layer \${entry.layer}\`] = entry.rules;
-                    } else {
-                      Object.assign(g, entry.rules);
-                    }
-                  } else {
-                    Object.assign(g, entry);
-                  }
-                }
-              }
-            }
-            return g;
-          })()`;
         }
 
         if (!allParsed) {
@@ -2636,11 +2667,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.variant = variantClassMap;
         }
 
-        const configEntries = Object.entries(rawParts)
-          .map(([key, raw]) => `${key}: ${raw}`)
-          .join(", ");
+        const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);
         const ctCall =
-          `ct({ ${configEntries} }, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
+          `ct(${runtimeConfigLiteral}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
         replacements.push({ start: decl.start, end: decl.end, text: `const ${decl.varName} = ${ctCall}` });
 
         for (const assignment of decl.assignments) {
