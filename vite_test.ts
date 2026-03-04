@@ -543,6 +543,24 @@ Deno.test("parser supports bare identifier values in style declarations", () => 
   assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
 });
 
+Deno.test("parser supports bare dashed identifier values in style declarations", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      pageWrapper: {
+        width: fit-content,
+        fontFamily: [ui-monospace, monospace],
+        animationTimingFunction: ease-in-out
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  assertEquals(declaration.width, "fit-content");
+  assertEquals(declaration.fontFamily, ["ui-monospace", "monospace"]);
+  assertEquals(declaration.animationTimingFunction, "ease-in-out");
+});
+
 Deno.test("parser supports @apply merge lists with local declarations", () => {
   const parsed = parseCtCallArguments(`{
     base: {
@@ -2484,6 +2502,33 @@ Deno.test("vite extracts bare identifier declaration values from new ct() patter
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{font-size:revert;border-style:solid\}/);
+});
+
+Deno.test("vite resolves @apply local const objects that use bare identifier values", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const utilityProse = {\n` +
+    `  "p": { margin: revert },\n` +
+    `  "h1": { fontWeight: revert },\n` +
+    `};\n` +
+    `const styles = new ct();\n` +
+    `styles.base = {\n` +
+    `  content: {\n` +
+    `    "@apply": utilityProse,\n` +
+    `    borderStyle: solid,\n` +
+    `  },\n` +
+    `};\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-bare-identifiers-apply.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{border-style:solid\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+ p\{margin:revert\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+ h1\{font-weight:revert\}/);
 });
 
 Deno.test("vite extracts new ct() with variants and global", () => {

@@ -154,6 +154,27 @@ function parseIdentifierReference(
   return [{ kind: "identifier-ref", path }, cursor];
 }
 
+function parseDashedIdentifierLiteral(
+  input: string,
+  identifier: string,
+  identifierEnd: number,
+): [string, number] | null {
+  const parts = [identifier];
+  let cursor = identifierEnd;
+
+  while (cursor < input.length && input[cursor] === "-" && isIdentifierStart(input[cursor + 1])) {
+    const [nextPart, nextEnd] = parseIdentifier(input, cursor + 1);
+    parts.push(nextPart);
+    cursor = nextEnd;
+  }
+
+  if (parts.length < 2) {
+    return null;
+  }
+
+  return [parts.join("-"), cursor];
+}
+
 function parseArray(input: string, index: number): [ParsedArray, number] {
   if (input[index] !== "[") {
     throw new Error(`Expected '[' at ${index}`);
@@ -211,6 +232,10 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
+    const dashedLiteral = parseDashedIdentifierLiteral(input, identifier, identifierEnd);
+    if (dashedLiteral) {
+      return dashedLiteral;
+    }
     let cursor = skipWhitespace(input, identifierEnd);
     if (input[cursor] !== "(") {
       return parseIdentifierReference(input, identifier, identifierEnd);
@@ -771,18 +796,20 @@ function parseExpression(source: string): ParsedValue | null {
 export function parseStaticExpression(
   source: string,
   resolveIdentifier?: IdentifierResolver,
+  options: { keepUnresolvedIdentifiers?: boolean } = {},
 ): unknown | null {
   const parsed = parseExpression(source);
   if (!parsed) {
     return null;
   }
+  const keepUnresolvedIdentifiers = options.keepUnresolvedIdentifiers === true;
 
   if (!resolveIdentifier) {
-    const unresolved = resolveParsedValue(parsed, () => undefined);
+    const unresolved = resolveParsedValue(parsed, () => undefined, keepUnresolvedIdentifiers);
     return unresolved === UNRESOLVED ? null : unresolved;
   }
 
-  const resolved = resolveParsedValue(parsed, resolveIdentifier);
+  const resolved = resolveParsedValue(parsed, resolveIdentifier, keepUnresolvedIdentifiers);
   if (resolved === UNRESOLVED) {
     return null;
   }

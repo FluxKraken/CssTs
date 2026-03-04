@@ -1097,7 +1097,7 @@ function loadCssConfig(
         let value = parseStaticExpression(initializer, (nestedPath) => {
           const nested = resolveIdentifierInModule(nestedPath, moduleId);
           return nested === null ? undefined : nested;
-        });
+        }, { keepUnresolvedIdentifiers: true });
 
         if (value === null) {
           value = evaluateExpression(initializer, buildEvalScope(moduleInfo, moduleId, head, initializer));
@@ -2188,7 +2188,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             let value = parseStaticExpression(initializer, (nestedPath) => {
               const nested = resolveIdentifierInModule(nestedPath, moduleId);
               return nested === null ? undefined : nested;
-            });
+            }, { keepUnresolvedIdentifiers: true });
 
             if (value === null) {
               value = evaluateExpression(initializer, buildEvalScope(head, initializer));
