@@ -31,7 +31,7 @@ type ImportBinding =
 
 type ModuleStaticInfo = {
   imports: Map<string, ImportBinding>;
-  constInitializers: Map<string, string>;
+  constInitializers: Map<string, { initializer: string; start: number; end: number; exported: boolean }>;
   functionDeclarations: Map<string, string>;
   exportedConsts: Map<string, string>;
   defaultExportExpression: string | null;
@@ -435,7 +435,7 @@ function parseBindingList(specifierList: string): Array<{ local: string; importe
 
 function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   const imports = new Map<string, ImportBinding>();
-  const constInitializers = new Map<string, string>();
+  const constInitializers = new Map<string, { initializer: string; start: number; end: number; exported: boolean }>();
   const functionDeclarations = new Map<string, string>();
   const exportedConsts = new Map<string, string>();
 
@@ -570,17 +570,24 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     const initializerEnd = findExpressionTerminator(code, initializerStart);
     const initializer = code.slice(initializerStart, initializerEnd).trim();
 
+    const declarationEnd = initializerEnd < code.length && code[initializerEnd] === ";"
+      ? initializerEnd + 1
+      : initializerEnd;
+
     if (initializer.length > 0) {
-      constInitializers.set(name, initializer);
+      constInitializers.set(name, {
+        initializer,
+        start: match.index,
+        end: declarationEnd,
+        exported: isExported,
+      });
     }
 
     if (isExported) {
       exportedConsts.set(name, name);
     }
 
-    constMatcher.lastIndex = initializerEnd < code.length && code[initializerEnd] === ";"
-      ? initializerEnd + 1
-      : initializerEnd;
+    constMatcher.lastIndex = declarationEnd;
   }
 
   const functionMatcher =
@@ -943,6 +950,71 @@ function identifierMentioned(source: string | undefined, identifier: string): bo
   return new RegExp(`\\b${escapeRegExp(identifier)}\\b`).test(source);
 }
 
+function countIdentifierMentions(source: string, identifier: string): number {
+  const matcher = new RegExp(`\\b${escapeRegExp(identifier)}\\b`, "g");
+  let count = 0;
+  for (let match = matcher.exec(source); match; match = matcher.exec(source)) {
+    count += 1;
+  }
+  return count;
+}
+
+function containsIdentifierReference(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  if (
+    "kind" in value &&
+    (value as { kind?: unknown }).kind === "identifier-ref" &&
+    "path" in value &&
+    Array.isArray((value as { path?: unknown }).path)
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsIdentifierReference(entry));
+  }
+
+  return Object.values(value as Record<string, unknown>).some((entry) => containsIdentifierReference(entry));
+}
+
+function stripUnusedStaticHelperConsts(code: string): string {
+  const moduleInfo = parseModuleStaticInfo(code);
+  const removals: Array<{ start: number; end: number }> = [];
+
+  for (const [name, info] of moduleInfo.constInitializers) {
+    if (info.exported) {
+      continue;
+    }
+
+    const parsedInitializer = parseStaticExpression(
+      info.initializer,
+      undefined,
+      { keepUnresolvedIdentifiers: true },
+    );
+    if (parsedInitializer === null || !containsIdentifierReference(parsedInitializer)) {
+      continue;
+    }
+
+    if (countIdentifierMentions(code, name) <= 1) {
+      removals.push({ start: info.start, end: info.end });
+    }
+  }
+
+  if (removals.length === 0) {
+    return code;
+  }
+
+  removals.sort((a, b) => b.start - a.start);
+  let nextCode = code;
+  for (const removal of removals) {
+    nextCode = nextCode.slice(0, removal.start) + nextCode.slice(removal.end);
+  }
+  return nextCode;
+}
+
 function toRuntimeCtConfigLiteral(parsed: {
   global?: StyleSheet;
   base: StyleSheet;
@@ -1092,8 +1164,9 @@ function loadCssConfig(
 
     const moduleInfo = getModuleInfo(moduleId);
     if (moduleInfo) {
-      const initializer = moduleInfo.constInitializers.get(head);
-      if (initializer !== undefined) {
+      const initializerInfo = moduleInfo.constInitializers.get(head);
+      if (initializerInfo !== undefined) {
+        const initializer = initializerInfo.initializer;
         let value = parseStaticExpression(initializer, (nestedPath) => {
           const nested = resolveIdentifierInModule(nestedPath, moduleId);
           return nested === null ? undefined : nested;
@@ -2183,8 +2256,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             return evalScope;
           };
 
-          const initializer = moduleInfo.constInitializers.get(head);
-          if (initializer !== undefined) {
+      const initializerInfo = moduleInfo.constInitializers.get(head);
+      if (initializerInfo !== undefined) {
+            const initializer = initializerInfo.initializer;
             let value = parseStaticExpression(initializer, (nestedPath) => {
               const nested = resolveIdentifierInModule(nestedPath, moduleId);
               return nested === null ? undefined : nested;
@@ -2689,6 +2763,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           replacement.text +
           nextCode.slice(replacement.end);
       }
+
+      nextCode = stripUnusedStaticHelperConsts(nextCode);
 
       let didVirtualCssChange = false;
       let scopedVirtualImport: string | null = null;
