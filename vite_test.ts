@@ -1071,7 +1071,7 @@ Deno.test("astro defaults to static resolution for unresolved new ct() assignmen
     assertThrows(
       () => transform(moduleCode, `${root}/src/pages/new-ct.astro`),
       Error,
-      "resolution=\"static\" could not statically resolve assignments for styles",
+      "resolution=\"static\" could not statically resolve config for styles",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1969,6 +1969,34 @@ Deno.test("new ct() resolves imported default objects without null-cache poisoni
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+Deno.test("new ct() extracts styles mixing unquoted value tokens and function calls", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `function responsiveWidth(width: string) {\n` +
+    `  return \`min(\${width}, 100%)\`;\n` +
+    `}\n` +
+    `const styles = new ct();\n` +
+    `styles.base = {\n` +
+    `  content: {\n` +
+    `    width: responsiveWidth("60rem"),\n` +
+    `    textAlign: center,\n` +
+    `    color: red,\n` +
+    `    marginInline: "auto",\n` +
+    `  },\n` +
+    `};\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-mixed-unquoted.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct()"));
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);text-align:center;color:red;margin-inline:auto\}/);
 });
 
 Deno.test("new ct() extracts styles computed by local function declarations", () => {

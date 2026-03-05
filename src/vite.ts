@@ -1422,10 +1422,26 @@ function transpileTsSnippet(source: string): string {
 function evaluateExpression(source: string, scope: Record<string, unknown>): unknown | null {
   const jsSource = transpileTsSnippet(`(${source})`);
   try {
-    const names = Object.keys(scope);
-    const values = names.map((name) => scope[name]);
-    const fn = new Function(...names, `"use strict"; return ${jsSource};`);
-    return fn(...values);
+    const proxyScope = new Proxy(scope, {
+      has(target, key) {
+        return true;
+      },
+      get(target, key) {
+        if (key in target) {
+          return target[key as string];
+        }
+        if (key === Symbol.unscopables) {
+          return undefined;
+        }
+        if (typeof key === "string" && key in globalThis) {
+          return globalThis[key as keyof typeof globalThis];
+        }
+        return key;
+      },
+    });
+
+    const fn = new Function("__scope", `with (__scope) { return ${jsSource}; }`);
+    return fn(proxyScope);
   } catch {
     return null;
   }
@@ -1434,10 +1450,26 @@ function evaluateExpression(source: string, scope: Record<string, unknown>): unk
 function evaluateFunctionDeclaration(source: string, scope: Record<string, unknown>): unknown | null {
   try {
     const jsSource = transpileTsSnippet(source);
-    const names = Object.keys(scope);
-    const values = names.map((name) => scope[name]);
-    const fn = new Function(...names, `"use strict"; return (${jsSource});`);
-    return fn(...values);
+    const proxyScope = new Proxy(scope, {
+      has(target, key) {
+        return true;
+      },
+      get(target, key) {
+        if (key in target) {
+          return target[key as string];
+        }
+        if (key === Symbol.unscopables) {
+          return undefined;
+        }
+        if (typeof key === "string" && key in globalThis) {
+          return globalThis[key as keyof typeof globalThis];
+        }
+        return key;
+      },
+    });
+
+    const fn = new Function("__scope", `with (__scope) { return (${jsSource}); }`);
+    return fn(proxyScope);
   } catch {
     return null;
   }
