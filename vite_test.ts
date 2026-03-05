@@ -2531,6 +2531,39 @@ Deno.test("vite resolves @apply local const objects that use bare identifier val
   assertMatch(css, /\.ct_[a-z0-9]+ h1\{font-weight:revert\}/);
 });
 
+Deno.test("vite extracts bare identifier declaration values with template literals", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/theme.ts`,
+      `export const theme = { width: "100%" };\n`,
+    );
+
+    const moduleCode =
+      `import ct from "css-ts";\n` +
+      `import { theme } from "$lib/theme";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = { card: { width: \`min(\${theme.width}, 60rem)\`, marginInline: auto } };\n`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+    const code = transformed.code as string;
+    assert(code.includes(`"marginInline":"auto"`));
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(100%, 60rem\);margin-inline:auto\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("vite extracts new ct() with variants and global", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

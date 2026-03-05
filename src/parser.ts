@@ -31,6 +31,11 @@ type IdentifierReference = {
   path: string[];
 };
 
+type TemplateLiteralReference = {
+  kind: "template-literal";
+  parts: ParsedValue[];
+};
+
 interface ParsedObject {
   [key: string]: ParsedValue;
 }
@@ -42,6 +47,7 @@ type ParsedValue =
   | number
   | ReturnType<typeof cv>
   | IdentifierReference
+  | TemplateLiteralReference
   | ParsedObject
   | ParsedArray;
 
@@ -113,6 +119,62 @@ function parseNumber(input: string, index: number): [number, number] {
     throw new Error("Invalid number literal");
   }
   return [Number(match[0]), index + match[0].length];
+}
+
+function parseTemplateLiteral(input: string, index: number): [ParsedValue, number] {
+  if (input[index] !== "`") {
+    throw new Error(`Expected '\`' at ${index}`);
+  }
+
+  index += 1;
+  const parts: ParsedValue[] = [];
+  let currentString = "";
+  let escaped = false;
+
+  while (index < input.length) {
+    const char = input[index];
+
+    if (escaped) {
+      currentString += char;
+      escaped = false;
+      index += 1;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === "`") {
+      if (currentString !== "") {
+        parts.push(currentString);
+      }
+      return [{ kind: "template-literal", parts }, index + 1];
+    }
+
+    if (char === "$" && input[index + 1] === "{") {
+      if (currentString !== "") {
+        parts.push(currentString);
+        currentString = "";
+      }
+      index += 2;
+      const [expressionValue, expressionEnd] = parseValue(input, index);
+      parts.push(expressionValue);
+      index = skipWhitespace(input, expressionEnd);
+      if (input[index] !== "}") {
+        throw new Error(`Expected '}' at ${index}`);
+      }
+      index += 1;
+      continue;
+    }
+
+    currentString += char;
+    index += 1;
+  }
+
+  throw new Error("Unterminated template literal");
 }
 
 function parseIdentifier(input: string, index: number): [string, number] {
@@ -226,6 +288,10 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
     return parseString(input, index);
   }
 
+  if (char === "`") {
+    return parseTemplateLiteral(input, index);
+  }
+
   if (char === "-" || /\d/.test(char)) {
     return parseNumber(input, index);
   }
@@ -322,6 +388,14 @@ function isIdentifierReference(value: unknown): value is IdentifierReference {
     value.kind === "identifier-ref" &&
     Array.isArray(value.path) &&
     value.path.every((part) => typeof part === "string")
+  );
+}
+
+function isTemplateLiteralReference(value: unknown): value is TemplateLiteralReference {
+  return (
+    isPlainObject(value) &&
+    value.kind === "template-literal" &&
+    Array.isArray(value.parts)
   );
 }
 
@@ -742,6 +816,18 @@ function resolveParsedValue(
       return keepUnresolvedIdentifiers ? value : UNRESOLVED;
     }
     return resolved;
+  }
+
+  if (isTemplateLiteralReference(value)) {
+    let resolvedString = "";
+    for (const part of value.parts) {
+      const resolvedPart = resolveParsedValue(part, resolveIdentifier, keepUnresolvedIdentifiers);
+      if (resolvedPart === UNRESOLVED) {
+        return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+      }
+      resolvedString += String(resolvedPart);
+    }
+    return resolvedString;
   }
 
   if (Array.isArray(value)) {
