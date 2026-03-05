@@ -1,4 +1,5 @@
 [tools]
 deno = "latest"
+gh = "latest"
 jj = "latest"
 node = "latest"
