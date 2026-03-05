@@ -342,6 +342,17 @@ Deno.test("toCssDeclaration and toCssRules support configurable defaultUnit", ()
   assert(rules.includes(".test{margin-block:2ch}"));
 });
 
+Deno.test("toCssDeclaration treats tokenized transition arrays as single shorthands", () => {
+  assertEquals(
+    toCssDeclaration("transition", ["text-decoration-color", "0.2s", "ease-in-out"]),
+    "transition:text-decoration-color 0.2s ease-in-out",
+  );
+  assertEquals(
+    toCssDeclaration("transition", ["opacity", "0.2s", "linear"]),
+    "transition:opacity 0.2s linear",
+  );
+});
+
 Deno.test("toCssRules supports nested selectors and nested @media/@container blocks", () => {
   const rules = toCssRules("test", {
     fontSize: "1.25rem",
@@ -795,6 +806,27 @@ Deno.test("extracts comma-delimited property arrays at build time", () => {
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{font-family:system-ui, sans-serif;transition:opacity 0\.2s, color 0\.3s\}/);
+});
+
+Deno.test("extracts tokenized transition arrays as single shorthands at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    textEl: {\n` +
+    `      transition: ["text-decoration-color", "0.2s", "ease-in-out"],\n` +
+    `    }\n` +
+    `  }\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/transition-token-props.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{transition:text-decoration-color 0\.2s ease-in-out\}/);
 });
 
 Deno.test("extracts @apply merge lists at build time", () => {

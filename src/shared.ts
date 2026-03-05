@@ -464,12 +464,55 @@ function formatPrimitiveStyleValue(
   return String(value);
 }
 
+function isTransitionTimingToken(value: string): boolean {
+  return (
+    /^-?\d*\.?\d+m?s$/i.test(value) ||
+    value === "linear" ||
+    value === "step-start" ||
+    value === "step-end" ||
+    value.startsWith("ease") ||
+    value.startsWith("steps(") ||
+    value.startsWith("cubic-bezier(")
+  );
+}
+
+function shouldUseSpaceDelimitedTransitionValue(value: readonly (PrimitiveStyleValue | CssVarRef)[]): boolean {
+  if (value.length < 2) {
+    return false;
+  }
+
+  let hasTimingToken = false;
+  for (const entry of value) {
+    if (typeof entry === "number") {
+      return false;
+    }
+
+    if (isCssVarRef(entry)) {
+      hasTimingToken = true;
+      continue;
+    }
+
+    if (/\s|,/.test(entry)) {
+      return false;
+    }
+
+    if (isTransitionTimingToken(entry)) {
+      hasTimingToken = true;
+    }
+  }
+
+  return hasTimingToken;
+}
+
 function formatStyleValue(
   property: string,
   value: StyleValue,
   options?: CssSerializationOptions,
 ): string {
   if (Array.isArray(value)) {
+    if (property === "transition" && shouldUseSpaceDelimitedTransitionValue(value)) {
+      return value.map((entry) => formatStyleValue(property, entry, options)).join(" ");
+    }
     const separator = COMMA_DELIMITED_PROPERTIES.has(property) ? ", " : " ";
     return value.map((entry) => formatStyleValue(property, entry, options)).join(separator);
   }
