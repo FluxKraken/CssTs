@@ -334,6 +334,52 @@ styles().label(); // applies defaults.size when available
 
 Notes:
 - Variant entries are partial overrides; you can provide only the keys you need.
+- Unquoted keys inside `variant` must already be declared in `base`. If you only need a variant-only accessor, declare it with an empty base rule such as `label: {}`.
+- Quoted keys inside `variant` are treated as selector rules for that variant, not as style accessors.
+
+### Variant-scoped global selectors
+
+Quoted variant keys are applied only when that variant is selected. This works in static extraction mode, so theme defaults can drive global selectors such as `html`.
+
+```ts
+import ct from "@kt-tools/css-ts";
+
+const styles = ct({
+  base: {
+    appShell: {
+      minHeight: "100dvh",
+    },
+  },
+  variant: {
+    theme: {
+      dark: {
+        appShell: {
+          backgroundColor: "#111",
+          color: "#fff",
+        },
+        ":global(html)": {
+          colorScheme: "dark",
+        },
+      },
+      light: {
+        appShell: {
+          backgroundColor: "#fff",
+          color: "#111",
+        },
+        ":global(html)": {
+          colorScheme: "light",
+        },
+      },
+    },
+  },
+  defaults: {
+    theme: "dark",
+  },
+});
+
+styles().appShell();
+styles().appShell({ theme: "light" });
+```
 
 ### Reusable style objects and declaration arrays
 
@@ -716,8 +762,14 @@ styles.global = {
 
 styles.variant = {
   theme: {
-    dark: { card: { backgroundColor: "#111", color: "#fff" } },
-    light: { card: { backgroundColor: "#fff", color: "#111" } },
+    dark: {
+      card: { backgroundColor: "#111", color: "#fff" },
+      ":global(html)": { colorScheme: "dark" },
+    },
+    light: {
+      card: { backgroundColor: "#fff", color: "#111" },
+      ":global(html)": { colorScheme: "light" },
+    },
   },
 };
 
@@ -750,6 +802,7 @@ The Vite plugin statically extracts `new ct()` declarations the same way it hand
 - Svelte files automatically import the virtual CSS module when static styles are detected.
 - Astro files automatically import the virtual CSS module in frontmatter when static styles are detected.
 - `new ct()` declarations are rewritten to equivalent precompiled `ct()` calls, and the property assignments are blanked out.
+- Quoted variant keys are compiled as variant-scoped selector rules and only the active default selection is applied at runtime.
 
 ## Current parser limitations
 
@@ -762,6 +815,8 @@ The build-time extractor supports `ct(...)` calls and `new ct()` declarations wi
 - `@apply` merge lists inside declarations
 - simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
 - optional `global`, `base`, `variant`, and `defaults` sections via `ct({ ... })`
+- unquoted variant keys only when the same key exists in `base`
+- quoted variant keys as selector rules for the selected variant (for example `":global(html)"`)
 - identifier references to `const` objects/arrays in the same module
 - named imports of `const` style objects from relative paths, Vite/SvelteKit aliases (including `$lib/...`), and `tsconfig.json` path aliases
 - imported/local `const` objects computed by statically evaluable helper function calls

@@ -239,6 +239,10 @@ function splitSelectors(value: string): string[] {
   return value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+function unwrapGlobalSelector(value: string): string {
+  return value.replace(/:global\(([^()]+)\)/g, "$1");
+}
+
 function nestSelector(parentSelector: string, childSelector: string): string {
   const parents = splitSelectors(parentSelector);
   const children = splitSelectors(childSelector);
@@ -404,7 +408,7 @@ function collectGlobalCssRules(
     return;
   }
 
-  collectCssRules(selectorOrAtRule, declaration, atRules, rules, options);
+  collectCssRules(unwrapGlobalSelector(selectorOrAtRule), declaration, atRules, rules, options);
 }
 
 /**

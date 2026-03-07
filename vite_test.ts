@@ -678,7 +678,7 @@ Deno.test("parser accepts defaults variant selections", () => {
   assertEquals(parsed.defaults, { size: "md" });
 });
 
-Deno.test("parser accepts variant keys not present in base", () => {
+Deno.test("parser requires unquoted variant keys to be declared in base", () => {
   const parsed = parseCtCallArguments(`{
     base: {
       myButton: {}
@@ -690,8 +690,44 @@ Deno.test("parser accepts variant keys not present in base", () => {
     }
   }`);
 
+  assertEquals(parsed, null);
+});
+
+Deno.test("parser accepts variant keys declared as empty base rules", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      myButton: {},
+      label: {}
+    },
+    variant: {
+      size: {
+        sm: { label: { fontSize: "0.8rem" } }
+      }
+    }
+  }`);
+
   assert(parsed !== null);
   assertEquals(parsed.variant?.size?.sm?.label.fontSize, "0.8rem");
+});
+
+Deno.test("parser routes quoted variant keys into variantGlobal", () => {
+  const parsed = parseCtCallArguments(`{
+    variant: {
+      theme: {
+        dark: {
+          ":global(html)": { colorScheme: "dark" }
+        }
+      }
+    },
+    defaults: {
+      theme: "dark"
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.variant, undefined);
+  assertEquals(parsed.variantGlobal?.theme?.dark?.[":global(html)"]?.colorScheme, "dark");
+  assertEquals(parsed.defaults, { theme: "dark" });
 });
 
 Deno.test("injects virtual stylesheet import in svelte files that only import ct styles", () => {
@@ -2364,10 +2400,11 @@ Deno.test("runtime applies defaults to variant selection and allows overrides", 
   assert(withDefaults !== styles().myButton({ size: "sm" }));
 });
 
-Deno.test("runtime accepts variant keys not present in base", () => {
+Deno.test("runtime applies variant overrides for empty base declarations", () => {
   const styles = ct({
     base: {
       myButton: { padding: "1rem" },
+      label: {},
     },
     variant: {
       size: {
@@ -2376,7 +2413,85 @@ Deno.test("runtime accepts variant keys not present in base", () => {
     },
   } as any);
 
-  assertMatch(styles().myButton({ size: "sm" }), /^ct_[a-z0-9]+$/);
+  assertEquals(styles().label.style(), "");
+  assertEquals(styles().label.style({ size: "sm" }), "font-size:0.8rem");
+  assertMatch(styles().label({ size: "sm" }), /^ct_[a-z0-9]+ ct_[a-z0-9]+$/);
+});
+
+Deno.test("runtime swaps selected variantGlobal rules in static mode", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = new (ct as any)(
+      undefined,
+      {
+        base: { app: "ct_app" },
+        variantGlobal: {
+          theme: {
+            dark: ["html{color-scheme:dark}"],
+            light: ["html{color-scheme:light}"],
+          },
+        },
+      },
+      { resolution: "static" },
+    );
+    styles.base = { app: {} };
+    styles.variantGlobal = {
+      theme: {
+        dark: { ":global(html)": { colorScheme: "dark" } },
+        light: { ":global(html)": { colorScheme: "light" } },
+      },
+    };
+    styles.defaults = { theme: "dark" };
+
+    styles().app();
+    const variantTag = Array.from(tags.values()).find((tag) => tag.id.includes("variant_global"));
+    assert(variantTag);
+    assertEquals(variantTag.textContent, "html{color-scheme:dark}");
+
+    styles.defaults = { theme: "light" };
+    styles().app();
+    assertEquals(variantTag.textContent, "html{color-scheme:light}");
+  } finally {
+    if (originalDocument !== undefined) {
+      globals.document = originalDocument;
+    } else {
+      delete globals.document;
+    }
+  }
 });
 
 Deno.test("runtime style() respects defaultUnit", () => {
@@ -2663,4 +2778,34 @@ Deno.test("vite extracts new ct() with variants and global", () => {
   assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{background-color:black\}/);
+});
+
+Deno.test("vite compiles quoted variant selectors into runtime-managed variantGlobal rules", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode =
+    `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.base = { app: { display: "block" } };\n` +
+    `styles.variant = {\n` +
+    `  theme: {\n` +
+    `    dark: { ":global(html)": { colorScheme: "dark" } },\n` +
+    `    light: { ":global(html)": { colorScheme: "light" } }\n` +
+    `  }\n` +
+    `};\n` +
+    `styles.defaults = { theme: "dark" };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-variant-global.ts");
+  assert(transformed && typeof transformed === "object" && "code" in transformed);
+
+  const code = transformed.code as string;
+  assertMatch(code, /variantGlobal/);
+  assertMatch(code, /html\{color-scheme:dark\}/);
+  assertMatch(code, /html\{color-scheme:light\}/);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:block\}/);
+  assert(!css.includes("color-scheme:dark"));
+  assert(!css.includes("color-scheme:light"));
 });

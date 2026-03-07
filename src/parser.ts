@@ -12,12 +12,14 @@ interface ParseResult {
 }
 
 type VariantSheet = Record<string, Record<string, StyleSheet>>;
+type VariantGlobalSheet = Record<string, Record<string, StyleSheet>>;
 type VariantSelection = Record<string, string>;
 type CtConfig = {
   imports?: string[];
   global?: StyleSheet;
   base: StyleSheet;
   variant?: VariantSheet;
+  variantGlobal?: VariantGlobalSheet;
   defaults?: VariantSelection;
 };
 type ParseCtOptions = {
@@ -39,6 +41,8 @@ type TemplateLiteralReference = {
 interface ParsedObject {
   [key: string]: ParsedValue;
 }
+
+const QUOTED_KEYS = Symbol("ct-parser-quoted-keys");
 
 interface ParsedArray extends Array<ParsedValue> { }
 
@@ -187,10 +191,14 @@ function parseIdentifier(input: string, index: number): [string, number] {
   return [input.slice(index, end), end];
 }
 
-function parseKey(input: string, index: number): [string, number] {
+function parseKey(input: string, index: number): [string, number, boolean] {
   const char = input[index];
-  if (char === '"' || char === "'") return parseString(input, index);
-  return parseIdentifier(input, index);
+  if (char === '"' || char === "'") {
+    const [value, end] = parseString(input, index);
+    return [value, end, true];
+  }
+  const [value, end] = parseIdentifier(input, index);
+  return [value, end, false];
 }
 
 function parseIdentifierReference(
@@ -352,7 +360,7 @@ function parseObject(input: string, index: number): ParseResult {
       return { value, end: index + 1 };
     }
 
-    const [key, keyEnd] = parseKey(input, index);
+    const [key, keyEnd, quoted] = parseKey(input, index);
     index = skipWhitespace(input, keyEnd);
 
     if (input[index] !== ":") {
@@ -361,6 +369,9 @@ function parseObject(input: string, index: number): ParseResult {
 
     const [parsedValue, valueEnd] = parseValue(input, index + 1);
     value[key] = parsedValue;
+    if (quoted) {
+      setQuotedKey(value, key);
+    }
     index = skipWhitespace(input, valueEnd);
 
     if (input[index] === ",") {
@@ -380,6 +391,28 @@ function parseObject(input: string, index: number): ParseResult {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function setQuotedKey(value: Record<string, unknown>, key: string): void {
+  let quotedKeys = (value as Record<PropertyKey, unknown>)[QUOTED_KEYS];
+  if (!(quotedKeys instanceof Set)) {
+    quotedKeys = new Set<string>();
+    Object.defineProperty(value, QUOTED_KEYS, {
+      value: quotedKeys,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  (quotedKeys as Set<string>).add(key);
+}
+
+function getQuotedKeys(value: unknown): ReadonlySet<string> {
+  if (!isPlainObject(value)) {
+    return new Set<string>();
+  }
+
+  const quotedKeys = (value as Record<PropertyKey, unknown>)[QUOTED_KEYS];
+  return quotedKeys instanceof Set ? quotedKeys : new Set<string>();
 }
 
 function isIdentifierReference(value: unknown): value is IdentifierReference {
@@ -675,7 +708,11 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   return sheet;
 }
 
-function normalizeVariantSheet(value: unknown, options: ParseCtOptions): VariantSheet | null {
+function normalizeVariantSheet(
+  value: unknown,
+  base: StyleSheet,
+  options: ParseCtOptions,
+): { variant?: VariantSheet; variantGlobal?: VariantGlobalSheet } | null {
   if (isIdentifierReference(value)) {
     return null;
   }
@@ -685,6 +722,7 @@ function normalizeVariantSheet(value: unknown, options: ParseCtOptions): Variant
   }
 
   const variantSheet: VariantSheet = {};
+  const variantGlobalSheet: VariantGlobalSheet = {};
 
   for (const [groupName, group] of Object.entries(value)) {
     if (!isPlainObject(group)) {
@@ -692,20 +730,55 @@ function normalizeVariantSheet(value: unknown, options: ParseCtOptions): Variant
     }
 
     const normalizedGroup: Record<string, StyleSheet> = {};
+    const normalizedGlobalGroup: Record<string, StyleSheet> = {};
 
     for (const [variantName, variant] of Object.entries(group)) {
-      const normalizedVariant = normalizeStyleSheet(variant, options);
-      if (!normalizedVariant) {
+      if (!isPlainObject(variant)) {
         return null;
       }
 
-      normalizedGroup[variantName] = normalizedVariant;
+      const normalizedVariant: StyleSheet = {};
+      const normalizedGlobalVariant: StyleSheet = {};
+      const quotedKeys = getQuotedKeys(variant);
+
+      for (const [key, declaration] of Object.entries(variant)) {
+        const normalizedDeclaration = normalizeStyleDeclaration(declaration, options);
+        if (!normalizedDeclaration) {
+          return null;
+        }
+
+        if (quotedKeys.has(key)) {
+          normalizedGlobalVariant[key] = normalizedDeclaration;
+          continue;
+        }
+
+        if (!(key in base)) {
+          return null;
+        }
+
+        normalizedVariant[key] = normalizedDeclaration;
+      }
+
+      if (Object.keys(normalizedVariant).length > 0) {
+        normalizedGroup[variantName] = normalizedVariant;
+      }
+      if (Object.keys(normalizedGlobalVariant).length > 0) {
+        normalizedGlobalGroup[variantName] = normalizedGlobalVariant;
+      }
     }
 
-    variantSheet[groupName] = normalizedGroup;
+    if (Object.keys(normalizedGroup).length > 0) {
+      variantSheet[groupName] = normalizedGroup;
+    }
+    if (Object.keys(normalizedGlobalGroup).length > 0) {
+      variantGlobalSheet[groupName] = normalizedGlobalGroup;
+    }
   }
 
-  return variantSheet;
+  return {
+    variant: Object.keys(variantSheet).length > 0 ? variantSheet : undefined,
+    variantGlobal: Object.keys(variantGlobalSheet).length > 0 ? variantGlobalSheet : undefined,
+  };
 }
 
 function normalizeVariantSelection(
@@ -759,6 +832,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   let global: StyleSheet | undefined;
   let base: StyleSheet = {};
   let variant: VariantSheet | undefined;
+  let variantGlobal: VariantGlobalSheet | undefined;
   let defaults: VariantSelection | undefined;
 
   if ("global" in value) {
@@ -778,11 +852,12 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   if ("variant" in value) {
-    const normalized = normalizeVariantSheet(value.variant, parseOptions);
+    const normalized = normalizeVariantSheet(value.variant, base, parseOptions);
     if (!normalized) {
       return null;
     }
-    variant = normalized;
+    variant = normalized.variant;
+    variantGlobal = normalized.variantGlobal;
   }
 
   if ("defaults" in value) {
@@ -799,6 +874,7 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
     global,
     base,
     variant,
+    variantGlobal,
     defaults,
   };
 }
@@ -854,6 +930,9 @@ function resolveParsedValue(
         return UNRESOLVED;
       }
       resolvedObject[key] = resolved;
+    }
+    for (const quotedKey of getQuotedKeys(value)) {
+      setQuotedKey(resolvedObject, quotedKey);
     }
     return resolvedObject;
   }

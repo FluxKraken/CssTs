@@ -1098,6 +1098,7 @@ function toRuntimeCtConfigLiteral(parsed: {
   global?: StyleSheet;
   base: StyleSheet;
   variant?: Record<string, Record<string, StyleSheet>>;
+  variantGlobal?: Record<string, Record<string, StyleSheet>>;
   defaults?: Record<string, string>;
 }): string {
   const runtimeConfig: Record<string, unknown> = {
@@ -1109,6 +1110,9 @@ function toRuntimeCtConfigLiteral(parsed: {
   }
   if (parsed.variant && Object.keys(parsed.variant).length > 0) {
     runtimeConfig.variant = parsed.variant;
+  }
+  if (parsed.variantGlobal && Object.keys(parsed.variantGlobal).length > 0) {
+    runtimeConfig.variantGlobal = parsed.variantGlobal;
   }
   if (parsed.defaults && Object.keys(parsed.defaults).length > 0) {
     runtimeConfig.defaults = parsed.defaults;
@@ -2504,6 +2508,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const classMap: Record<string, string> = {};
         const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
+        const variantGlobalRuleMap: Record<string, Record<string, string[]>> = {};
         const compiledConfig: Record<string, unknown> = {};
         if ((parsed.imports?.length ?? 0) > 0) {
           compiledConfig.imports = true;
@@ -2571,6 +2576,23 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             variantClassMap[group] = groupMap;
           }
           compiledConfig.variant = variantClassMap;
+        }
+
+        if (parsed.variantGlobal) {
+          for (const [group, variants] of Object.entries(parsed.variantGlobal)) {
+            const groupMap: Record<string, string[]> = {};
+            for (const [variantName, declarations] of Object.entries(variants)) {
+              const variantRules = toCssGlobalRules(declarations, {
+                breakpoints: cssConfig.breakpoints,
+                containers: cssConfig.containers,
+                defaultUnit: cssConfig.defaultUnit,
+              });
+              groupMap[variantName] = variantRules;
+              logStatic(`variantGlobal.${group}.${variantName}`);
+            }
+            variantGlobalRuleMap[group] = groupMap;
+          }
+          compiledConfig.variantGlobal = variantGlobalRuleMap;
         }
 
         const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);
@@ -2769,6 +2791,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const classMap: Record<string, string> = {};
         const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
+        const variantGlobalRuleMap: Record<string, Record<string, string[]>> = {};
         const compiledConfig: Record<string, unknown> = {};
         if ((parsed.imports?.length ?? 0) > 0) {
           compiledConfig.imports = true;
@@ -2836,6 +2859,23 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             variantClassMap[group] = groupMap;
           }
           compiledConfig.variant = variantClassMap;
+        }
+
+        if (parsed.variantGlobal) {
+          for (const [group, variants] of Object.entries(parsed.variantGlobal)) {
+            const groupMap: Record<string, string[]> = {};
+            for (const [variantName, declarations] of Object.entries(variants)) {
+              const variantRules = toCssGlobalRules(declarations, {
+                breakpoints: cssConfig.breakpoints,
+                containers: cssConfig.containers,
+                defaultUnit: cssConfig.defaultUnit,
+              });
+              groupMap[variantName] = variantRules;
+              logStatic(`variantGlobal.${group}.${variantName}`);
+            }
+            variantGlobalRuleMap[group] = groupMap;
+          }
+          compiledConfig.variantGlobal = variantGlobalRuleMap;
         }
 
         const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);

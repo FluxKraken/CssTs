@@ -15,7 +15,8 @@ function assertDistGuards() {
 
   assert(!code.includes('require("npm:typescript'), "dist/vite.js must not require npm:typescript");
   assert(!code.includes("require('npm:typescript"), "dist/vite.js must not require npm:typescript");
-  assert(code.includes('nodeRequire("typescript")'), "dist/vite.js must load typescript via nodeRequire");
+  assert(code.includes('createRequire(import.meta.url)'), "dist/vite.js must bootstrap node require via createRequire");
+  assert(code.includes('requireFn("typescript")'), "dist/vite.js must load typescript through the node require path");
 }
 
 function asHook(hook) {
