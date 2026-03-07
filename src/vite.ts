@@ -109,6 +109,20 @@ type NodeFs = typeof import("node:fs");
 type NodePath = typeof import("node:path");
 type NodeModule = typeof import("node:module");
 type NodeRequire = (id: string) => unknown;
+type NodeRequireWithResolve = NodeRequire & { resolve?: (id: string) => string };
+type TypeScriptTranspileApi = {
+  transpileModule: (
+    source: string,
+    options: {
+      compilerOptions: {
+        target: number;
+        module: number;
+      };
+    },
+  ) => { outputText: string };
+  ScriptTarget: { ES2020: number };
+  ModuleKind: { ESNext: number };
+};
 
 let nodeFs: NodeFs | null | undefined;
 let nodePath: NodePath | null | undefined;
@@ -155,6 +169,71 @@ function getNodeRequire(): NodeRequire | null {
 
   nodeRequire = getFallbackRequire();
   return nodeRequire;
+}
+
+function isTypeScriptTranspileApi(value: unknown): value is TypeScriptTranspileApi {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<TypeScriptTranspileApi>;
+  return (
+    typeof candidate.transpileModule === "function" &&
+    typeof candidate.ScriptTarget?.ES2020 === "number" &&
+    typeof candidate.ModuleKind?.ESNext === "number"
+  );
+}
+
+function loadTypeScriptModuleFromDisk(requireFn: NodeRequire): TypeScriptTranspileApi | null {
+  const requireWithResolve = requireFn as NodeRequireWithResolve;
+  if (typeof requireWithResolve.resolve !== "function") {
+    return null;
+  }
+
+  try {
+    const modulePath = requireWithResolve.resolve("typescript/lib/typescript.js");
+    const fs = getNodeFs();
+    const path = getNodePath();
+    const source = fs.readFileSync(modulePath, "utf8");
+    const module = { exports: {} as unknown };
+    const exports = module.exports;
+
+    // Deno's CommonJS interop can return an empty namespace for typescript; execute the CJS bundle directly instead.
+    const loaded = new Function(
+      "exports",
+      "require",
+      "module",
+      "__filename",
+      "__dirname",
+      `${source}\nreturn module.exports;`,
+    )(exports, requireFn, module, modulePath, path.dirname(modulePath));
+
+    return isTypeScriptTranspileApi(loaded) ? loaded : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadTypeScriptModule(requireFn: NodeRequire): TypeScriptTranspileApi | null {
+  try {
+    const loaded = requireFn("typescript");
+    if (isTypeScriptTranspileApi(loaded)) {
+      return loaded;
+    }
+
+    if (
+      loaded &&
+      typeof loaded === "object" &&
+      "default" in (loaded as Record<string, unknown>) &&
+      isTypeScriptTranspileApi((loaded as Record<string, unknown>).default)
+    ) {
+      return (loaded as { default: TypeScriptTranspileApi }).default;
+    }
+  } catch {
+    // fall through to the disk-backed fallback
+  }
+
+  return loadTypeScriptModuleFromDisk(requireFn);
 }
 
 function getNodeFs(): NodeFs {
@@ -1374,34 +1453,20 @@ function getTsTranspiler(): ((source: string) => string) | null {
     return null;
   }
 
-  try {
-    const nodeRequire = requireFn;
-    const typescript = nodeRequire("typescript") as {
-      transpileModule: (
-        source: string,
-        options: {
-          compilerOptions: {
-            target: number;
-            module: number;
-          };
-        },
-      ) => { outputText: string };
-      ScriptTarget: { ES2020: number };
-      ModuleKind: { ESNext: number };
-    };
-
-    tsTranspiler = (source: string): string =>
-      typescript.transpileModule(source, {
-        compilerOptions: {
-          target: typescript.ScriptTarget.ES2020,
-          module: typescript.ModuleKind.ESNext,
-        },
-      }).outputText;
-    return tsTranspiler;
-  } catch {
+  const typescript = loadTypeScriptModule(requireFn);
+  if (!typescript) {
     tsTranspiler = null;
     return null;
   }
+
+  tsTranspiler = (source: string): string =>
+    typescript.transpileModule(source, {
+      compilerOptions: {
+        target: typescript.ScriptTarget.ES2020,
+        module: typescript.ModuleKind.ESNext,
+      },
+    }).outputText;
+  return tsTranspiler;
 }
 
 function transpileTsSnippet(source: string): string {

@@ -458,10 +458,43 @@ function formatPrimitiveStyleValue(
   value: PrimitiveStyleValue,
   options?: CssSerializationOptions,
 ): string {
+  if (property === "content" && typeof value === "string") {
+    return formatContentValue(value);
+  }
+
   if (typeof value === "number" && !UNITLESS_PROPERTIES.has(property)) {
     return `${value}${options?.defaultUnit ?? "px"}`;
   }
   return String(value);
+}
+
+const RAW_CONTENT_KEYWORDS = new Set([
+  "none",
+  "normal",
+  "open-quote",
+  "close-quote",
+  "no-open-quote",
+  "no-close-quote",
+]);
+
+function isQuotedCssString(value: string): boolean {
+  return (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  );
+}
+
+function isRawContentFunction(value: string): boolean {
+  return /^(attr|counter|counters|element|leader|target-counter|target-counters|target-text|string)\(/.test(value);
+}
+
+function formatContentValue(value: string): string {
+  if (isQuotedCssString(value) || RAW_CONTENT_KEYWORDS.has(value) || isRawContentFunction(value)) {
+    return value;
+  }
+
+  return JSON.stringify(value);
 }
 
 function isTransitionTimingToken(value: string): boolean {

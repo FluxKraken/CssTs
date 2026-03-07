@@ -353,6 +353,26 @@ Deno.test("toCssDeclaration treats tokenized transition arrays as single shortha
   );
 });
 
+Deno.test("toCssDeclaration quotes string content values and preserves raw content tokens", () => {
+  assertEquals(toCssDeclaration("content", ""), `content:""`);
+  assertEquals(toCssDeclaration("content", "- "), `content:"- "`);
+  assertEquals(toCssDeclaration("content", "''"), `content:''`);
+  assertEquals(toCssDeclaration("content", "open-quote"), `content:open-quote`);
+  assertEquals(toCssDeclaration("content", "attr(data-label)"), `content:attr(data-label)`);
+});
+
+Deno.test("toCssRules serializes empty content strings in pseudo elements", () => {
+  assertEquals(
+    toCssRules("test", {
+      after: {
+        content: "",
+        backgroundColor: "red",
+      },
+    }),
+    [`.test::after{content:\"\";background-color:red}`],
+  );
+});
+
 Deno.test("toCssRules supports nested selectors and nested @media/@container blocks", () => {
   const rules = toCssRules("test", {
     fontSize: "1.25rem",
