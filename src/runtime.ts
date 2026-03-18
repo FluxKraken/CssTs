@@ -1,6 +1,6 @@
 import {
-  CssSerializationOptions,
   createClassName,
+  CssSerializationOptions,
   isCssVarRef,
   StyleDeclaration,
   StyleSheet,
@@ -11,13 +11,18 @@ import {
 } from "./shared.js";
 
 /** A style declaration or recursive array of declarations (merged left-to-right). */
-type StyleDeclarationInput = StyleDeclaration | readonly StyleDeclarationInput[];
+type StyleDeclarationInput =
+  | StyleDeclaration
+  | readonly StyleDeclarationInput[];
 /** Map of class keys to style declaration inputs. */
 type StyleSheetInput = Record<string, StyleDeclarationInput>;
 /** Precompiled class name map keyed by style key. */
 type CompiledMap<T extends StyleSheetInput> = Partial<Record<keyof T, string>>;
 /** Variant group map: `{ groupName: { variantName: Partial<StyleSheet> } }`. */
-type VariantSheet<T extends StyleSheetInput> = Record<string, Record<string, Partial<T>>>;
+type VariantSheet<T extends StyleSheetInput> = Record<
+  string,
+  Record<string, Partial<T>>
+>;
 /** Variant-specific global selector map applied from the active default selection. */
 type VariantGlobalSheet = Record<string, Record<string, StyleSheetInput>>;
 /** Precompiled variant class name map. */
@@ -28,13 +33,27 @@ type VariantClassMap<T extends StyleSheetInput> = Record<
 /** Precompiled variant-scoped global CSS rules. */
 type VariantGlobalRuleMap = Record<string, Record<string, string[]>>;
 /** Selected variant values: `{ groupName: variantName }`. */
-type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
-  ? { [G in keyof V]?: keyof V[G] }
+type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
+  VariantSheet<any> ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
+
+type RootVarInput =
+  | Record<string, StyleValue>
+  | {
+    vars: Record<string, StyleValue>;
+    layer?: string;
+  };
 /** Configuration object accepted by `ct()`. */
-type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+type CtConfig<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+> = {
   /** Global stylesheet rules applied without class names. */
   global?: StyleSheetInput;
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  root?: readonly RootVarInput[];
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  rootVars?: readonly RootVarInput[];
   /** Base stylesheet mapping class keys to declarations. */
   base?: T;
   /** Variant groups that conditionally override base styles. */
@@ -83,16 +102,21 @@ type ContainerDefinitionInput = {
   rule: string;
 };
 /** Maps each base style key to a {@link StyleAccessor} for class/style output. */
-type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+type Accessor<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+> = {
   [K in keyof T]: StyleAccessor<V>;
 };
 /** Callable accessor for a single style key that returns class names or inline styles. */
-type StyleAccessor<V extends VariantSheet<any> | undefined> = ((variants?: VariantSelection<V>) => string) & {
-  /** Return the CSS class name(s) for this style key. */
-  class: (variants?: VariantSelection<V>) => string;
-  /** Return an inline style string for this style key. */
-  style: (variants?: VariantSelection<V>) => string;
-};
+type StyleAccessor<V extends VariantSheet<any> | undefined> =
+  & ((variants?: VariantSelection<V>) => string)
+  & {
+    /** Return the CSS class name(s) for this style key. */
+    class: (variants?: VariantSelection<V>) => string;
+    /** Return an inline style string for this style key. */
+    style: (variants?: VariantSelection<V>) => string;
+  };
 
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
 const RUNTIME_IMPORT_TAG_ID = "__css_ts_runtime_imports";
@@ -194,19 +218,27 @@ function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
 }
 
 function isPrimitiveStyleLeaf(value: unknown): boolean {
-  return typeof value === "string" || typeof value === "number" || isCssVarRef(value);
+  return typeof value === "string" || typeof value === "number" ||
+    isCssVarRef(value);
 }
 
 function isStyleLeafArray(value: unknown): value is readonly StyleValue[] {
-  return Array.isArray(value) && value.every((entry) => isPrimitiveStyleLeaf(entry));
+  return Array.isArray(value) &&
+    value.every((entry) => isPrimitiveStyleLeaf(entry));
 }
 
-function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration): StyleDeclaration {
+function mergeStyleDeclarations(
+  base: StyleDeclaration,
+  next: StyleDeclaration,
+): StyleDeclaration {
   const merged: Record<string, unknown> = { ...base };
 
   for (const [key, nextValue] of Object.entries(next)) {
     const previousValue = merged[key];
-    if (isStyleDeclarationObject(previousValue) && isStyleDeclarationObject(nextValue)) {
+    if (
+      isStyleDeclarationObject(previousValue) &&
+      isStyleDeclarationObject(nextValue)
+    ) {
       merged[key] = mergeStyleDeclarations(previousValue, nextValue);
       continue;
     }
@@ -227,7 +259,10 @@ function normalizeStyleDeclarationInput(
   if (Array.isArray(input)) {
     let merged: StyleDeclaration = {};
     for (const entry of input) {
-      merged = mergeStyleDeclarations(merged, normalizeStyleDeclarationInput(entry, options));
+      merged = mergeStyleDeclarations(
+        merged,
+        normalizeStyleDeclarationInput(entry, options),
+      );
     }
     return merged;
   }
@@ -254,10 +289,11 @@ function normalizeStyleDeclarationInput(
     }
 
     if (Array.isArray(value) || isStyleDeclarationObject(value)) {
-      (normalized as Record<string, unknown>)[key] = normalizeStyleDeclarationInput(
-        value as StyleDeclarationInput,
-        options,
-      );
+      (normalized as Record<string, unknown>)[key] =
+        normalizeStyleDeclarationInput(
+          value as StyleDeclarationInput,
+          options,
+        );
       continue;
     }
 
@@ -278,7 +314,10 @@ function normalizeApplyInput(
   if (Array.isArray(value)) {
     let merged: StyleDeclaration = {};
     for (const entry of value) {
-      merged = mergeStyleDeclarations(merged, normalizeApplyInput(entry, options));
+      merged = mergeStyleDeclarations(
+        merged,
+        normalizeApplyInput(entry, options),
+      );
     }
     return merged;
   }
@@ -292,7 +331,10 @@ function normalizeApplyInput(
   }
 
   if (isStyleDeclarationObject(value) || Array.isArray(value)) {
-    return normalizeStyleDeclarationInput(value as StyleDeclarationInput, options);
+    return normalizeStyleDeclarationInput(
+      value as StyleDeclarationInput,
+      options,
+    );
   }
 
   return {};
@@ -307,7 +349,10 @@ function normalizeSetInput(
   if (Array.isArray(value)) {
     let merged: StyleDeclaration = {};
     for (const entry of value) {
-      merged = mergeStyleDeclarations(merged, normalizeSetInput(entry, options));
+      merged = mergeStyleDeclarations(
+        merged,
+        normalizeSetInput(entry, options),
+      );
     }
     return merged;
   }
@@ -346,11 +391,12 @@ function normalizeStyleSheetInput(
   const normalized: StyleSheet = {};
 
   function addImportPaths(value: unknown): void {
-    const entries = typeof value === "string" || (typeof value === "object" && value !== null && !Array.isArray(value))
+    const entries = typeof value === "string" ||
+        (typeof value === "object" && value !== null && !Array.isArray(value))
       ? [value]
       : Array.isArray(value)
-        ? value
-        : [];
+      ? value
+      : [];
 
     for (const entry of entries) {
       if (typeof entry === "string") {
@@ -358,13 +404,20 @@ function normalizeStyleSheetInput(
         if (trimmed.length > 0) {
           options.imports?.add(`"${trimmed}"`);
         }
-      } else if (typeof entry === "object" && entry !== null && "path" in entry) {
+      } else if (
+        typeof entry === "object" && entry !== null && "path" in entry
+      ) {
         const pathEntry = entry as { path: string; layer?: string };
         if (typeof pathEntry.path === "string") {
           const trimmed = pathEntry.path.trim();
           if (trimmed.length > 0) {
-            if (typeof pathEntry.layer === "string" && pathEntry.layer.trim().length > 0) {
-              options.imports?.add(`"${trimmed}" layer(${pathEntry.layer.trim()})`);
+            if (
+              typeof pathEntry.layer === "string" &&
+              pathEntry.layer.trim().length > 0
+            ) {
+              options.imports?.add(
+                `"${trimmed}" layer(${pathEntry.layer.trim()})`,
+              );
             } else {
               options.imports?.add(`"${trimmed}"`);
             }
@@ -393,11 +446,51 @@ function normalizeStyleSheetInput(
   return normalized;
 }
 
-function isInlineStyleValue(value: unknown): value is StyleValue {
-  return typeof value === "string" || typeof value === "number" || isCssVarRef(value) || isStyleLeafArray(value);
+function rootVarsToGlobalRules(
+  rootVars: readonly RootVarInput[] | undefined,
+): StyleSheet {
+  const globalRules: StyleSheet = {};
+  if (!rootVars) {
+    return globalRules;
+  }
+
+  for (const entry of rootVars) {
+    const vars = ("vars" in entry ? entry.vars : entry) as Record<
+      string,
+      StyleValue
+    >;
+    const layer = "layer" in entry && typeof entry.layer === "string" &&
+        entry.layer.trim().length > 0
+      ? entry.layer.trim()
+      : null;
+
+    if (layer) {
+      const layerKey = `@layer ${layer}`;
+      const layerRules =
+        (globalRules[layerKey] as StyleDeclaration | undefined) ?? {};
+      const rootDeclaration =
+        (layerRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
+      layerRules[":root"] = { ...rootDeclaration, ...vars };
+      globalRules[layerKey] = layerRules;
+      continue;
+    }
+
+    const rootDeclaration =
+      (globalRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
+    globalRules[":root"] = { ...rootDeclaration, ...vars };
+  }
+
+  return globalRules;
 }
 
-function mergeInlineDeclarations(...declarations: readonly StyleDeclaration[]): Record<string, StyleValue> {
+function isInlineStyleValue(value: unknown): value is StyleValue {
+  return typeof value === "string" || typeof value === "number" ||
+    isCssVarRef(value) || isStyleLeafArray(value);
+}
+
+function mergeInlineDeclarations(
+  ...declarations: readonly StyleDeclaration[]
+): Record<string, StyleValue> {
   const merged: Record<string, StyleValue> = {};
   for (const declaration of declarations) {
     for (const [name, value] of Object.entries(declaration)) {
@@ -489,7 +582,8 @@ function compileConfig<
   compiled?: CompiledConfig<T>,
   runtimeOptions: CtRuntimeOptions = {},
   managedTagIds: { variantGlobal: string } = {
-    variantGlobal: `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
+    variantGlobal:
+      `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
   },
 ): () => Accessor<T, V> {
   const resolution = runtimeOptions.resolution ?? "hybrid";
@@ -498,7 +592,9 @@ function compileConfig<
   const logDynamic = debugEnabled && runtimeOptions.debug?.logDynamic === true;
   const logStatic = debugEnabled && runtimeOptions.debug?.logStatic === true;
   const log = (mode: "dynamic" | "static", message: string): void => {
-    if ((mode === "dynamic" && !logDynamic) || (mode === "static" && !logStatic)) {
+    if (
+      (mode === "dynamic" && !logDynamic) || (mode === "static" && !logStatic)
+    ) {
       return;
     }
     console.log(`[css-ts][${mode}] ${message}`);
@@ -511,25 +607,42 @@ function compileConfig<
       containers: runtimeOptions.containers,
     })
     : undefined;
-  const normalizeOptions = { imports, utilities, containers: runtimeOptions.containers };
+  const normalizeOptions = {
+    imports,
+    utilities,
+    containers: runtimeOptions.containers,
+  };
   const cssOptions: CssSerializationOptions = {
     breakpoints: runtimeOptions.breakpoints,
     containers: runtimeOptions.containers,
     defaultUnit: runtimeOptions.defaultUnit,
   };
 
-  const globalStyles = normalizeStyleSheetInput(config.global, normalizeOptions);
+  const rootVarStyles = rootVarsToGlobalRules(config.root ?? config.rootVars);
+  const mergedGlobalStyles = {
+    ...rootVarStyles,
+    ...(config.global ?? {}),
+  };
+  const globalStyles = normalizeStyleSheetInput(
+    mergedGlobalStyles,
+    normalizeOptions,
+  );
   const styles = normalizeStyleSheetInput(config.base, normalizeOptions);
   const variants = normalizeVariantSheetInput(
     config.variant as VariantSheet<T> | undefined,
     normalizeOptions,
   );
-  const variantGlobalStyles = normalizeVariantGlobalSheetInput(config.variantGlobal, normalizeOptions);
+  const variantGlobalStyles = normalizeVariantGlobalSheetInput(
+    config.variantGlobal,
+    normalizeOptions,
+  );
   const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
 
   if (imports.size > 0 && !effectiveCompiled?.imports) {
     if (resolution === "static") {
-      throw new Error("css-ts resolution=\"static\" requires @import rules to be statically extracted.");
+      throw new Error(
+        'css-ts resolution="static" requires @import rules to be statically extracted.',
+      );
     }
     for (const importPath of imports) {
       injectImportRule(`@import ${importPath};`);
@@ -543,7 +656,9 @@ function compileConfig<
 
   if (Object.keys(globalStyles).length > 0 && !effectiveCompiled?.global) {
     if (resolution === "static") {
-      throw new Error("css-ts resolution=\"static\" requires global rules to be statically extracted.");
+      throw new Error(
+        'css-ts resolution="static" requires global rules to be statically extracted.',
+      );
     }
     for (const rule of toCssGlobalRules(globalStyles, cssOptions)) {
       injectRule(rule);
@@ -557,14 +672,18 @@ function compileConfig<
 
   const variantGlobalRules: string[] = [];
   const compiledVariantGlobal = effectiveCompiled?.variantGlobal;
-  const resolvedDefaults = defaultSelection as Record<string, string | number | symbol | undefined>;
+  const resolvedDefaults = defaultSelection as Record<
+    string,
+    string | number | symbol | undefined
+  >;
   for (const [group, variantName] of Object.entries(resolvedDefaults)) {
     if (!variantName) {
       continue;
     }
 
     const normalizedVariantName = String(variantName);
-    const compiledRules = compiledVariantGlobal?.[group]?.[normalizedVariantName];
+    const compiledRules = compiledVariantGlobal?.[group]
+      ?.[normalizedVariantName];
     if (compiledRules) {
       variantGlobalRules.push(...compiledRules);
       log("static", `variantGlobal.${group}.${normalizedVariantName}`);
@@ -585,7 +704,10 @@ function compileConfig<
     const rules = toCssGlobalRules(declarations, cssOptions);
     variantGlobalRules.push(...rules);
     for (const rule of rules) {
-      log("dynamic", `variantGlobal.${group}.${normalizedVariantName} -> ${rule}`);
+      log(
+        "dynamic",
+        `variantGlobal.${group}.${normalizedVariantName} -> ${rule}`,
+      );
     }
   }
   setManagedRules(managedTagIds.variantGlobal, variantGlobalRules);
@@ -594,12 +716,22 @@ function compileConfig<
   const variantClassMap: VariantClassMap<T> = {};
   const compiledBase = effectiveCompiled?.base;
 
-  for (const [key, declaration] of Object.entries(styles) as [keyof T, StyleDeclaration][]) {
+  for (
+    const [key, declaration] of Object.entries(styles) as [
+      keyof T,
+      StyleDeclaration,
+    ][]
+  ) {
     const compiledClassName = compiledBase?.[key];
     if (resolution === "static" && !compiledClassName) {
-      throw new Error(`css-ts resolution="static" could not statically resolve base.${String(key)}.`);
+      throw new Error(
+        `css-ts resolution="static" could not statically resolve base.${
+          String(key)
+        }.`,
+      );
     }
-    const className = compiledClassName ?? createClassName(String(key), declaration, "runtime");
+    const className = compiledClassName ??
+      createClassName(String(key), declaration, "runtime");
 
     if (!compiledClassName) {
       for (const rule of toCssRules(className, declaration, cssOptions)) {
@@ -615,7 +747,9 @@ function compileConfig<
         ? ({ ...defaultSelection, ...selection } as VariantSelection<V>)
         : defaultSelection;
 
-    const resolveVariantDeclarations = (selection?: VariantSelection<V>): StyleDeclaration[] => {
+    const resolveVariantDeclarations = (
+      selection?: VariantSelection<V>,
+    ): StyleDeclaration[] => {
       if (!variants) {
         return [];
       }
@@ -623,14 +757,20 @@ function compileConfig<
       const resolvedSelection = resolveSelection(selection);
       const declarations: StyleDeclaration[] = [];
 
-      for (const [group, variantName] of Object.entries(
-        resolvedSelection as Record<string, string | number | symbol | undefined>,
-      )) {
+      for (
+        const [group, variantName] of Object.entries(
+          resolvedSelection as Record<
+            string,
+            string | number | symbol | undefined
+          >,
+        )
+      ) {
         if (!variantName) {
           continue;
         }
 
-        const variantDeclaration = variants[group]?.[String(variantName)]?.[String(key)];
+        const variantDeclaration = variants[group]?.[String(variantName)]
+          ?.[String(key)];
         if (variantDeclaration) {
           declarations.push(variantDeclaration as StyleDeclaration);
         }
@@ -650,14 +790,20 @@ function compileConfig<
 
       const classNames = [className];
 
-      for (const [group, variantName] of Object.entries(
-        resolvedSelection as Record<string, string | number | symbol | undefined>,
-      )) {
+      for (
+        const [group, variantName] of Object.entries(
+          resolvedSelection as Record<
+            string,
+            string | number | symbol | undefined
+          >,
+        )
+      ) {
         if (!variantName) {
           continue;
         }
 
-        const variantClass = variantClassMap[group]?.[String(variantName)]?.[key];
+        const variantClass = variantClassMap[group]?.[String(variantName)]
+          ?.[key];
         if (variantClass) {
           classNames.push(variantClass);
         }
@@ -669,7 +815,10 @@ function compileConfig<
     const accessor = classAccessor as StyleAccessor<V>;
     accessor.class = classAccessor;
     accessor.style = (selection?: VariantSelection<V>) =>
-      toInlineStyleString([declaration, ...resolveVariantDeclarations(selection)], cssOptions);
+      toInlineStyleString([
+        declaration,
+        ...resolveVariantDeclarations(selection),
+      ], cssOptions);
 
     accessors[key] = accessor as Accessor<T, V>[keyof T];
   }
@@ -685,24 +834,40 @@ function compileConfig<
         const variantMap: Partial<Record<keyof T, string>> = {};
         const compiledVariant = compiledGroup?.[variantName];
 
-        for (const [key, declaration] of Object.entries(declarations) as [keyof T, StyleDeclaration][]) {
+        for (
+          const [key, declaration] of Object.entries(declarations) as [
+            keyof T,
+            StyleDeclaration,
+          ][]
+        ) {
           const compiledClassName = compiledVariant?.[key];
           if (resolution === "static" && !compiledClassName) {
             throw new Error(
-              `css-ts resolution="static" could not statically resolve variant.${group}.${variantName}.${String(key)}.`,
+              `css-ts resolution="static" could not statically resolve variant.${group}.${variantName}.${
+                String(key)
+              }.`,
             );
           }
-          const className =
-            compiledClassName ??
-            createClassName(`${group}:${variantName}:${String(key)}`, declaration, "runtime");
+          const className = compiledClassName ??
+            createClassName(
+              `${group}:${variantName}:${String(key)}`,
+              declaration,
+              "runtime",
+            );
 
           if (!compiledClassName) {
             for (const rule of toCssRules(className, declaration, cssOptions)) {
               injectRule(rule);
             }
-            log("dynamic", `variant.${group}.${variantName}.${String(key)} -> .${className}`);
+            log(
+              "dynamic",
+              `variant.${group}.${variantName}.${String(key)} -> .${className}`,
+            );
           } else {
-            log("static", `variant.${group}.${variantName}.${String(key)} -> .${className}`);
+            log(
+              "static",
+              `variant.${group}.${variantName}.${String(key)} -> .${className}`,
+            );
           }
 
           variantMap[key] = className;
@@ -730,10 +895,12 @@ function compileConfig<
       return Reflect.has(target, prop);
     },
     ownKeys(target) {
-      return Array.from(new Set([
-        ...Reflect.ownKeys(target),
-        ...Object.keys(accessors)
-      ]));
+      return Array.from(
+        new Set([
+          ...Reflect.ownKeys(target),
+          ...Object.keys(accessors),
+        ]),
+      );
     },
     getOwnPropertyDescriptor(target, prop) {
       if (typeof prop === "string" && prop in accessors) {
@@ -748,7 +915,19 @@ function compileConfig<
   }) as unknown as () => Accessor<T, V>;
 }
 
-const CONFIG_KEYS = new Set(["base", "global", "variant", "variantGlobal", "defaults"]);
+const CONFIG_KEYS = new Set([
+  "base",
+  "global",
+  "root",
+  "rootVars",
+  "variant",
+  "variantGlobal",
+  "defaults",
+]);
+
+function normalizeConfigKey(key: string): string {
+  return key === "rootVars" ? "root" : key;
+}
 
 /**
  * Builder returned by `new ct()` that supports incremental property assignment.
@@ -770,6 +949,10 @@ type CtBuilder<
   base: T | undefined;
   /** Global stylesheet rules (selectors and at-rules applied without class names). */
   global: StyleSheetInput | undefined;
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  root: readonly RootVarInput[] | undefined;
+  /** @deprecated Use `root` instead. */
+  rootVars: readonly RootVarInput[] | undefined;
   /** Variant groups that conditionally override base styles. */
   variant: V | undefined;
   /** Default variant selections applied when no explicit selection is given. */
@@ -783,11 +966,15 @@ type CtBuilder<
 function createCtBuilder<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
->(compiled?: CompiledConfig<T>, runtimeOptions: CtRuntimeOptions = {}): CtBuilder<T, V> {
+>(
+  compiled?: CompiledConfig<T>,
+  runtimeOptions: CtRuntimeOptions = {},
+): CtBuilder<T, V> {
   const config: Partial<CtConfig<T, V>> = {};
   const mutableContainers = { ...(runtimeOptions.containers ?? {}) };
   const managedTagIds = {
-    variantGlobal: `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
+    variantGlobal:
+      `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
   };
   const effectiveRuntimeOptions: CtRuntimeOptions = {
     ...runtimeOptions,
@@ -797,7 +984,12 @@ function createCtBuilder<
 
   function ensureCompiled(): () => Accessor<T, V> {
     if (!cachedFactory) {
-      cachedFactory = compileConfig(config as CtConfig<T, V>, compiled, effectiveRuntimeOptions, managedTagIds);
+      cachedFactory = compileConfig(
+        config as CtConfig<T, V>,
+        compiled,
+        effectiveRuntimeOptions,
+        managedTagIds,
+      );
     }
     return cachedFactory;
   }
@@ -811,7 +1003,7 @@ function createCtBuilder<
     },
     set(_target, prop, value) {
       if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
-        (config as Record<string, unknown>)[prop] = value;
+        (config as Record<string, unknown>)[normalizeConfigKey(prop)] = value;
         cachedFactory = null;
         return true;
       }
@@ -819,7 +1011,7 @@ function createCtBuilder<
     },
     get(target, prop, receiver) {
       if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
-        return (config as Record<string, unknown>)[prop];
+        return (config as Record<string, unknown>)[normalizeConfigKey(prop)];
       }
       if (typeof prop === "string" && !Reflect.has(target, prop)) {
         const accessor = ensureCompiled()();
@@ -843,14 +1035,19 @@ function createCtBuilder<
     },
     ownKeys(target) {
       const accessor = ensureCompiled()();
-      return Array.from(new Set([
-        ...Reflect.ownKeys(target),
-        ...CONFIG_KEYS,
-        ...Object.keys(accessor)
-      ]));
+      return Array.from(
+        new Set([
+          ...Reflect.ownKeys(target),
+          ...CONFIG_KEYS,
+          ...Object.keys(accessor),
+        ]),
+      );
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === "string" && (CONFIG_KEYS.has(prop) || prop in ensureCompiled()())) {
+      if (
+        typeof prop === "string" &&
+        (CONFIG_KEYS.has(prop) || prop in ensureCompiled()())
+      ) {
         return {
           enumerable: true,
           configurable: true,
@@ -862,8 +1059,13 @@ function createCtBuilder<
   }) as unknown as CtBuilder<T, V>;
 
   proxy.addContainer = (container: ContainerDefinitionInput) => {
-    if (typeof container?.name !== "string" || container.name.length === 0 || typeof container.rule !== "string") {
-      throw new Error("addContainer() expects { name: string, rule: string, type?: string }");
+    if (
+      typeof container?.name !== "string" || container.name.length === 0 ||
+      typeof container.rule !== "string"
+    ) {
+      throw new Error(
+        "addContainer() expects { name: string, rule: string, type?: string }",
+      );
     }
 
     mutableContainers[container.name] = {
@@ -880,12 +1082,20 @@ function createCtBuilder<
     const currentGlobal = config.global;
 
     for (const entry of entries) {
-      if (typeof entry === "string" || (typeof entry === "object" && entry !== null && "path" in entry)) {
+      if (
+        typeof entry === "string" ||
+        (typeof entry === "object" && entry !== null && "path" in entry)
+      ) {
         currentGlobal["@import"] = currentGlobal["@import"] ?? [];
         if (Array.isArray(currentGlobal["@import"])) {
-          (currentGlobal["@import"] as unknown as string[]).push(entry as string);
+          (currentGlobal["@import"] as unknown as string[]).push(
+            entry as string,
+          );
         } else {
-          currentGlobal["@import"] = [currentGlobal["@import"], entry as string] as unknown as import("./shared.js").StyleDeclaration;
+          currentGlobal["@import"] = [
+            currentGlobal["@import"],
+            entry as string,
+          ] as unknown as import("./shared.js").StyleDeclaration;
         }
       } else if (typeof entry === "object" && entry !== null) {
         if ("rules" in entry) {
@@ -932,4 +1142,4 @@ export default function ct<
 export type { CtBuilder };
 
 /** Re-exported style types for convenience. */
-export type { StyleSheet, StyleDeclaration, StyleValue } from "./shared.js";
+export type { StyleDeclaration, StyleSheet, StyleValue } from "./shared.js";

@@ -7,12 +7,28 @@ import {
   parseCtConfig,
   parseStaticExpression,
 } from "./parser.js";
-import { camelToKebab, createClassName, type StyleSheet, toCssGlobalRules, toCssRules } from "./shared.js";
+import {
+  camelToKebab,
+  createClassName,
+  type StyleSheet,
+  type StyleValue,
+  toCssGlobalRules,
+  toCssRules,
+} from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
-const STATIC_STYLE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+const STATIC_STYLE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts",
+];
 
 type ImportBinding =
   | {
@@ -31,7 +47,10 @@ type ImportBinding =
 
 type ModuleStaticInfo = {
   imports: Map<string, ImportBinding>;
-  constInitializers: Map<string, { initializer: string; start: number; end: number; exported: boolean }>;
+  constInitializers: Map<
+    string,
+    { initializer: string; start: number; end: number; exported: boolean }
+  >;
   functionDeclarations: Map<string, string>;
   exportedConsts: Map<string, string>;
   defaultExportExpression: string | null;
@@ -109,7 +128,9 @@ type NodeFs = typeof import("node:fs");
 type NodePath = typeof import("node:path");
 type NodeModule = typeof import("node:module");
 type NodeRequire = (id: string) => unknown;
-type NodeRequireWithResolve = NodeRequire & { resolve?: (id: string) => string };
+type NodeRequireWithResolve = NodeRequire & {
+  resolve?: (id: string) => string;
+};
 type TypeScriptTranspileApi = {
   transpileModule: (
     source: string,
@@ -135,7 +156,8 @@ function getBuiltinModule(id: string): unknown | null {
     return null;
   }
 
-  const getBuiltinModule = (processValue as { getBuiltinModule?: unknown }).getBuiltinModule;
+  const getBuiltinModule =
+    (processValue as { getBuiltinModule?: unknown }).getBuiltinModule;
   if (typeof getBuiltinModule !== "function") {
     return null;
   }
@@ -149,7 +171,9 @@ function getBuiltinModule(id: string): unknown | null {
 
 function getFallbackRequire(): NodeRequire | null {
   try {
-    const req = new Function("return typeof require === \"function\" ? require : null;")();
+    const req = new Function(
+      'return typeof require === "function" ? require : null;',
+    )();
     return typeof req === "function" ? (req as NodeRequire) : null;
   } catch {
     return null;
@@ -171,7 +195,9 @@ function getNodeRequire(): NodeRequire | null {
   return nodeRequire;
 }
 
-function isTypeScriptTranspileApi(value: unknown): value is TypeScriptTranspileApi {
+function isTypeScriptTranspileApi(
+  value: unknown,
+): value is TypeScriptTranspileApi {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -184,14 +210,18 @@ function isTypeScriptTranspileApi(value: unknown): value is TypeScriptTranspileA
   );
 }
 
-function loadTypeScriptModuleFromDisk(requireFn: NodeRequire): TypeScriptTranspileApi | null {
+function loadTypeScriptModuleFromDisk(
+  requireFn: NodeRequire,
+): TypeScriptTranspileApi | null {
   const requireWithResolve = requireFn as NodeRequireWithResolve;
   if (typeof requireWithResolve.resolve !== "function") {
     return null;
   }
 
   try {
-    const modulePath = requireWithResolve.resolve("typescript/lib/typescript.js");
+    const modulePath = requireWithResolve.resolve(
+      "typescript/lib/typescript.js",
+    );
     const fs = getNodeFs();
     const path = getNodePath();
     const source = fs.readFileSync(modulePath, "utf8");
@@ -214,7 +244,9 @@ function loadTypeScriptModuleFromDisk(requireFn: NodeRequire): TypeScriptTranspi
   }
 }
 
-function loadTypeScriptModule(requireFn: NodeRequire): TypeScriptTranspileApi | null {
+function loadTypeScriptModule(
+  requireFn: NodeRequire,
+): TypeScriptTranspileApi | null {
   try {
     const loaded = requireFn("typescript");
     if (isTypeScriptTranspileApi(loaded)) {
@@ -309,7 +341,9 @@ const CSS_TS_IMPORT_SOURCES = [
 
 function hasCssTsImport(code: string): boolean {
   for (const source of CSS_TS_IMPORT_SOURCES) {
-    if (code.includes(`from "${source}"`) || code.includes(`from '${source}'`)) {
+    if (
+      code.includes(`from "${source}"`) || code.includes(`from '${source}'`)
+    ) {
       return true;
     }
   }
@@ -324,10 +358,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readMemberPath(value: unknown, members: readonly string[]): unknown | null {
+function readMemberPath(
+  value: unknown,
+  members: readonly string[],
+): unknown | null {
   let current: unknown = value;
   for (const member of members) {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) {
+    if (
+      typeof current !== "object" || current === null || Array.isArray(current)
+    ) {
       return null;
     }
     const record = current as Record<string, unknown>;
@@ -398,7 +437,10 @@ function addVirtualImport(code: string, importId = PUBLIC_VIRTUAL_ID): string {
   return `import "${importId}";\n${code}`;
 }
 
-function addVirtualImportToSvelte(code: string, importId = PUBLIC_VIRTUAL_ID): string {
+function addVirtualImportToSvelte(
+  code: string,
+  importId = PUBLIC_VIRTUAL_ID,
+): string {
   if (code.includes(importId)) {
     return code;
   }
@@ -416,7 +458,10 @@ function addVirtualImportToSvelte(code: string, importId = PUBLIC_VIRTUAL_ID): s
   );
 }
 
-function addVirtualImportToAstro(code: string, importId = PUBLIC_VIRTUAL_ID): string {
+function addVirtualImportToAstro(
+  code: string,
+  importId = PUBLIC_VIRTUAL_ID,
+): string {
   if (code.includes(importId)) {
     return code;
   }
@@ -456,11 +501,14 @@ function addModuleVirtualImportToAstro(code: string, importId: string): string {
   }
 
   const insertAt = frontmatterMatch[0].length + closeMatch.index;
-  return code.slice(0, insertAt) + `\nimport "${importId}";` + code.slice(insertAt);
+  return code.slice(0, insertAt) + `\nimport "${importId}";` +
+    code.slice(insertAt);
 }
 
 function moduleVirtualImportId(moduleId: string): string {
-  return `${PUBLIC_VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(moduleId)}`;
+  return `${PUBLIC_VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${
+    encodeURIComponent(moduleId)
+  }`;
 }
 
 function readModuleVirtualImportId(id: string): string | null {
@@ -478,7 +526,9 @@ function mergeCss(rules: Iterable<string>): string {
   return Array.from(rules).join("\n");
 }
 
-function parseBindingList(specifierList: string): Array<{ local: string; imported: string }> {
+function parseBindingList(
+  specifierList: string,
+): Array<{ local: string; imported: string }> {
   const bindings: Array<{ local: string; imported: string }> = [];
 
   for (const rawSpecifier of specifierList.split(",")) {
@@ -492,7 +542,9 @@ function parseBindingList(specifierList: string): Array<{ local: string; importe
       continue;
     }
 
-    const asMatch = normalized.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/);
+    const asMatch = normalized.match(
+      /^([A-Za-z_$][A-Za-z0-9_$]*)\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/,
+    );
     if (asMatch) {
       bindings.push({
         imported: asMatch[1],
@@ -514,13 +566,20 @@ function parseBindingList(specifierList: string): Array<{ local: string; importe
 
 function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   const imports = new Map<string, ImportBinding>();
-  const constInitializers = new Map<string, { initializer: string; start: number; end: number; exported: boolean }>();
+  const constInitializers = new Map<
+    string,
+    { initializer: string; start: number; end: number; exported: boolean }
+  >();
   const functionDeclarations = new Map<string, string>();
   const exportedConsts = new Map<string, string>();
 
   const defaultImportMatcher =
     /import\s+(?!type\b)([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*(?:\{[\s\S]*?\}|\*\s*as\s*[A-Za-z_$][A-Za-z0-9_$]*))?\s*from\s*["']([^"']+)["']/g;
-  for (let match = defaultImportMatcher.exec(code); match; match = defaultImportMatcher.exec(code)) {
+  for (
+    let match = defaultImportMatcher.exec(code);
+    match;
+    match = defaultImportMatcher.exec(code)
+  ) {
     imports.set(match[1], {
       source: match[2],
       kind: "default",
@@ -529,7 +588,11 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
 
   const namespaceImportMatcher =
     /import\s*\*\s*as\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*from\s*["']([^"']+)["']/g;
-  for (let match = namespaceImportMatcher.exec(code); match; match = namespaceImportMatcher.exec(code)) {
+  for (
+    let match = namespaceImportMatcher.exec(code);
+    match;
+    match = namespaceImportMatcher.exec(code)
+  ) {
     imports.set(match[1], {
       source: match[2],
       kind: "namespace",
@@ -537,7 +600,11 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   }
 
   const importMatcher = /import\s*{([\s\S]*?)}\s*from\s*["']([^"']+)["']/g;
-  for (let match = importMatcher.exec(code); match; match = importMatcher.exec(code)) {
+  for (
+    let match = importMatcher.exec(code);
+    match;
+    match = importMatcher.exec(code)
+  ) {
     const source = match[2];
     for (const binding of parseBindingList(match[1])) {
       imports.set(binding.local, {
@@ -549,19 +616,29 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   }
 
   const exportListMatcher = /export\s*{([\s\S]*?)}\s*;?/g;
-  for (let match = exportListMatcher.exec(code); match; match = exportListMatcher.exec(code)) {
+  for (
+    let match = exportListMatcher.exec(code);
+    match;
+    match = exportListMatcher.exec(code)
+  ) {
     for (const binding of parseBindingList(match[1])) {
       exportedConsts.set(binding.local, binding.imported);
     }
   }
 
   const constMatcher = /\b(export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/g;
-  for (let match = constMatcher.exec(code); match; match = constMatcher.exec(code)) {
+  for (
+    let match = constMatcher.exec(code);
+    match;
+    match = constMatcher.exec(code)
+  ) {
     const isExported = Boolean(match[1]);
     const name = match[2];
     let initializerStart = constMatcher.lastIndex;
 
-    while (initializerStart < code.length && /\s/.test(code[initializerStart])) {
+    while (
+      initializerStart < code.length && /\s/.test(code[initializerStart])
+    ) {
       initializerStart += 1;
     }
 
@@ -571,7 +648,7 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
       let parenDepth = 0;
       let bracketDepth = 0;
       let braceDepth = 0;
-      let inString: "" | "\"" | "'" | "`" = "";
+      let inString: "" | '"' | "'" | "`" = "";
       let escaped = false;
 
       for (; initializerStart < code.length; initializerStart += 1) {
@@ -591,7 +668,7 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
           continue;
         }
 
-        if (char === "\"" || char === "'" || char === "`") {
+        if (char === '"' || char === "'" || char === "`") {
           inString = char;
           continue;
         }
@@ -649,9 +726,10 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
     const initializerEnd = findExpressionTerminator(code, initializerStart);
     const initializer = code.slice(initializerStart, initializerEnd).trim();
 
-    const declarationEnd = initializerEnd < code.length && code[initializerEnd] === ";"
-      ? initializerEnd + 1
-      : initializerEnd;
+    const declarationEnd =
+      initializerEnd < code.length && code[initializerEnd] === ";"
+        ? initializerEnd + 1
+        : initializerEnd;
 
     if (initializer.length > 0) {
       constInitializers.set(name, {
@@ -671,12 +749,16 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
 
   const functionMatcher =
     /\b(export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-  for (let match = functionMatcher.exec(code); match; match = functionMatcher.exec(code)) {
+  for (
+    let match = functionMatcher.exec(code);
+    match;
+    match = functionMatcher.exec(code)
+  ) {
     const isExported = Boolean(match[1]);
     const name = match[2];
     let cursor = functionMatcher.lastIndex;
     let parenDepth = 1;
-    let inString: "" | "\"" | "'" | "`" = "";
+    let inString: "" | '"' | "'" | "`" = "";
     let escaped = false;
 
     for (; cursor < code.length; cursor += 1) {
@@ -696,7 +778,7 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
         continue;
       }
 
-      if (char === "\"" || char === "'" || char === "`") {
+      if (char === '"' || char === "'" || char === "`") {
         inString = char;
         continue;
       }
@@ -711,7 +793,10 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
 
       if (char === "/" && code[cursor + 1] === "*") {
         cursor += 2;
-        while (cursor < code.length && !(code[cursor] === "*" && code[cursor + 1] === "/")) {
+        while (
+          cursor < code.length &&
+          !(code[cursor] === "*" && code[cursor + 1] === "/")
+        ) {
           cursor += 1;
         }
         cursor += 1;
@@ -769,7 +854,7 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
         continue;
       }
 
-      if (char === "\"" || char === "'" || char === "`") {
+      if (char === '"' || char === "'" || char === "`") {
         inString = char;
         continue;
       }
@@ -783,7 +868,10 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
       }
       if (char === "/" && code[cursor + 1] === "*") {
         cursor += 2;
-        while (cursor < code.length && !(code[cursor] === "*" && code[cursor + 1] === "/")) {
+        while (
+          cursor < code.length &&
+          !(code[cursor] === "*" && code[cursor + 1] === "/")
+        ) {
           cursor += 1;
         }
         cursor += 1;
@@ -854,7 +942,8 @@ function extractDefaultExportExpression(source: string): string | null {
   }
 
   const end = findExpressionTerminator(source, start);
-  const expression = source.slice(start, end === -1 ? source.length : end).trim();
+  const expression = source.slice(start, end === -1 ? source.length : end)
+    .trim();
   if (!expression) {
     return null;
   }
@@ -931,7 +1020,9 @@ function normalizeResolution(value: unknown): "static" | "dynamic" | "hybrid" {
   return "hybrid";
 }
 
-function normalizeDebugOptions(value: unknown): { logDynamic: boolean; logStatic: boolean } {
+function normalizeDebugOptions(
+  value: unknown,
+): { logDynamic: boolean; logStatic: boolean } {
   if (!isRecord(value)) {
     return {
       logDynamic: false,
@@ -949,15 +1040,17 @@ function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
   const entries = typeof value === "string"
     ? [value]
     : Array.isArray(value)
-      ? value.filter((entry): entry is string => typeof entry === "string")
-      : [];
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 
   const normalized = entries
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
     .map((entry) =>
       getNodePath().normalize(
-        getNodePath().isAbsolute(entry) ? entry : getNodePath().resolve(projectRoot, entry),
+        getNodePath().isAbsolute(entry)
+          ? entry
+          : getNodePath().resolve(projectRoot, entry),
       )
     );
 
@@ -974,23 +1067,31 @@ function toBrowserStylesheetPath(
   const suffix = match ? match[2] : "";
 
   const queryIndex = bareImportPathRaw.indexOf("?");
-  const bareImportPath = queryIndex === -1 ? bareImportPathRaw : bareImportPathRaw.slice(0, queryIndex);
-  const querySuffix = queryIndex === -1 ? "" : bareImportPathRaw.slice(queryIndex);
+  const bareImportPath = queryIndex === -1
+    ? bareImportPathRaw
+    : bareImportPathRaw.slice(0, queryIndex);
+  const querySuffix = queryIndex === -1
+    ? ""
+    : bareImportPathRaw.slice(queryIndex);
 
   const formatResult = (resolvedValue: string | null): string | null => {
     if (!resolvedValue) return null;
     return match ? `"${resolvedValue}"${suffix}` : resolvedValue;
-  }
+  };
 
   const toProjectPath = (resolvedFile: string): string | null => {
-    const relative = getNodePath().relative(options.projectRoot, resolvedFile).split(getNodePath().sep).join("/");
+    const relative = getNodePath().relative(options.projectRoot, resolvedFile)
+      .split(getNodePath().sep).join("/");
     if (relative.startsWith("..")) {
       return null;
     }
     return `/${relative}${querySuffix}`;
   };
 
-  if (/^(?:https?:)?\/\//.test(bareImportPath) || bareImportPath.startsWith("data:")) {
+  if (
+    /^(?:https?:)?\/\//.test(bareImportPath) ||
+    bareImportPath.startsWith("data:")
+  ) {
     return formatResult(bareImportPathRaw);
   }
   if (bareImportPath.startsWith("/")) {
@@ -998,12 +1099,20 @@ function toBrowserStylesheetPath(
   }
 
   if (bareImportPath.startsWith(".")) {
-    const resolved = resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath));
+    const resolved = resolveFileFromBase(
+      getNodePath().resolve(
+        getNodePath().dirname(importerPath),
+        bareImportPath,
+      ),
+    );
     if (resolved) {
       return formatResult(toProjectPath(resolved));
     }
 
-    const fallback = getNodePath().resolve(getNodePath().dirname(importerPath), bareImportPath);
+    const fallback = getNodePath().resolve(
+      getNodePath().dirname(importerPath),
+      bareImportPath,
+    );
     return formatResult(toProjectPath(fallback));
   }
 
@@ -1022,7 +1131,10 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function identifierMentioned(source: string | undefined, identifier: string): boolean {
+function identifierMentioned(
+  source: string | undefined,
+  identifier: string,
+): boolean {
   if (!source || source.trim().length === 0) {
     return true;
   }
@@ -1056,7 +1168,9 @@ function containsIdentifierReference(value: unknown): boolean {
     return value.some((entry) => containsIdentifierReference(entry));
   }
 
-  return Object.values(value as Record<string, unknown>).some((entry) => containsIdentifierReference(entry));
+  return Object.values(value as Record<string, unknown>).some((entry) =>
+    containsIdentifierReference(entry)
+  );
 }
 
 function stripUnusedStaticHelperConsts(code: string): string {
@@ -1073,7 +1187,10 @@ function stripUnusedStaticHelperConsts(code: string): string {
       undefined,
       { keepUnresolvedIdentifiers: true },
     );
-    if (parsedInitializer === null || !containsIdentifierReference(parsedInitializer)) {
+    if (
+      parsedInitializer === null ||
+      !containsIdentifierReference(parsedInitializer)
+    ) {
       continue;
     }
 
@@ -1096,6 +1213,18 @@ function stripUnusedStaticHelperConsts(code: string): string {
 
 function toRuntimeCtConfigLiteral(parsed: {
   global?: StyleSheet;
+  root?: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  >;
+  rootVars?: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  >;
   base: StyleSheet;
   variant?: Record<string, Record<string, StyleSheet>>;
   variantGlobal?: Record<string, Record<string, StyleSheet>>;
@@ -1107,6 +1236,11 @@ function toRuntimeCtConfigLiteral(parsed: {
 
   if (parsed.global && Object.keys(parsed.global).length > 0) {
     runtimeConfig.global = parsed.global;
+  }
+  if (parsed.root && parsed.root.length > 0) {
+    runtimeConfig.root = parsed.root;
+  } else if (parsed.rootVars && parsed.rootVars.length > 0) {
+    runtimeConfig.root = parsed.rootVars;
   }
   if (parsed.variant && Object.keys(parsed.variant).length > 0) {
     runtimeConfig.variant = parsed.variant;
@@ -1152,7 +1286,11 @@ function loadCssConfig(
   const source = getNodeFs().readFileSync(configPath, "utf8");
   const sideEffectImports: string[] = [];
   const cssImportMatcher = /import\s*["']([^"']+\.css(?:\?[^"']*)?)["']\s*;?/g;
-  for (let match = cssImportMatcher.exec(source); match; match = cssImportMatcher.exec(source)) {
+  for (
+    let match = cssImportMatcher.exec(source);
+    match;
+    match = cssImportMatcher.exec(source)
+  ) {
     sideEffectImports.push(`"${match[1]}"`);
   }
 
@@ -1196,7 +1334,9 @@ function loadCssConfig(
     };
 
     for (const localName of moduleInfo.functionDeclarations.keys()) {
-      if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
+      if (
+        localName === excludeName || !identifierMentioned(sourceHint, localName)
+      ) {
         continue;
       }
       const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -1206,7 +1346,9 @@ function loadCssConfig(
     }
 
     for (const localName of moduleInfo.constInitializers.keys()) {
-      if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
+      if (
+        localName === excludeName || !identifierMentioned(sourceHint, localName)
+      ) {
         continue;
       }
       const localValue = resolveIdentifierInModule([localName], moduleId);
@@ -1228,7 +1370,10 @@ function loadCssConfig(
     return evalScope;
   }
 
-  function resolveIdentifierInModule(identifierPath: readonly string[], moduleId: string): unknown | null {
+  function resolveIdentifierInModule(
+    identifierPath: readonly string[],
+    moduleId: string,
+  ): unknown | null {
     if (identifierPath.length === 0) {
       return null;
     }
@@ -1256,7 +1401,10 @@ function loadCssConfig(
         }, { keepUnresolvedIdentifiers: true });
 
         if (value === null) {
-          value = evaluateExpression(initializer, buildEvalScope(moduleInfo, moduleId, head, initializer));
+          value = evaluateExpression(
+            initializer,
+            buildEvalScope(moduleInfo, moduleId, head, initializer),
+          );
         }
 
         if (value !== null) {
@@ -1270,7 +1418,9 @@ function loadCssConfig(
             buildEvalScope(moduleInfo, moduleId, head, functionDeclaration),
           );
           if (functionValue !== null) {
-            resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
+            resolved = tail.length > 0
+              ? readMemberPath(functionValue, tail)
+              : functionValue;
           }
         }
       }
@@ -1278,11 +1428,15 @@ function loadCssConfig(
       if (resolved === null) {
         const binding = moduleInfo.imports.get(head);
         if (binding) {
-          const resolvedImportFile = resolveImportToFile(moduleId, binding.source, {
-            projectRoot,
-            viteAliases: resolverOptions.viteAliases,
-            tsconfigResolver: resolverOptions.tsconfigResolver,
-          });
+          const resolvedImportFile = resolveImportToFile(
+            moduleId,
+            binding.source,
+            {
+              projectRoot,
+              viteAliases: resolverOptions.viteAliases,
+              tsconfigResolver: resolverOptions.tsconfigResolver,
+            },
+          );
           if (resolvedImportFile) {
             const importedModuleInfo = getModuleInfo(resolvedImportFile);
             if (importedModuleInfo) {
@@ -1290,7 +1444,8 @@ function loadCssConfig(
                 if (tail.length > 0) {
                   const [namespaceExport, ...namespaceTail] = tail;
                   const exportedLocalName =
-                    importedModuleInfo.exportedConsts.get(namespaceExport) ?? namespaceExport;
+                    importedModuleInfo.exportedConsts.get(namespaceExport) ??
+                      namespaceExport;
                   const namespaceValue = resolveIdentifierInModule(
                     [exportedLocalName],
                     resolvedImportFile,
@@ -1300,14 +1455,15 @@ function loadCssConfig(
                     : namespaceValue;
                 }
               } else {
-                const importedName = binding.kind === "default" ? "default" : binding.imported;
+                const importedName = binding.kind === "default"
+                  ? "default"
+                  : binding.imported;
                 const exportedLocalName = importedName === "default"
                   ? null
-                  : (importedModuleInfo.exportedConsts.get(importedName) ?? importedName);
+                  : (importedModuleInfo.exportedConsts.get(importedName) ??
+                    importedName);
                 const importedValue = resolveIdentifierInModule(
-                  exportedLocalName
-                    ? [exportedLocalName]
-                    : ["default"],
+                  exportedLocalName ? [exportedLocalName] : ["default"],
                   resolvedImportFile,
                 );
                 resolved = tail.length > 0
@@ -1319,13 +1475,19 @@ function loadCssConfig(
         }
       }
 
-      if (resolved === null && head === "default" && moduleInfo.defaultExportExpression) {
+      if (
+        resolved === null && head === "default" &&
+        moduleInfo.defaultExportExpression
+      ) {
         const parsedDefault = parseStaticExpression(
           moduleInfo.defaultExportExpression,
-          (nestedPath) => resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
+          (nestedPath) =>
+            resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
         );
         if (parsedDefault !== null) {
-          resolved = tail.length > 0 ? readMemberPath(parsedDefault, tail) : parsedDefault;
+          resolved = tail.length > 0
+            ? readMemberPath(parsedDefault, tail)
+            : parsedDefault;
         } else {
           const evaluatedDefault = evaluateExpression(
             moduleInfo.defaultExportExpression,
@@ -1337,7 +1499,9 @@ function loadCssConfig(
             ),
           );
           if (evaluatedDefault !== null) {
-            resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
+            resolved = tail.length > 0
+              ? readMemberPath(evaluatedDefault, tail)
+              : evaluatedDefault;
           }
         }
       }
@@ -1353,13 +1517,15 @@ function loadCssConfig(
   }
 
   const configModuleInfo = getModuleInfo(configPath);
-  const defaultExpr = configModuleInfo?.defaultExportExpression ?? extractDefaultExportExpression(source);
+  const defaultExpr = configModuleInfo?.defaultExportExpression ??
+    extractDefaultExportExpression(source);
   let configObject: Record<string, unknown> = {};
 
   if (defaultExpr) {
     const parsed = parseStaticExpression(
       defaultExpr,
-      (identifierPath) => resolveIdentifierInModule(identifierPath, configPath) ?? undefined,
+      (identifierPath) =>
+        resolveIdentifierInModule(identifierPath, configPath) ?? undefined,
     );
     if (isRecord(parsed)) {
       configObject = parsed;
@@ -1378,9 +1544,17 @@ function loadCssConfig(
   const importsFromObject = Array.isArray(configObject.imports)
     ? configObject.imports
       .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => (entry.startsWith('"') && entry.endsWith('"') ? entry : `"${entry}"`))
+      .map((
+        entry,
+      ) => (entry.startsWith('"') && entry.endsWith('"')
+        ? entry
+        : `"${entry}"`)
+      )
     : [];
-  const hasExplicitResolution = Object.prototype.hasOwnProperty.call(configObject, "resolution");
+  const hasExplicitResolution = Object.prototype.hasOwnProperty.call(
+    configObject,
+    "resolution",
+  );
   const resolution = normalizeResolution(configObject.resolution);
   const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
@@ -1392,13 +1566,17 @@ function loadCssConfig(
     : null;
   const utilityImports = parsedUtilities?.imports ?? [];
 
-  const dedupedRawImports = Array.from(new Set([...sideEffectImports, ...importsFromObject, ...utilityImports]));
+  const dedupedRawImports = Array.from(
+    new Set([...sideEffectImports, ...importsFromObject, ...utilityImports]),
+  );
   const resolvedImports = dedupedRawImports
-    .map((importPath) => toBrowserStylesheetPath(importPath, configPath, {
-      projectRoot,
-      viteAliases: resolverOptions.viteAliases,
-      tsconfigResolver: resolverOptions.tsconfigResolver,
-    }))
+    .map((importPath) =>
+      toBrowserStylesheetPath(importPath, configPath, {
+        projectRoot,
+        viteAliases: resolverOptions.viteAliases,
+        tsconfigResolver: resolverOptions.tsconfigResolver,
+      })
+    )
     .filter((entry): entry is string => Boolean(entry));
   const allImports = Array.from(new Set(resolvedImports));
 
@@ -1488,7 +1666,10 @@ function transpileTsSnippet(source: string): string {
   return output;
 }
 
-function evaluateExpression(source: string, scope: Record<string, unknown>): unknown | null {
+function evaluateExpression(
+  source: string,
+  scope: Record<string, unknown>,
+): unknown | null {
   const jsSource = transpileTsSnippet(`(${source})`);
   try {
     const proxyScope = new Proxy(scope, {
@@ -1509,14 +1690,20 @@ function evaluateExpression(source: string, scope: Record<string, unknown>): unk
       },
     });
 
-    const fn = new Function("__scope", `with (__scope) { return ${jsSource}; }`);
+    const fn = new Function(
+      "__scope",
+      `with (__scope) { return ${jsSource}; }`,
+    );
     return fn(proxyScope);
   } catch {
     return null;
   }
 }
 
-function evaluateFunctionDeclaration(source: string, scope: Record<string, unknown>): unknown | null {
+function evaluateFunctionDeclaration(
+  source: string,
+  scope: Record<string, unknown>,
+): unknown | null {
   try {
     const jsSource = transpileTsSnippet(source);
     const proxyScope = new Proxy(scope, {
@@ -1537,7 +1724,10 @@ function evaluateFunctionDeclaration(source: string, scope: Record<string, unkno
       },
     });
 
-    const fn = new Function("__scope", `with (__scope) { return (${jsSource}); }`);
+    const fn = new Function(
+      "__scope",
+      `with (__scope) { return (${jsSource}); }`,
+    );
     return fn(proxyScope);
   } catch {
     return null;
@@ -1556,7 +1746,10 @@ function resolveFileFromBase(basePath: string): string | null {
   }
 
   for (const candidate of candidates) {
-    if (getNodeFs().existsSync(candidate) && getNodeFs().statSync(candidate).isFile()) {
+    if (
+      getNodeFs().existsSync(candidate) &&
+      getNodeFs().statSync(candidate).isFile()
+    ) {
       return getNodePath().normalize(candidate);
     }
   }
@@ -1597,13 +1790,13 @@ function stripJsonComments(input: string): string {
         isEscaped = false;
       } else if (char === "\\") {
         isEscaped = true;
-      } else if (char === "\"") {
+      } else if (char === '"') {
         inString = false;
       }
       continue;
     }
 
-    if (char === "\"") {
+    if (char === '"') {
       inString = true;
       output += char;
       continue;
@@ -1641,13 +1834,13 @@ function removeTrailingCommas(input: string): string {
         isEscaped = false;
       } else if (char === "\\") {
         isEscaped = true;
-      } else if (char === "\"") {
+      } else if (char === '"') {
         inString = false;
       }
       continue;
     }
 
-    if (char === "\"") {
+    if (char === '"') {
       inString = true;
       output += char;
       continue;
@@ -1658,7 +1851,10 @@ function removeTrailingCommas(input: string): string {
       while (cursor < input.length && /\s/.test(input[cursor])) {
         cursor += 1;
       }
-      if (cursor < input.length && (input[cursor] === "}" || input[cursor] === "]")) {
+      if (
+        cursor < input.length &&
+        (input[cursor] === "}" || input[cursor] === "]")
+      ) {
         continue;
       }
     }
@@ -1689,9 +1885,14 @@ function parseJsoncFile(filePath: string): Record<string, unknown> | null {
   }
 }
 
-function resolveTsconfigExtendsPath(configDir: string, extendsValue: string): string | null {
+function resolveTsconfigExtendsPath(
+  configDir: string,
+  extendsValue: string,
+): string | null {
   if (extendsValue.startsWith(".")) {
-    const withExtension = extendsValue.endsWith(".json") ? extendsValue : `${extendsValue}.json`;
+    const withExtension = extendsValue.endsWith(".json")
+      ? extendsValue
+      : `${extendsValue}.json`;
     return getNodePath().resolve(configDir, withExtension);
   }
 
@@ -1699,11 +1900,21 @@ function resolveTsconfigExtendsPath(configDir: string, extendsValue: string): st
     return extendsValue;
   }
 
-  const candidate = getNodePath().resolve(configDir, "node_modules", extendsValue);
-  if (getNodeFs().existsSync(candidate) && getNodeFs().statSync(candidate).isFile()) {
+  const candidate = getNodePath().resolve(
+    configDir,
+    "node_modules",
+    extendsValue,
+  );
+  if (
+    getNodeFs().existsSync(candidate) &&
+    getNodeFs().statSync(candidate).isFile()
+  ) {
     return candidate;
   }
-  if (getNodeFs().existsSync(`${candidate}.json`) && getNodeFs().statSync(`${candidate}.json`).isFile()) {
+  if (
+    getNodeFs().existsSync(`${candidate}.json`) &&
+    getNodeFs().statSync(`${candidate}.json`).isFile()
+  ) {
     return `${candidate}.json`;
   }
   const nested = getNodePath().resolve(candidate, "tsconfig.json");
@@ -1742,7 +1953,10 @@ function loadTsconfigCompilerOptions(
     if (parentPath) {
       const parent = loadTsconfigCompilerOptions(parentPath, visited);
       if (parent?.baseUrl) {
-        mergedBaseUrl = getNodePath().resolve(getNodePath().dirname(parentPath), parent.baseUrl);
+        mergedBaseUrl = getNodePath().resolve(
+          getNodePath().dirname(parentPath),
+          parent.baseUrl,
+        );
       }
       if (parent?.paths) {
         mergedPaths = { ...parent.paths };
@@ -1763,7 +1977,9 @@ function loadTsconfigCompilerOptions(
         if (!Array.isArray(targetValue)) {
           continue;
         }
-        const targets = targetValue.filter((entry): entry is string => typeof entry === "string");
+        const targets = targetValue.filter((entry): entry is string =>
+          typeof entry === "string"
+        );
         if (targets.length > 0) {
           mergedPaths[pattern] = targets;
         }
@@ -1780,9 +1996,14 @@ function loadTsconfigCompilerOptions(
   };
 }
 
-function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | null {
+function createTsconfigResolver(
+  projectRoot: string,
+): TsconfigPathResolver | null {
   const tsconfigPath = getNodePath().resolve(projectRoot, "tsconfig.json");
-  if (!getNodeFs().existsSync(tsconfigPath) || !getNodeFs().statSync(tsconfigPath).isFile()) {
+  if (
+    !getNodeFs().existsSync(tsconfigPath) ||
+    !getNodeFs().statSync(tsconfigPath).isFile()
+  ) {
     return null;
   }
 
@@ -1834,7 +2055,9 @@ function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | nul
         }
 
         for (const target of matcher.targets) {
-          const resolvedTarget = matcher.hasWildcard ? target.replace(/\*/g, wildcardValue) : target;
+          const resolvedTarget = matcher.hasWildcard
+            ? target.replace(/\*/g, wildcardValue)
+            : target;
           const candidateBase = getNodePath().isAbsolute(resolvedTarget)
             ? resolvedTarget
             : getNodePath().resolve(baseUrl, resolvedTarget);
@@ -1845,7 +2068,9 @@ function createTsconfigResolver(projectRoot: string): TsconfigPathResolver | nul
         }
       }
 
-      const baseUrlFallback = resolveFileFromBase(getNodePath().resolve(baseUrl, source));
+      const baseUrlFallback = resolveFileFromBase(
+        getNodePath().resolve(baseUrl, source),
+      );
       return baseUrlFallback;
     },
   };
@@ -1902,13 +2127,21 @@ function applyViteAlias(source: string, alias: ViteAliasEntry): string | null {
   return source.replace(alias.find, alias.replacement);
 }
 
-function resolveAliasedPath(importerId: string, source: string, projectRoot: string): string | null {
+function resolveAliasedPath(
+  importerId: string,
+  source: string,
+  projectRoot: string,
+): string | null {
   if (source.startsWith(".")) {
-    return resolveFileFromBase(getNodePath().resolve(getNodePath().dirname(importerId), source));
+    return resolveFileFromBase(
+      getNodePath().resolve(getNodePath().dirname(importerId), source),
+    );
   }
 
   if (getNodePath().isAbsolute(source)) {
-    const rootRelative = resolveFileFromBase(getNodePath().resolve(projectRoot, `.${source}`));
+    const rootRelative = resolveFileFromBase(
+      getNodePath().resolve(projectRoot, `.${source}`),
+    );
     if (rootRelative) {
       return rootRelative;
     }
@@ -1933,14 +2166,23 @@ function inferProjectRootFromImporter(importerId: string): string | null {
   return inferred || getNodePath().parse(normalized).root;
 }
 
-function resolveImportToFile(importerId: string, source: string, options: ImportResolverOptions): string | null {
+function resolveImportToFile(
+  importerId: string,
+  source: string,
+  options: ImportResolverOptions,
+): string | null {
   if (source.startsWith(".")) {
-    const base = getNodePath().resolve(getNodePath().dirname(importerId), source);
+    const base = getNodePath().resolve(
+      getNodePath().dirname(importerId),
+      source,
+    );
     return resolveFileFromBase(base);
   }
 
   if (source.startsWith("/")) {
-    const resolvedRootRelative = resolveFileFromBase(getNodePath().resolve(options.projectRoot, `.${source}`));
+    const resolvedRootRelative = resolveFileFromBase(
+      getNodePath().resolve(options.projectRoot, `.${source}`),
+    );
     if (resolvedRootRelative) {
       return resolvedRootRelative;
     }
@@ -1953,14 +2195,19 @@ function resolveImportToFile(importerId: string, source: string, options: Import
       continue;
     }
 
-    const resolvedAliased = resolveAliasedPath(importerId, aliased, options.projectRoot);
+    const resolvedAliased = resolveAliasedPath(
+      importerId,
+      aliased,
+      options.projectRoot,
+    );
     if (resolvedAliased) {
       return resolvedAliased;
     }
   }
 
   if (source === "$lib" || source.startsWith("$lib/")) {
-    const projectRoot = inferProjectRootFromImporter(importerId) ?? options.projectRoot;
+    const projectRoot = inferProjectRootFromImporter(importerId) ??
+      options.projectRoot;
     if (!projectRoot) {
       return null;
     }
@@ -2015,15 +2262,22 @@ function moduleIdToFilePath(id: string, projectRoot: string): string | null {
     return absolute;
   }
 
-  return getNodePath().normalize(getNodePath().resolve(projectRoot, normalizedId));
+  return getNodePath().normalize(
+    getNodePath().resolve(projectRoot, normalizedId),
+  );
 }
 
 function isPathWithinScope(filePath: string, scopePath: string): boolean {
   const relative = getNodePath().relative(scopePath, filePath);
-  return relative === "" || (!relative.startsWith("..") && !getNodePath().isAbsolute(relative));
+  return relative === "" ||
+    (!relative.startsWith("..") && !getNodePath().isAbsolute(relative));
 }
 
-function isInDefaultTransformScope(id: string, projectRoot: string, includePaths: readonly string[]): boolean {
+function isInDefaultTransformScope(
+  id: string,
+  projectRoot: string,
+  includePaths: readonly string[],
+): boolean {
   const modulePath = moduleIdToFilePath(id, projectRoot);
   if (!modulePath) {
     return false;
@@ -2181,7 +2435,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       if (options.include && !options.include.test(normalizedId)) {
         return null;
       }
-      if (!options.include && !isInDefaultTransformScope(normalizedId, projectRoot, cssConfig.include)) {
+      if (
+        !options.include &&
+        !isInDefaultTransformScope(normalizedId, projectRoot, cssConfig.include)
+      ) {
         return null;
       }
       const isSvelte = normalizedId.endsWith(".svelte");
@@ -2204,17 +2461,22 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           return null;
         }
 
-        nextCode = isSvelte ? addVirtualImportToSvelte(nextCode) : addVirtualImportToAstro(nextCode);
+        nextCode = isSvelte
+          ? addVirtualImportToSvelte(nextCode)
+          : addVirtualImportToAstro(nextCode);
         return {
           code: nextCode,
           map: null,
         };
       }
 
-      const replacements: Array<{ start: number; end: number; text: string }> = [];
+      const replacements: Array<{ start: number; end: number; text: string }> =
+        [];
       const importRules = new Set<string>();
       const rules = new Set<string>();
-      const resolution = isAstro && !cssConfig.hasExplicitResolution ? "static" : cssConfig.resolution;
+      const resolution = isAstro && !cssConfig.hasExplicitResolution
+        ? "static"
+        : cssConfig.resolution;
       const runtimeOptionsForRuntime: LoadedCssConfig["runtimeOptions"] = {
         ...cssConfig.runtimeOptions,
       };
@@ -2243,7 +2505,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       function staticResolutionError(message: string, index: number): Error {
-        return new Error(`[css-ts] ${message} (${normalizedId}:${lineAt(index)})`);
+        return new Error(
+          `[css-ts] ${message} (${normalizedId}:${lineAt(index)})`,
+        );
       }
 
       function logStatic(message: string): void {
@@ -2253,7 +2517,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         console.log(`[css-ts][static] ${normalizedId} ${message}`);
       }
 
-      function withRuntimeOptionsInNewCtDeclaration(declarationSource: string): string {
+      function withRuntimeOptionsInNewCtDeclaration(
+        declarationSource: string,
+      ): string {
         const replaced = declarationSource.replace(
           /new\s+ct\s*\(\s*\)/,
           `new ct(undefined, undefined, ${runtimeOptionsLiteral})`,
@@ -2261,10 +2527,16 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return replaced;
       }
 
-      function readMemberPath(value: unknown, members: readonly string[]): unknown | null {
+      function readMemberPath(
+        value: unknown,
+        members: readonly string[],
+      ): unknown | null {
         let current: unknown = value;
         for (const member of members) {
-          if (typeof current !== "object" || current === null || Array.isArray(current)) {
+          if (
+            typeof current !== "object" || current === null ||
+            Array.isArray(current)
+          ) {
             return null;
           }
           const record = current as Record<string, unknown>;
@@ -2301,7 +2573,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return parsed;
       }
 
-      function resolveIdentifierInModule(identifierPath: readonly string[], moduleId: string): unknown | null {
+      function resolveIdentifierInModule(
+        identifierPath: readonly string[],
+        moduleId: string,
+      ): unknown | null {
         if (identifierPath.length === 0) {
           return null;
         }
@@ -2328,19 +2603,31 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               ...STATIC_EVAL_GLOBALS,
             };
             for (const localName of moduleInfo.functionDeclarations.keys()) {
-              if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
+              if (
+                localName === excludeName ||
+                !identifierMentioned(sourceHint, localName)
+              ) {
                 continue;
               }
-              const localValue = resolveIdentifierInModule([localName], moduleId);
+              const localValue = resolveIdentifierInModule(
+                [localName],
+                moduleId,
+              );
               if (localValue !== null) {
                 evalScope[localName] = localValue;
               }
             }
             for (const localName of moduleInfo.constInitializers.keys()) {
-              if (localName === excludeName || !identifierMentioned(sourceHint, localName)) {
+              if (
+                localName === excludeName ||
+                !identifierMentioned(sourceHint, localName)
+              ) {
                 continue;
               }
-              const localValue = resolveIdentifierInModule([localName], moduleId);
+              const localValue = resolveIdentifierInModule(
+                [localName],
+                moduleId,
+              );
               if (localValue !== null) {
                 evalScope[localName] = localValue;
               }
@@ -2349,7 +2636,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               if (!identifierMentioned(sourceHint, localName)) {
                 continue;
               }
-              const localValue = resolveIdentifierInModule([localName], moduleId);
+              const localValue = resolveIdentifierInModule(
+                [localName],
+                moduleId,
+              );
               if (localValue !== null) {
                 evalScope[localName] = localValue;
               }
@@ -2357,8 +2647,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             return evalScope;
           };
 
-      const initializerInfo = moduleInfo.constInitializers.get(head);
-      if (initializerInfo !== undefined) {
+          const initializerInfo = moduleInfo.constInitializers.get(head);
+          if (initializerInfo !== undefined) {
             const initializer = initializerInfo.initializer;
             let value = parseStaticExpression(initializer, (nestedPath) => {
               const nested = resolveIdentifierInModule(nestedPath, moduleId);
@@ -2366,21 +2656,28 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             }, { keepUnresolvedIdentifiers: true });
 
             if (value === null) {
-              value = evaluateExpression(initializer, buildEvalScope(head, initializer));
+              value = evaluateExpression(
+                initializer,
+                buildEvalScope(head, initializer),
+              );
             }
 
             if (value !== null) {
               resolved = tail.length > 0 ? readMemberPath(value, tail) : value;
             }
           } else {
-            const functionDeclaration = moduleInfo.functionDeclarations.get(head);
+            const functionDeclaration = moduleInfo.functionDeclarations.get(
+              head,
+            );
             if (functionDeclaration !== undefined) {
               const functionValue = evaluateFunctionDeclaration(
                 functionDeclaration,
                 buildEvalScope(head, functionDeclaration),
               );
               if (functionValue !== null) {
-                resolved = tail.length > 0 ? readMemberPath(functionValue, tail) : functionValue;
+                resolved = tail.length > 0
+                  ? readMemberPath(functionValue, tail)
+                  : functionValue;
               }
             }
           }
@@ -2388,11 +2685,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           if (resolved === null) {
             const binding = moduleInfo.imports.get(head);
             if (binding) {
-              const resolvedImportFile = resolveImportToFile(moduleId, binding.source, {
-                projectRoot,
-                viteAliases,
-                tsconfigResolver,
-              });
+              const resolvedImportFile = resolveImportToFile(
+                moduleId,
+                binding.source,
+                {
+                  projectRoot,
+                  viteAliases,
+                  tsconfigResolver,
+                },
+              );
               if (resolvedImportFile) {
                 const importedModuleInfo = getModuleInfo(resolvedImportFile);
                 if (importedModuleInfo) {
@@ -2400,7 +2701,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                     if (tail.length > 0) {
                       const [namespaceExport, ...namespaceTail] = tail;
                       const exportedLocalName =
-                        importedModuleInfo.exportedConsts.get(namespaceExport) ?? namespaceExport;
+                        importedModuleInfo.exportedConsts.get(
+                          namespaceExport,
+                        ) ?? namespaceExport;
                       const namespaceValue = resolveIdentifierInModule(
                         [exportedLocalName],
                         resolvedImportFile,
@@ -2410,14 +2713,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                         : namespaceValue;
                     }
                   } else {
-                    const importedName = binding.kind === "default" ? "default" : binding.imported;
+                    const importedName = binding.kind === "default"
+                      ? "default"
+                      : binding.imported;
                     const exportedLocalName = importedName === "default"
                       ? null
-                      : (importedModuleInfo.exportedConsts.get(importedName) ?? importedName);
+                      : (importedModuleInfo.exportedConsts.get(importedName) ??
+                        importedName);
                     const importedValue = resolveIdentifierInModule(
-                      exportedLocalName
-                        ? [exportedLocalName]
-                        : ["default"],
+                      exportedLocalName ? [exportedLocalName] : ["default"],
                       resolvedImportFile,
                     );
                     resolved = tail.length > 0
@@ -2429,20 +2733,28 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             }
           }
 
-          if (resolved === null && head === "default" && moduleInfo.defaultExportExpression) {
+          if (
+            resolved === null && head === "default" &&
+            moduleInfo.defaultExportExpression
+          ) {
             const parsedDefault = parseStaticExpression(
               moduleInfo.defaultExportExpression,
-              (nestedPath) => resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
+              (nestedPath) =>
+                resolveIdentifierInModule(nestedPath, moduleId) ?? undefined,
             );
             if (parsedDefault !== null) {
-              resolved = tail.length > 0 ? readMemberPath(parsedDefault, tail) : parsedDefault;
+              resolved = tail.length > 0
+                ? readMemberPath(parsedDefault, tail)
+                : parsedDefault;
             } else {
               const evaluatedDefault = evaluateExpression(
                 moduleInfo.defaultExportExpression,
                 buildEvalScope(undefined, moduleInfo.defaultExportExpression),
               );
               if (evaluatedDefault !== null) {
-                resolved = tail.length > 0 ? readMemberPath(evaluatedDefault, tail) : evaluatedDefault;
+                resolved = tail.length > 0
+                  ? readMemberPath(evaluatedDefault, tail)
+                  : evaluatedDefault;
               }
             }
           }
@@ -2469,7 +2781,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         const parsed = parseCtCallArgumentsWithResolver(
           call.arg,
-          (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+          (identifierPath) =>
+            resolveIdentifierInModule(identifierPath, normalizedId) ??
+              undefined,
           {
             utilities: cssConfig.utilities,
             containers: cssConfig.containers,
@@ -2482,7 +2796,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         if (!parsed) {
           if (resolution === "static") {
             throw staticResolutionError(
-              "resolution=\"static\" could not statically resolve ct(...)",
+              'resolution="static" could not statically resolve ct(...)',
               call.start,
             );
           }
@@ -2495,11 +2809,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         for (const importPath of parsed.imports ?? []) {
-          const browserPath = toBrowserStylesheetPath(importPath, normalizedId, {
-            projectRoot,
-            viteAliases,
-            tsconfigResolver,
-          });
+          const browserPath = toBrowserStylesheetPath(
+            importPath,
+            normalizedId,
+            {
+              projectRoot,
+              viteAliases,
+              tsconfigResolver,
+            },
+          );
           if (browserPath) {
             importRules.add(browserPath);
             logStatic(`import -> ${browserPath}`);
@@ -2507,8 +2825,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         const classMap: Record<string, string> = {};
-        const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
-        const variantGlobalRuleMap: Record<string, Record<string, string[]>> = {};
+        const variantClassMap: Record<
+          string,
+          Record<string, Partial<Record<string, string>>>
+        > = {};
+        const variantGlobalRuleMap: Record<string, Record<string, string[]>> =
+          {};
         const compiledConfig: Record<string, unknown> = {};
         if ((parsed.imports?.length ?? 0) > 0) {
           compiledConfig.imports = true;
@@ -2550,8 +2872,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         if (parsed.variant) {
           for (const [group, variants] of Object.entries(parsed.variant)) {
-            const groupMap: Record<string, Partial<Record<string, string>>> = {};
-            for (const [variantName, declarations] of Object.entries(variants)) {
+            const groupMap: Record<string, Partial<Record<string, string>>> =
+              {};
+            for (
+              const [variantName, declarations] of Object.entries(variants)
+            ) {
               const variantMap: Partial<Record<string, string>> = {};
               for (const [key, declaration] of Object.entries(declarations)) {
                 const className = createClassName(
@@ -2569,7 +2894,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ) {
                   rules.add(rule);
                 }
-                logStatic(`variant.${group}.${variantName}.${key} -> .${className}`);
+                logStatic(
+                  `variant.${group}.${variantName}.${key} -> .${className}`,
+                );
               }
               groupMap[variantName] = variantMap;
             }
@@ -2579,9 +2906,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         if (parsed.variantGlobal) {
-          for (const [group, variants] of Object.entries(parsed.variantGlobal)) {
+          for (
+            const [group, variants] of Object.entries(parsed.variantGlobal)
+          ) {
             const groupMap: Record<string, string[]> = {};
-            for (const [variantName, declarations] of Object.entries(variants)) {
+            for (
+              const [variantName, declarations] of Object.entries(variants)
+            ) {
               const variantRules = toCssGlobalRules(declarations, {
                 breakpoints: cssConfig.breakpoints,
                 containers: cssConfig.containers,
@@ -2596,20 +2927,34 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);
-        const replacement = `ct(${runtimeConfigLiteral}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
-        replacements.push({ start: call.start, end: call.end, text: replacement });
+        const replacement = `ct(${runtimeConfigLiteral}, ${
+          JSON.stringify(compiledConfig)
+        }, ${runtimeOptionsLiteral})`;
+        replacements.push({
+          start: call.start,
+          end: call.end,
+          text: replacement,
+        });
       }
 
       for (const decl of newCtDecls) {
         const declarationSource = nextCode.slice(decl.start, decl.end);
-        const runtimeDeclaration = withRuntimeOptionsInNewCtDeclaration(declarationSource);
+        const runtimeDeclaration = withRuntimeOptionsInNewCtDeclaration(
+          declarationSource,
+        );
 
         if (resolution === "dynamic") {
-          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
+          replacements.push({
+            start: decl.start,
+            end: decl.end,
+            text: runtimeDeclaration,
+          });
           continue;
         }
 
-        const addContainerMatcher = new RegExp(`\\b${decl.varName}\\.addContainer\\s*\\(`);
+        const addContainerMatcher = new RegExp(
+          `\\b${decl.varName}\\.addContainer\\s*\\(`,
+        );
         if (addContainerMatcher.test(nextCode)) {
           if (resolution === "static") {
             throw staticResolutionError(
@@ -2617,7 +2962,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               decl.start,
             );
           }
-          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
+          replacements.push({
+            start: decl.start,
+            end: decl.end,
+            text: runtimeDeclaration,
+          });
           continue;
         }
 
@@ -2629,7 +2978,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           let value = parseStaticExpression(assignment.valueSource) ??
             parseStaticExpression(
               assignment.valueSource,
-              (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+              (identifierPath) =>
+                resolveIdentifierInModule(identifierPath, normalizedId) ??
+                  undefined,
             );
           if (value === null) {
             const moduleInfo = getModuleInfo(normalizedId);
@@ -2641,7 +2992,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 if (!identifierMentioned(assignment.valueSource, localName)) {
                   continue;
                 }
-                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                const localValue = resolveIdentifierInModule(
+                  [localName],
+                  normalizedId,
+                );
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
                 }
@@ -2650,7 +3004,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 if (!identifierMentioned(assignment.valueSource, localName)) {
                   continue;
                 }
-                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                const localValue = resolveIdentifierInModule(
+                  [localName],
+                  normalizedId,
+                );
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
                 }
@@ -2659,7 +3016,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 if (!identifierMentioned(assignment.valueSource, localName)) {
                   continue;
                 }
-                const localValue = resolveIdentifierInModule([localName], normalizedId);
+                const localValue = resolveIdentifierInModule(
+                  [localName],
+                  normalizedId,
+                );
                 if (localValue !== null) {
                   evalScope[localName] = localValue;
                 }
@@ -2671,12 +3031,16 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             if (
               assignment.property === "base" ||
               assignment.property === "global" ||
+              assignment.property === "root" ||
+              assignment.property === "rootVars" ||
               assignment.property === "variant" ||
               assignment.property === "defaults"
             ) {
               const partialParsed = parseCtCallArgumentsWithResolver(
                 `{ ${assignment.property}: ${assignment.valueSource} }`,
-                (identifierPath) => resolveIdentifierInModule(identifierPath, normalizedId) ?? undefined,
+                (identifierPath) =>
+                  resolveIdentifierInModule(identifierPath, normalizedId) ??
+                    undefined,
                 {
                   utilities: cssConfig.utilities,
                   containers: cssConfig.containers,
@@ -2694,9 +3058,19 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   configParts.base = partialParsed.base;
                 } else if (assignment.property === "global") {
                   configParts.global = partialParsed.global ?? {};
-                } else if (assignment.property === "variant" && partialParsed.variant) {
+                } else if (
+                  (assignment.property === "root" ||
+                    assignment.property === "rootVars") &&
+                  (partialParsed.root ?? partialParsed.rootVars)
+                ) {
+                  configParts.root = partialParsed.root ?? partialParsed.rootVars;
+                } else if (
+                  assignment.property === "variant" && partialParsed.variant
+                ) {
                   configParts.variant = partialParsed.variant;
-                } else if (assignment.property === "defaults" && partialParsed.defaults) {
+                } else if (
+                  assignment.property === "defaults" && partialParsed.defaults
+                ) {
                   configParts.defaults = partialParsed.defaults;
                 }
                 if ((partialParsed.imports?.length ?? 0) > 0) {
@@ -2713,7 +3087,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           if (assignment.property === "import") {
             importParts.push(value);
           } else {
-            configParts[assignment.property] = value;
+            configParts[assignment.property === "rootVars"
+              ? "root"
+              : assignment.property] = value;
           }
         }
 
@@ -2722,7 +3098,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           const currentGlobal = configParts.global as Record<string, unknown>;
 
           for (const entryGroup of importParts) {
-            const entries = Array.isArray(entryGroup) ? entryGroup : [entryGroup];
+            const entries = Array.isArray(entryGroup)
+              ? entryGroup
+              : [entryGroup];
             for (const entry of entries) {
               if (
                 typeof entry === "string" ||
@@ -2739,7 +3117,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   const ruleObj = entry as { layer?: string; rules: unknown };
                   if (ruleObj.layer && typeof ruleObj.layer === "string") {
                     currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
-                  } else if (ruleObj.rules && typeof ruleObj.rules === "object") {
+                  } else if (
+                    ruleObj.rules && typeof ruleObj.rules === "object"
+                  ) {
                     Object.assign(currentGlobal, ruleObj.rules);
                   }
                 } else {
@@ -2748,7 +3128,6 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               }
             }
           }
-
         }
 
         if (!allParsed) {
@@ -2758,7 +3137,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               decl.start,
             );
           }
-          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
+          replacements.push({
+            start: decl.start,
+            end: decl.end,
+            text: runtimeDeclaration,
+          });
           continue;
         }
 
@@ -2773,16 +3156,24 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               decl.start,
             );
           }
-          replacements.push({ start: decl.start, end: decl.end, text: runtimeDeclaration });
+          replacements.push({
+            start: decl.start,
+            end: decl.end,
+            text: runtimeDeclaration,
+          });
           continue;
         }
 
         for (const importPath of parsed.imports ?? []) {
-          const browserPath = toBrowserStylesheetPath(importPath, normalizedId, {
-            projectRoot,
-            viteAliases,
-            tsconfigResolver,
-          });
+          const browserPath = toBrowserStylesheetPath(
+            importPath,
+            normalizedId,
+            {
+              projectRoot,
+              viteAliases,
+              tsconfigResolver,
+            },
+          );
           if (browserPath) {
             importRules.add(browserPath);
             logStatic(`import -> ${browserPath}`);
@@ -2790,8 +3181,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         const classMap: Record<string, string> = {};
-        const variantClassMap: Record<string, Record<string, Partial<Record<string, string>>>> = {};
-        const variantGlobalRuleMap: Record<string, Record<string, string[]>> = {};
+        const variantClassMap: Record<
+          string,
+          Record<string, Partial<Record<string, string>>>
+        > = {};
+        const variantGlobalRuleMap: Record<string, Record<string, string[]>> =
+          {};
         const compiledConfig: Record<string, unknown> = {};
         if ((parsed.imports?.length ?? 0) > 0) {
           compiledConfig.imports = true;
@@ -2833,8 +3228,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
         if (parsed.variant) {
           for (const [group, variants] of Object.entries(parsed.variant)) {
-            const groupMap: Record<string, Partial<Record<string, string>>> = {};
-            for (const [variantName, declarations] of Object.entries(variants)) {
+            const groupMap: Record<string, Partial<Record<string, string>>> =
+              {};
+            for (
+              const [variantName, declarations] of Object.entries(variants)
+            ) {
               const variantMap: Partial<Record<string, string>> = {};
               for (const [key, declaration] of Object.entries(declarations)) {
                 const className = createClassName(
@@ -2852,7 +3250,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ) {
                   rules.add(rule);
                 }
-                logStatic(`variant.${group}.${variantName}.${key} -> .${className}`);
+                logStatic(
+                  `variant.${group}.${variantName}.${key} -> .${className}`,
+                );
               }
               groupMap[variantName] = variantMap;
             }
@@ -2862,9 +3262,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         if (parsed.variantGlobal) {
-          for (const [group, variants] of Object.entries(parsed.variantGlobal)) {
+          for (
+            const [group, variants] of Object.entries(parsed.variantGlobal)
+          ) {
             const groupMap: Record<string, string[]> = {};
-            for (const [variantName, declarations] of Object.entries(variants)) {
+            for (
+              const [variantName, declarations] of Object.entries(variants)
+            ) {
               const variantRules = toCssGlobalRules(declarations, {
                 breakpoints: cssConfig.breakpoints,
                 containers: cssConfig.containers,
@@ -2879,12 +3283,21 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
 
         const runtimeConfigLiteral = toRuntimeCtConfigLiteral(parsed);
-        const ctCall =
-          `ct(${runtimeConfigLiteral}, ${JSON.stringify(compiledConfig)}, ${runtimeOptionsLiteral})`;
-        replacements.push({ start: decl.start, end: decl.end, text: `const ${decl.varName} = ${ctCall}` });
+        const ctCall = `ct(${runtimeConfigLiteral}, ${
+          JSON.stringify(compiledConfig)
+        }, ${runtimeOptionsLiteral})`;
+        replacements.push({
+          start: decl.start,
+          end: decl.end,
+          text: `const ${decl.varName} = ${ctCall}`,
+        });
 
         for (const assignment of decl.assignments) {
-          replacements.push({ start: assignment.start, end: assignment.end, text: "" });
+          replacements.push({
+            start: assignment.start,
+            end: assignment.end,
+            text: "",
+          });
         }
       }
 
@@ -2895,8 +3308,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       replacements.sort((a, b) => b.start - a.start);
 
       for (const replacement of replacements) {
-        nextCode =
-          nextCode.slice(0, replacement.start) +
+        nextCode = nextCode.slice(0, replacement.start) +
           replacement.text +
           nextCode.slice(replacement.end);
       }
@@ -2925,7 +3337,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           didVirtualCssChange = true;
         }
       } else {
-        nextCode = isAstro ? addVirtualImportToAstro(nextCode) : addVirtualImport(nextCode);
+        nextCode = isAstro
+          ? addVirtualImportToAstro(nextCode)
+          : addVirtualImport(nextCode);
         const nextImports = Array.from(importRules);
         const prevImports = moduleImports.get(normalizedId) ?? [];
         const importsChanged = nextImports.length !== prevImports.length ||
@@ -2973,7 +3387,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
       if (cssConfig.path && normalizedId === cleanId(cssConfig.path)) {
-        cssConfig = loadCssConfig(projectRoot, { viteAliases, tsconfigResolver });
+        cssConfig = loadCssConfig(projectRoot, {
+          viteAliases,
+          tsconfigResolver,
+        });
         invalidateVirtualModule();
       }
       if (moduleCss.has(normalizedId)) {

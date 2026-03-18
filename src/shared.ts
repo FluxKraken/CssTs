@@ -11,7 +11,10 @@ export interface CssVarRef {
   fallback?: PrimitiveStyleValue;
 }
 /** CSS value accepted by style declarations. */
-export type StyleValue = PrimitiveStyleValue | CssVarRef | readonly (PrimitiveStyleValue | CssVarRef)[];
+export type StyleValue =
+  | PrimitiveStyleValue
+  | CssVarRef
+  | readonly (PrimitiveStyleValue | CssVarRef)[];
 /** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
@@ -48,7 +51,6 @@ export type SingularImportInput =
 
 /** Import shapes accepted by the `.import()` method. */
 export type ImportInput = SingularImportInput | readonly SingularImportInput[];
-
 
 /** Optional serialization settings shared by runtime and build-time extraction. */
 export interface CssSerializationOptions {
@@ -145,7 +147,11 @@ export function createClassName(
  * @param value Style value to serialize.
  * @param options Optional serialization settings (breakpoints, containers, default unit).
  */
-export function toCssDeclaration(name: string, value: StyleValue, options?: CssSerializationOptions): string {
+export function toCssDeclaration(
+  name: string,
+  value: StyleValue,
+  options?: CssSerializationOptions,
+): string {
   const property = camelToKebab(name);
   return `${property}:${formatStyleValue(property, value, options)}`;
 }
@@ -203,7 +209,9 @@ const PSEUDO_CLASS_KEYS = new Set([
   "where",
 ]);
 
-function isNestedStyleDeclaration(value: StyleValue | NestedStyleDeclaration): value is NestedStyleDeclaration {
+function isNestedStyleDeclaration(
+  value: StyleValue | NestedStyleDeclaration,
+): value is NestedStyleDeclaration {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -236,11 +244,20 @@ function toCssRule(
 }
 
 function splitSelectors(value: string): string[] {
-  return value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+  return value.split(",").map((part) => part.trim()).filter((part) =>
+    part.length > 0
+  );
 }
 
 function unwrapGlobalSelector(value: string): string {
   return value.replace(/:global\(([^()]+)\)/g, "$1");
+}
+
+function isScopeDirectiveDeclaration(
+  value: unknown,
+): value is StyleDeclaration {
+  return typeof value === "object" && value !== null && !Array.isArray(value) &&
+    !isCssVarRef(value);
 }
 
 function nestSelector(parentSelector: string, childSelector: string): string {
@@ -257,9 +274,10 @@ function nestSelector(parentSelector: string, childSelector: string): string {
     return expanded.join(", ");
   }
 
-  const pseudoSelector = childSelector.startsWith(":") || childSelector.startsWith("::")
-    ? childSelector
-    : toPseudoSelectorIfShorthand(childSelector);
+  const pseudoSelector =
+    childSelector.startsWith(":") || childSelector.startsWith("::")
+      ? childSelector
+      : toPseudoSelectorIfShorthand(childSelector);
   if (pseudoSelector) {
     return parents.map((parent) => `${parent}${pseudoSelector}`).join(", ");
   }
@@ -299,7 +317,9 @@ function resolveAtRule(key: string, options?: CssSerializationOptions): string {
     return key;
   }
 
-  const rangeMatch = key.match(/^@\(\s*([A-Za-z0-9_$-]+)\s*,\s*([A-Za-z0-9_$-]+)\s*\)$/);
+  const rangeMatch = key.match(
+    /^@\(\s*([A-Za-z0-9_$-]+)\s*,\s*([A-Za-z0-9_$-]+)\s*\)$/,
+  );
   if (rangeMatch) {
     const lower = options?.breakpoints?.[rangeMatch[1]];
     const upper = options?.breakpoints?.[rangeMatch[2]];
@@ -358,11 +378,23 @@ function collectCssRules(
 
   for (const [name, value] of nested) {
     if (isSupportedAtRule(name)) {
-      collectCssRules(selector, value, [...atRules, resolveAtRule(name, options)], rules, options);
+      collectCssRules(
+        selector,
+        value,
+        [...atRules, resolveAtRule(name, options)],
+        rules,
+        options,
+      );
       continue;
     }
 
-    collectCssRules(nestSelector(selector, name), value, atRules, rules, options);
+    collectCssRules(
+      nestSelector(selector, name),
+      value,
+      atRules,
+      rules,
+      options,
+    );
   }
 }
 
@@ -388,8 +420,38 @@ function collectGlobalCssRules(
   rules: string[],
   options?: CssSerializationOptions,
 ): void {
+  if (selectorOrAtRule === "@scope") {
+    const scopeSelector = declaration.selector;
+    if (
+      typeof scopeSelector !== "string" || scopeSelector.trim().length === 0
+    ) {
+      return;
+    }
+
+    const scopedRules: string[] = [];
+    for (const [name, value] of Object.entries(declaration)) {
+      if (name === "selector" || !isScopeDirectiveDeclaration(value)) {
+        continue;
+      }
+      collectGlobalCssRules(name, value, [], scopedRules, options);
+    }
+
+    rules.push(
+      wrapInAtRules(
+        `@scope (${unwrapGlobalSelector(scopeSelector.trim())}){${
+          scopedRules.join("")
+        }}`,
+        atRules,
+      ),
+    );
+    return;
+  }
+
   if (isSupportedAtRule(selectorOrAtRule)) {
-    const nestedAtRules = [...atRules, resolveAtRule(selectorOrAtRule, options)];
+    const nestedAtRules = [
+      ...atRules,
+      resolveAtRule(selectorOrAtRule, options),
+    ];
     const nestedDeclarations: PseudoStyleDeclaration = {};
 
     for (const [name, value] of Object.entries(declaration)) {
@@ -402,20 +464,34 @@ function collectGlobalCssRules(
     }
 
     if (Object.keys(nestedDeclarations).length > 0) {
-      rules.push(wrapInAtRules(toCssRule(selectorOrAtRule, nestedDeclarations, options), atRules));
+      rules.push(
+        wrapInAtRules(
+          toCssRule(selectorOrAtRule, nestedDeclarations, options),
+          atRules,
+        ),
+      );
     }
 
     return;
   }
 
-  collectCssRules(unwrapGlobalSelector(selectorOrAtRule), declaration, atRules, rules, options);
+  collectCssRules(
+    unwrapGlobalSelector(selectorOrAtRule),
+    declaration,
+    atRules,
+    rules,
+    options,
+  );
 }
 
 /**
  * Build CSS rules for global selectors/at-rules without generating class names.
  * @param styles Selector/at-rule map to serialize.
  */
-export function toCssGlobalRules(styles: StyleSheet, options?: CssSerializationOptions): string[] {
+export function toCssGlobalRules(
+  styles: StyleSheet,
+  options?: CssSerializationOptions,
+): string[] {
   const rules: string[] = [];
   for (const [selectorOrAtRule, declaration] of Object.entries(styles)) {
     collectGlobalCssRules(selectorOrAtRule, declaration, [], rules, options);
@@ -430,10 +506,15 @@ export function toCssGlobalRules(styles: StyleSheet, options?: CssSerializationO
  */
 export function cv(name: string, fallback?: PrimitiveStyleValue): CssVarRef {
   if (!name.startsWith("--")) {
-    throw new Error(`Expected a CSS variable name like "--token", got "${name}"`);
+    throw new Error(
+      `Expected a CSS variable name like "--token", got "${name}"`,
+    );
   }
 
-  if (fallback !== undefined && typeof fallback !== "string" && typeof fallback !== "number") {
+  if (
+    fallback !== undefined && typeof fallback !== "string" &&
+    typeof fallback !== "number"
+  ) {
     throw new Error("cv() fallback must be a string or number");
   }
 
@@ -490,11 +571,15 @@ function isQuotedCssString(value: string): boolean {
 }
 
 function isRawContentFunction(value: string): boolean {
-  return /^(attr|counter|counters|element|leader|target-counter|target-counters|target-text|string)\(/.test(value);
+  return /^(attr|counter|counters|element|leader|target-counter|target-counters|target-text|string)\(/
+    .test(value);
 }
 
 function formatContentValue(value: string): string {
-  if (isQuotedCssString(value) || RAW_CONTENT_KEYWORDS.has(value) || isRawContentFunction(value)) {
+  if (
+    isQuotedCssString(value) || RAW_CONTENT_KEYWORDS.has(value) ||
+    isRawContentFunction(value)
+  ) {
     return value;
   }
 
@@ -513,7 +598,9 @@ function isTransitionTimingToken(value: string): boolean {
   );
 }
 
-function shouldUseSpaceDelimitedTransitionValue(value: readonly (PrimitiveStyleValue | CssVarRef)[]): boolean {
+function shouldUseSpaceDelimitedTransitionValue(
+  value: readonly (PrimitiveStyleValue | CssVarRef)[],
+): boolean {
   if (value.length < 2) {
     return false;
   }
@@ -547,19 +634,29 @@ function formatStyleValue(
   options?: CssSerializationOptions,
 ): string {
   if (Array.isArray(value)) {
-    if (property === "transition" && shouldUseSpaceDelimitedTransitionValue(value)) {
-      return value.map((entry) => formatStyleValue(property, entry, options)).join(" ");
+    if (
+      property === "transition" && shouldUseSpaceDelimitedTransitionValue(value)
+    ) {
+      return value.map((entry) => formatStyleValue(property, entry, options))
+        .join(" ");
     }
     const separator = COMMA_DELIMITED_PROPERTIES.has(property) ? ", " : " ";
-    return value.map((entry) => formatStyleValue(property, entry, options)).join(separator);
+    return value.map((entry) => formatStyleValue(property, entry, options))
+      .join(separator);
   }
 
   if (isCssVarRef(value)) {
     if (value.fallback === undefined) {
       return `var(${value.name})`;
     }
-    return `var(${value.name}, ${formatPrimitiveStyleValue(property, value.fallback, options)})`;
+    return `var(${value.name}, ${
+      formatPrimitiveStyleValue(property, value.fallback, options)
+    })`;
   }
 
-  return formatPrimitiveStyleValue(property, value as PrimitiveStyleValue, options);
+  return formatPrimitiveStyleValue(
+    property,
+    value as PrimitiveStyleValue,
+    options,
+  );
 }

@@ -1,6 +1,7 @@
 # css-ts
 
-A TypeScript-first CSS object API with a Vite plugin that extracts styles to real stylesheets during build.
+A TypeScript-first CSS object API with a Vite plugin that extracts styles to
+real stylesheets during build.
 
 ## Install
 
@@ -14,7 +15,7 @@ npx jsr add @kt-tools/css-ts
 
 ```bash
 pnpm dlx jsr add @kt-tools/css-ts
-````
+```
 
 ## Vite setup
 
@@ -30,8 +31,9 @@ export default defineConfig({
 });
 ```
 
-By default, `ctVite()` only transforms modules inside `<project-root>/src/**`. This avoids transforming third-party code in `node_modules`.
-Supported file types include `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte`, and `.astro`.
+By default, `ctVite()` only transforms modules inside `<project-root>/src/**`.
+This avoids transforming third-party code in `node_modules`. Supported file
+types include `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte`, and `.astro`.
 
 To include extra directories, add `include` paths in root `css.config.ts`:
 
@@ -41,11 +43,13 @@ export default {
 };
 ```
 
-If you need full control, pass `ctVite({ include: /.../ })` to override the default scope matcher.
+If you need full control, pass `ctVite({ include: /.../ })` to override the
+default scope matcher.
 
 ## Astro setup
 
-Astro projects usually do not have a `vite.config.ts`. Configure the plugin in `astro.config.mjs` via Astro's `vite` field:
+Astro projects usually do not have a `vite.config.ts`. Configure the plugin in
+`astro.config.mjs` via Astro's `vite` field:
 
 ```js
 // @ts-check
@@ -64,8 +68,9 @@ export default defineConfig({
 
 ### Deno + Vite configuration (no package.json)
 
-Only needed if you install via Deno and do not use a `package.json`. Vite does not read `deno.json`
-import maps, so you must map the JSR package to its npm shim and add a Vite alias.
+Only needed if you install via Deno and do not use a `package.json`. Vite does
+not read `deno.json` import maps, so you must map the JSR package to its npm
+shim and add a Vite alias.
 
 1. Add the import map entry:
 
@@ -97,7 +102,8 @@ export default defineConfig({
 
 ### SvelteKit + Deno example (no package.json)
 
-This example assumes `nodeModulesDir` is enabled in `deno.json` and you are using the Deno adapter.
+This example assumes `nodeModulesDir` is enabled in `deno.json` and you are
+using the Deno adapter.
 
 1. Install:
 
@@ -200,7 +206,8 @@ Each accessor now includes:
 - `myStyle.class()` -> class string alias
 - `myStyle.style()` -> inline style string
 
-This is useful for components that expect a `style` prop (for example PaneForge):
+This is useful for components that expect a `style` prop (for example
+PaneForge):
 
 ```svelte
 <script lang="ts">
@@ -224,8 +231,9 @@ This is useful for components that expect a `style` prop (for example PaneForge)
 
 ### Pseudo selectors
 
-You can nest pseudo-classes/elements inside a style block. Keys are camel-cased (e.g. `focusVisible`)
-or explicit selectors (e.g. `":hover"`, `"::after"`). Known pseudo-elements map to `::` automatically.
+You can nest pseudo-classes/elements inside a style block. Keys are camel-cased
+(e.g. `focusVisible`) or explicit selectors (e.g. `":hover"`, `"::after"`).
+Known pseudo-elements map to `::` automatically.
 
 ```ts
 const styles = ct({
@@ -245,7 +253,8 @@ const styles = ct({
 
 ### Nested selectors, media, and container queries
 
-Quoted keys are treated as nested selectors, and nested `@media` / `@container` blocks are supported.
+Quoted keys are treated as nested selectors, and nested `@media` / `@container`
+blocks are supported.
 
 ```ts
 const styles = ct({
@@ -274,7 +283,8 @@ const styles = ct({
 
 ## Variant usage
 
-`ct` accepts a single config object with optional `global`, `base`, `variant`, and `defaults` sections:
+`ct` accepts a single config object with optional `global`, `root`, `base`,
+`variant`, and `defaults` sections:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -284,7 +294,24 @@ const styles = ct({
     "@layer reset": {
       "html": { scrollBehavior: "smooth" },
     },
+    "@scope": {
+      selector: ".dark",
+      ":scope": { colorScheme: "dark" },
+      ".accent": { color: "deepskyblue" },
+    },
   },
+  root: [
+    {
+      "--radius": "8px",
+      "--space": "1rem",
+    },
+    {
+      layer: "theme",
+      vars: {
+        "--accent": "deepskyblue",
+      },
+    },
+  ],
   base: {
     button: {
       padding: "0.75rem 1rem",
@@ -333,13 +360,19 @@ styles().label(); // applies defaults.size when available
 ```
 
 Notes:
+
 - Variant entries are partial overrides; you can provide only the keys you need.
-- Unquoted keys inside `variant` must already be declared in `base`. If you only need a variant-only accessor, declare it with an empty base rule such as `label: {}`.
-- Quoted keys inside `variant` are treated as selector rules for that variant, not as style accessors.
+- Unquoted keys inside `variant` must already be declared in `base`. If you only
+  need a variant-only accessor, declare it with an empty base rule such as
+  `label: {}`.
+- Quoted keys inside `variant` are treated as selector rules for that variant,
+  not as style accessors.
 
 ### Variant-scoped global selectors
 
-Quoted variant keys are applied only when that variant is selected. This works in static extraction mode, so theme defaults can drive global selectors such as `html`.
+Quoted variant keys are applied only when that variant is selected. This works
+in static extraction mode, so theme defaults can drive global selectors such as
+`html`.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -383,7 +416,8 @@ styles().appShell({ theme: "light" });
 
 ### Reusable style objects and declaration arrays
 
-You can compose declarations from reusable constants, including imported constants, and arrays are merged left-to-right:
+You can compose declarations from reusable constants, including imported
+constants, and arrays are merged left-to-right:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -396,11 +430,13 @@ const styles = ct({
 });
 ```
 
-When these references resolve to static `const` objects at build time, the Vite plugin precompiles them into CSS.
+When these references resolve to static `const` objects at build time, the Vite
+plugin precompiles them into CSS.
 
 ### Array property values
 
-Property values can be arrays to produce space-delimited or comma-delimited CSS values depending on the CSS property.
+Property values can be arrays to produce space-delimited or comma-delimited CSS
+values depending on the CSS property.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -418,11 +454,15 @@ const styles = ct({
 });
 ```
 
-Commonly used comma-delimited properties like `transition`, `boxShadow`, `animation`, `fontFamily`, and `background` are automatically handled. For all other properties, arrays produce space-delimited values.
+Commonly used comma-delimited properties like `transition`, `boxShadow`,
+`animation`, `fontFamily`, and `background` are automatically handled. For all
+other properties, arrays produce space-delimited values.
 
 ### Global stylesheet and rule imports with `.import()`
 
-Use `.import()` to register global styles, external CSS files, or layered imports. This is an alternative to the `@import` key in `global` blocks and provides more control over layers.
+Use `.import()` to register global styles, external CSS files, or layered
+imports. This is an alternative to the `@import` key in `global` blocks and
+provides more control over layers.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -441,19 +481,20 @@ styles.import({
   rules: {
     ".u-full-width": { width: "100%" },
     ".u-hidden": { display: "none" },
-  }
+  },
 });
 
 // 4. Batch imports
 styles.import([
   "./src/global.css",
-  { path: "./src/extra.css", layer: "extra" }
+  { path: "./src/extra.css", layer: "extra" },
 ]);
 ```
 
 ### `@apply` merge lists inside class declarations
 
-Use `@apply` to merge declaration objects at any position in a class declaration. Merge order is top-to-bottom and left-to-right.
+Use `@apply` to merge declaration objects at any position in a class
+declaration. Merge order is top-to-bottom and left-to-right.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -479,11 +520,13 @@ const styles = ct({
 ```
 
 `@apply` entries can be:
+
 - declaration objects
 - arrays of declaration objects
 - utility names from `css.config.ts` (see below)
 
-Use stylesheet imports with an `@import` key (for example in `global`) to stay close to native CSS:
+Use stylesheet imports with an `@import` key (for example in `global`) to stay
+close to native CSS:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -552,7 +595,10 @@ styles.addContainer({
 
 ### Global `css.config.ts`
 
-Create a config file at project root to define project-wide imports, breakpoints, containers, and utility classes. Supported filenames: `css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`, `css.config.cts`, `css.config.cjs`.
+Create a config file at project root to define project-wide imports,
+breakpoints, containers, and utility classes. Supported filenames:
+`css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`,
+`css.config.cts`, `css.config.cjs`.
 
 ```ts
 import "./src/global.css";
@@ -564,7 +610,7 @@ export default {
   resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default for non-Astro files)
   debug: {
     logDynamic: false, // dev server only
-    logStatic: false,  // dev server only
+    logStatic: false, // dev server only
   },
   breakpoints: {
     sm: "40rem",
@@ -592,11 +638,15 @@ export default {
 
 Use `resolution` to control how `ct(...)` is resolved:
 
-- `"hybrid"` (default for non-Astro files): statically extract what can be resolved at build-time, fall back to runtime for the rest.
-- `"static"`: require static extraction. If a `ct(...)` block cannot be fully resolved at build-time, the Vite transform throws.
-- `"dynamic"`: disable static extraction for `ct(...)`; styles are applied at runtime.
+- `"hybrid"` (default for non-Astro files): statically extract what can be
+  resolved at build-time, fall back to runtime for the rest.
+- `"static"`: require static extraction. If a `ct(...)` block cannot be fully
+  resolved at build-time, the Vite transform throws.
+- `"dynamic"`: disable static extraction for `ct(...)`; styles are applied at
+  runtime.
 
-Astro modules (`.astro`) default to `"static"` when `resolution` is not explicitly set in `css.config.*`.
+Astro modules (`.astro`) default to `"static"` when `resolution` is not
+explicitly set in `css.config.*`.
 
 ```ts
 export default {
@@ -606,8 +656,9 @@ export default {
 
 #### Dev debug logs
 
-Use `debug.logStatic` and `debug.logDynamic` to inspect what is static vs dynamic.
-These logs only run in the Vite dev server (`vite dev`), not in build/production output.
+Use `debug.logStatic` and `debug.logDynamic` to inspect what is static vs
+dynamic. These logs only run in the Vite dev server (`vite dev`), not in
+build/production output.
 
 ```ts
 export default {
@@ -618,7 +669,8 @@ export default {
 };
 ```
 
-`css.config.ts` supports the same static identifier resolution used for `ct(...)` extraction, including:
+`css.config.ts` supports the same static identifier resolution used for
+`ct(...)` extraction, including:
 
 - local `const` values
 - imported `const` values from relative files
@@ -627,8 +679,8 @@ export default {
 
 #### Transform include paths
 
-By default, extraction only runs for files under `<project-root>/src/**`.
-Use `include` to add additional directories:
+By default, extraction only runs for files under `<project-root>/src/**`. Use
+`include` to add additional directories:
 
 ```ts
 export default {
@@ -638,17 +690,19 @@ export default {
 
 #### Global stylesheet imports
 
-Both `import "./file.css"` side-effect imports and the `imports: [...]` array add global stylesheet imports to the virtual CSS bundle as `@import` rules.
+Both `import "./file.css"` side-effect imports and the `imports: [...]` array
+add global stylesheet imports to the virtual CSS bundle as `@import` rules.
 
 #### Default numeric unit
 
 Numeric style values append `px` by default:
 
 ```ts
-fontSize: 1 // -> "1px"
+fontSize: 1; // -> "1px"
 ```
 
-Set `defaultUnit` in `css.config.*` to use another unit for numeric style values:
+Set `defaultUnit` in `css.config.*` to use another unit for numeric style
+values:
 
 ```ts
 export default {
@@ -660,7 +714,8 @@ export default {
 
 #### Breakpoint aliases
 
-`breakpoints` defines named aliases for `@media` width queries. Use `@<name>` in style objects:
+`breakpoints` defines named aliases for `@media` width queries. Use `@<name>` in
+style objects:
 
 ```ts
 const styles = ct({
@@ -678,8 +733,8 @@ const styles = ct({
 });
 ```
 
-`"@md"` expands to `@media (width >= 48rem) { ... }`.
-`"!@md"` expands to `@media (width <= 48rem) { ... }`.
+`"@md"` expands to `@media (width >= 48rem) { ... }`. `"!@md"` expands to
+`@media (width <= 48rem) { ... }`.
 
 Breakpoint values can be strings or numbers (numbers get a `px` suffix):
 
@@ -708,7 +763,9 @@ If an alias is not found, the key is kept as a literal at-rule.
 
 #### Container presets
 
-`containers` defines named container presets. Use `@<name>` shorthand for container queries, and `@(from,to)` for range queries across two container presets:
+`containers` defines named container presets. Use `@<name>` shorthand for
+container queries, and `@(from,to)` for range queries across two container
+presets:
 
 ```ts
 "@card": { backgroundColor: "blue" }
@@ -718,11 +775,14 @@ If an alias is not found, the key is kept as a literal at-rule.
 // expands to: @container (smRule) and (lgRule) { ... }
 ```
 
-See [Container presets and shorthand](#container-presets-and-shorthand) for full usage.
+See [Container presets and shorthand](#container-presets-and-shorthand) for full
+usage.
 
 #### Utility classes
 
-`utilities` generates global CSS classes emitted into the virtual stylesheet. Class names are derived from the camelCase key converted to kebab-case with a `u-` prefix:
+`utilities` generates global CSS classes emitted into the virtual stylesheet.
+Class names are derived from the camelCase key converted to kebab-case with a
+`u-` prefix:
 
 - `cardBase` &rarr; `.u-card-base`
 - `mutedText` &rarr; `.u-muted-text`
@@ -735,7 +795,8 @@ Utility names can be referenced by `@apply` inside style declarations:
 
 ## Builder pattern (`new ct()`)
 
-As an alternative to the config-object API, you can use the builder pattern to declare styles incrementally via property assignment:
+As an alternative to the config-object API, you can use the builder pattern to
+declare styles incrementally via property assignment:
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -758,7 +819,17 @@ styles.global = {
   "@layer reset": {
     "html": { scrollBehavior: "smooth" },
   },
+  "@scope": {
+    selector: ".dark",
+    ":scope": { colorScheme: "dark" },
+    ".accent": { color: "deepskyblue" },
+  },
 };
+
+styles.root = [
+  { "--surface": "#111" },
+  { layer: "theme", vars: { "--accent": "deepskyblue" } },
+];
 
 styles.variant = {
   theme: {
@@ -788,40 +859,69 @@ styles.card();
 styles.card({ theme: "dark" });
 ```
 
-Both patterns return the same class names. The direct pattern is shorter, but the property names `base`, `global`, `variant`, and `defaults` are reserved for config — use the factory pattern to access style keys with those names.
+Both patterns return the same class names. The direct pattern is shorter, but
+the property names `base`, `global`, `root`, `variant`, and `defaults` are
+reserved for config — use the factory pattern to access style keys with those
+names.
 
-Setting a config property after the first access invalidates the cache and recompiles on the next access.
+Setting a config property after the first access invalidates the cache and
+recompiles on the next access.
 
-The Vite plugin statically extracts `new ct()` declarations the same way it handles `ct({...})` calls. Module-level `const`/`let` declarations followed by property assignments (`styles.base = ...`, `styles.global = ...`, etc.) are detected, extracted to CSS, and rewritten to a precompiled `ct()` call at build time.
+The Vite plugin statically extracts `new ct()` declarations the same way it
+handles `ct({...})` calls. Module-level `const`/`let` declarations followed by
+property assignments (`styles.base = ...`, `styles.global = ...`, etc.) are
+detected, extracted to CSS, and rewritten to a precompiled `ct()` call at build
+time.
 
 ## How it works
 
-- In dev, the Vite plugin rewrites static `ct({ ... })` calls and `new ct()` declarations (`global`, `base`, `variant`, and `defaults`) and serves a virtual CSS module.
-- In build, that same virtual CSS is bundled as a normal stylesheet, preventing flash of unstyled content.
-- If a `ct` call is too dynamic to statically parse, runtime fallback still injects styles in the browser.
-- Svelte files automatically import the virtual CSS module when static styles are detected.
-- Astro files automatically import the virtual CSS module in frontmatter when static styles are detected.
-- `new ct()` declarations are rewritten to equivalent precompiled `ct()` calls, and the property assignments are blanked out.
-- Quoted variant keys are compiled as variant-scoped selector rules and only the active default selection is applied at runtime.
+- In dev, the Vite plugin rewrites static `ct({ ... })` calls and `new ct()`
+  declarations (`global`, `root`, `base`, `variant`, and `defaults`) and
+  serves a virtual CSS module.
+- In build, that same virtual CSS is bundled as a normal stylesheet, preventing
+  flash of unstyled content.
+- If a `ct` call is too dynamic to statically parse, runtime fallback still
+  injects styles in the browser.
+- Svelte files automatically import the virtual CSS module when static styles
+  are detected.
+- Astro files automatically import the virtual CSS module in frontmatter when
+  static styles are detected.
+- `new ct()` declarations are rewritten to equivalent precompiled `ct()` calls,
+  and the property assignments are blanked out.
+- Quoted variant keys are compiled as variant-scoped selector rules and only the
+  active default selection is applied at runtime.
 
 ## Current parser limitations
 
-The build-time extractor supports `ct(...)` calls and `new ct()` declarations with object literal arguments:
+The build-time extractor supports `ct(...)` calls and `new ct()` declarations
+with object literal arguments:
 
 - style keys as identifiers/quoted keys
-- property values as strings, numbers, `cv("--token")`, or bare CSS identifier literals (for example `revert`, `solid`, `currentColor`)
+- property values as strings, numbers, `cv("--token")`, or bare CSS identifier
+  literals (for example `revert`, `solid`, `currentColor`)
 - property values as arrays for space-delimited or comma-delimited CSS values
 - declaration arrays (merged left-to-right)
 - `@apply` merge lists inside declarations
-- simple nested objects for pseudo selectors (e.g. `hover`, `before`, or `":hover"`)
-- optional `global`, `base`, `variant`, and `defaults` sections via `ct({ ... })`
+- simple nested objects for pseudo selectors (e.g. `hover`, `before`, or
+  `":hover"`)
+- optional `global`, `root`, `base`, `variant`, and `defaults` sections via
+  `ct({ ... })`
 - unquoted variant keys only when the same key exists in `base`
-- quoted variant keys as selector rules for the selected variant (for example `":global(html)"`)
+- quoted variant keys as selector rules for the selected variant (for example
+  `":global(html)"`)
 - identifier references to `const` objects/arrays in the same module
-- named imports of `const` style objects from relative paths, Vite/SvelteKit aliases (including `$lib/...`), and `tsconfig.json` path aliases
-- imported/local `const` objects computed by statically evaluable helper function calls
-- namespace imports with member access (for example `import * as S ...` + `S.buttonStyles`)
-- `new ct()` with subsequent `const`/`let`-scoped property assignments (`styles.base = ...`, etc.)
-- `.import()` calls on `new ct()` instances (extracted to global styles and layers)
+- named imports of `const` style objects from relative paths, Vite/SvelteKit
+  aliases (including `$lib/...`), and `tsconfig.json` path aliases
+- imported/local `const` objects computed by statically evaluable helper
+  function calls
+- namespace imports with member access (for example `import * as S ...` +
+  `S.buttonStyles`)
+- `new ct()` with subsequent `const`/`let`-scoped property assignments
+  (`styles.base = ...`, `styles.root = ...`, etc.)
+- `.import()` calls on `new ct()` instances (extracted to global styles and
+  layers)
 
-It skips dynamic expressions, spreads, non-const bindings, and arbitrary function calls. For `new ct()` patterns, only module-level assignments are extracted — assignments inside conditionals, loops, or functions fall back to runtime.
+It skips dynamic expressions, spreads, non-const bindings, and arbitrary
+function calls. For `new ct()` patterns, only module-level assignments are
+extracted — assignments inside conditionals, loops, or functions fall back to
+runtime.

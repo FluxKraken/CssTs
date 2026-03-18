@@ -17,6 +17,18 @@ type VariantSelection = Record<string, string>;
 type CtConfig = {
   imports?: string[];
   global?: StyleSheet;
+  root?: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  >;
+  rootVars?: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  >;
   base: StyleSheet;
   variant?: VariantSheet;
   variantGlobal?: VariantGlobalSheet;
@@ -44,7 +56,7 @@ interface ParsedObject {
 
 const QUOTED_KEYS = Symbol("ct-parser-quoted-keys");
 
-interface ParsedArray extends Array<ParsedValue> { }
+interface ParsedArray extends Array<ParsedValue> {}
 
 type ParsedValue =
   | string
@@ -56,7 +68,9 @@ type ParsedValue =
   | ParsedArray;
 
 /** Callback that resolves a dotted identifier path to its static value during parsing. */
-export type IdentifierResolver = (path: readonly string[]) => unknown | undefined;
+export type IdentifierResolver = (
+  path: readonly string[],
+) => unknown | undefined;
 
 function isIdentifierStart(char: string): boolean {
   return /[A-Za-z_$]/.test(char);
@@ -82,7 +96,10 @@ function skipWhitespace(input: string, index: number): number {
 
     if (char === "/" && input[index + 1] === "*") {
       index += 2;
-      while (index < input.length && !(input[index] === "*" && input[index + 1] === "/")) {
+      while (
+        index < input.length &&
+        !(input[index] === "*" && input[index + 1] === "/")
+      ) {
         index += 1;
       }
       index += 2;
@@ -125,7 +142,10 @@ function parseNumber(input: string, index: number): [number, number] {
   return [Number(match[0]), index + match[0].length];
 }
 
-function parseTemplateLiteral(input: string, index: number): [ParsedValue, number] {
+function parseTemplateLiteral(
+  input: string,
+  index: number,
+): [ParsedValue, number] {
   if (input[index] !== "`") {
     throw new Error(`Expected '\`' at ${index}`);
   }
@@ -232,7 +252,10 @@ function parseDashedIdentifierLiteral(
   const parts = [identifier];
   let cursor = identifierEnd;
 
-  while (cursor < input.length && input[cursor] === "-" && isIdentifierStart(input[cursor + 1])) {
+  while (
+    cursor < input.length && input[cursor] === "-" &&
+    isIdentifierStart(input[cursor + 1])
+  ) {
     const [nextPart, nextEnd] = parseIdentifier(input, cursor + 1);
     parts.push(nextPart);
     cursor = nextEnd;
@@ -306,7 +329,11 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
-    const dashedLiteral = parseDashedIdentifierLiteral(input, identifier, identifierEnd);
+    const dashedLiteral = parseDashedIdentifierLiteral(
+      input,
+      identifier,
+      identifierEnd,
+    );
     if (dashedLiteral) {
       return dashedLiteral;
     }
@@ -326,7 +353,9 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
       let fallback: string | number | undefined;
       if (input[cursor] === ",") {
         const [fallbackValue, fallbackEnd] = parseValue(input, cursor + 1);
-        if (typeof fallbackValue !== "string" && typeof fallbackValue !== "number") {
+        if (
+          typeof fallbackValue !== "string" && typeof fallbackValue !== "number"
+        ) {
           throw new Error("cv() fallback must be a string or number");
         }
         fallback = fallbackValue;
@@ -424,7 +453,9 @@ function isIdentifierReference(value: unknown): value is IdentifierReference {
   );
 }
 
-function isTemplateLiteralReference(value: unknown): value is TemplateLiteralReference {
+function isTemplateLiteralReference(
+  value: unknown,
+): value is TemplateLiteralReference {
   return (
     isPlainObject(value) &&
     value.kind === "template-literal" &&
@@ -466,7 +497,8 @@ function isStyleLeaf(value: unknown): boolean {
     return true;
   }
 
-  return Array.isArray(value) && value.every((entry) => isPrimitiveStyleLeaf(entry));
+  return Array.isArray(value) &&
+    value.every((entry) => isPrimitiveStyleLeaf(entry));
 }
 
 function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
@@ -475,7 +507,10 @@ function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
   }
 
   for (const declarationValue of Object.values(value)) {
-    if (!isStyleLeaf(declarationValue) && !isStyleDeclarationObject(declarationValue)) {
+    if (
+      !isStyleLeaf(declarationValue) &&
+      !isStyleDeclarationObject(declarationValue)
+    ) {
       return false;
     }
   }
@@ -556,12 +591,18 @@ function normalizeSetValue(
   };
 }
 
-function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration): StyleDeclaration {
+function mergeStyleDeclarations(
+  base: StyleDeclaration,
+  next: StyleDeclaration,
+): StyleDeclaration {
   const merged: Record<string, unknown> = { ...base };
 
   for (const [key, nextValue] of Object.entries(next)) {
     const previousValue = merged[key];
-    if (isStyleDeclarationObject(previousValue) && isStyleDeclarationObject(nextValue)) {
+    if (
+      isStyleDeclarationObject(previousValue) &&
+      isStyleDeclarationObject(nextValue)
+    ) {
       merged[key] = mergeStyleDeclarations(previousValue, nextValue);
       continue;
     }
@@ -571,7 +612,10 @@ function mergeStyleDeclarations(base: StyleDeclaration, next: StyleDeclaration):
   return merged as StyleDeclaration;
 }
 
-function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): StyleDeclaration | null {
+function normalizeStyleDeclaration(
+  value: unknown,
+  options: ParseCtOptions,
+): StyleDeclaration | null {
   if (Array.isArray(value)) {
     let merged: StyleDeclaration = {};
     for (const item of value) {
@@ -614,7 +658,9 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
     }
 
     if (isStyleLeaf(declarationValue)) {
-      const cssIdentifierLiteral = identifierReferenceToCssLiteral(declarationValue);
+      const cssIdentifierLiteral = identifierReferenceToCssLiteral(
+        declarationValue,
+      );
       if (cssIdentifierLiteral !== null) {
         (merged as Record<string, StyleValue>)[key] = cssIdentifierLiteral;
       } else if (Array.isArray(declarationValue)) {
@@ -623,7 +669,8 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
         ) as StyleValue;
         (merged as Record<string, StyleValue>)[key] = normalizedArray;
       } else {
-        (merged as Record<string, StyleValue>)[key] = declarationValue as StyleValue;
+        (merged as Record<string, StyleValue>)[key] =
+          declarationValue as StyleValue;
       }
       continue;
     }
@@ -638,7 +685,10 @@ function normalizeStyleDeclaration(value: unknown, options: ParseCtOptions): Sty
   return merged;
 }
 
-function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleSheet | null {
+function normalizeStyleSheet(
+  value: unknown,
+  options: ParseCtOptions,
+): StyleSheet | null {
   if (isIdentifierReference(value)) {
     return null;
   }
@@ -650,9 +700,10 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   const sheet: StyleSheet = {};
 
   function addImportPaths(importValue: unknown): boolean {
-    const entries = typeof importValue === "string" || isPlainObject(importValue)
-      ? [importValue]
-      : Array.isArray(importValue)
+    const entries =
+      typeof importValue === "string" || isPlainObject(importValue)
+        ? [importValue]
+        : Array.isArray(importValue)
         ? importValue
         : null;
     if (!entries) {
@@ -666,12 +717,18 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
           return false;
         }
         options.imports?.add(`"${trimmed}"`);
-      } else if (isPlainObject(entry) && "path" in entry && typeof entry.path === "string") {
+      } else if (
+        isPlainObject(entry) && "path" in entry &&
+        typeof entry.path === "string"
+      ) {
         const trimmed = entry.path.trim();
         if (trimmed.length === 0) {
           return false;
         }
-        if ("layer" in entry && typeof entry.layer === "string" && entry.layer.trim().length > 0) {
+        if (
+          "layer" in entry && typeof entry.layer === "string" &&
+          entry.layer.trim().length > 0
+        ) {
           options.imports?.add(`"${trimmed}" layer(${entry.layer.trim()})`);
         } else {
           options.imports?.add(`"${trimmed}"`);
@@ -708,6 +765,70 @@ function normalizeStyleSheet(value: unknown, options: ParseCtOptions): StyleShee
   return sheet;
 }
 
+function normalizeRootVars(
+  value: unknown,
+  options: ParseCtOptions,
+):
+  | Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  >
+  | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  > = [];
+  for (const entry of value) {
+    if (isIdentifierReference(entry)) {
+      return null;
+    }
+    if (!isPlainObject(entry) || isCssVarRef(entry)) {
+      return null;
+    }
+
+    if ("vars" in entry) {
+      const varsDeclaration = normalizeStyleDeclaration(entry.vars, options);
+      if (!varsDeclaration) {
+        return null;
+      }
+      const vars: Record<string, StyleValue> = {};
+      for (const [name, declarationValue] of Object.entries(varsDeclaration)) {
+        if (!isStyleLeaf(declarationValue)) {
+          return null;
+        }
+        vars[name] = declarationValue as StyleValue;
+      }
+
+      const layer = typeof entry.layer === "string" ? entry.layer : undefined;
+      normalized.push(layer ? { vars, layer } : { vars });
+      continue;
+    }
+
+    const declaration = normalizeStyleDeclaration(entry, options);
+    if (!declaration) {
+      return null;
+    }
+    const vars: Record<string, StyleValue> = {};
+    for (const [name, declarationValue] of Object.entries(declaration)) {
+      if (!isStyleLeaf(declarationValue)) {
+        return null;
+      }
+      vars[name] = declarationValue as StyleValue;
+    }
+    normalized.push(vars);
+  }
+
+  return normalized;
+}
+
 function normalizeVariantSheet(
   value: unknown,
   base: StyleSheet,
@@ -742,7 +863,10 @@ function normalizeVariantSheet(
       const quotedKeys = getQuotedKeys(variant);
 
       for (const [key, declaration] of Object.entries(variant)) {
-        const normalizedDeclaration = normalizeStyleDeclaration(declaration, options);
+        const normalizedDeclaration = normalizeStyleDeclaration(
+          declaration,
+          options,
+        );
         if (!normalizedDeclaration) {
           return null;
         }
@@ -777,7 +901,9 @@ function normalizeVariantSheet(
 
   return {
     variant: Object.keys(variantSheet).length > 0 ? variantSheet : undefined,
-    variantGlobal: Object.keys(variantGlobalSheet).length > 0 ? variantGlobalSheet : undefined,
+    variantGlobal: Object.keys(variantGlobalSheet).length > 0
+      ? variantGlobalSheet
+      : undefined,
   };
 }
 
@@ -812,11 +938,21 @@ function normalizeVariantSelection(
 
 /**
  * Validate and normalize a parsed config object into a {@link CtConfig}.
- * Allowed top-level keys: `global`, `base`, `variant`, `defaults`.
+ * Allowed top-level keys: `global`, `root`, `rootVars`, `base`, `variant`, `defaults`.
  * Returns `null` when the input cannot be validated.
  */
-export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOptions = {}): CtConfig | null {
-  const allowed = new Set(["global", "base", "variant", "defaults"]);
+export function parseCtConfig(
+  value: Record<string, unknown>,
+  options: ParseCtOptions = {},
+): CtConfig | null {
+  const allowed = new Set([
+    "global",
+    "root",
+    "rootVars",
+    "base",
+    "variant",
+    "defaults",
+  ]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
       return null;
@@ -830,6 +966,14 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   };
 
   let global: StyleSheet | undefined;
+  let root:
+    | Array<
+      Record<string, StyleValue> | {
+        vars: Record<string, StyleValue>;
+        layer?: string;
+      }
+    >
+    | undefined;
   let base: StyleSheet = {};
   let variant: VariantSheet | undefined;
   let variantGlobal: VariantGlobalSheet | undefined;
@@ -841,6 +985,33 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
       return null;
     }
     global = normalized;
+  }
+
+  const rootEntries: Array<
+    Record<string, StyleValue> | {
+      vars: Record<string, StyleValue>;
+      layer?: string;
+    }
+  > = [];
+
+  if ("root" in value) {
+    const normalizedRoot = normalizeRootVars(value.root, parseOptions);
+    if (!normalizedRoot) {
+      return null;
+    }
+    rootEntries.push(...normalizedRoot);
+  }
+
+  if ("rootVars" in value) {
+    const normalizedRootVars = normalizeRootVars(value.rootVars, parseOptions);
+    if (!normalizedRootVars) {
+      return null;
+    }
+    rootEntries.push(...normalizedRootVars);
+  }
+
+  if (rootEntries.length > 0) {
+    root = rootEntries;
   }
 
   if ("base" in value) {
@@ -861,7 +1032,10 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   }
 
   if ("defaults" in value) {
-    const normalizedDefaults = normalizeVariantSelection(value.defaults, variant);
+    const normalizedDefaults = normalizeVariantSelection(
+      value.defaults,
+      variant,
+    );
     if (!normalizedDefaults) {
       return null;
     }
@@ -872,6 +1046,8 @@ export function parseCtConfig(value: Record<string, unknown>, options: ParseCtOp
   return {
     imports: imports.size > 0 ? Array.from(imports) : undefined,
     global,
+    root,
+    rootVars: root,
     base,
     variant,
     variantGlobal,
@@ -897,7 +1073,11 @@ function resolveParsedValue(
   if (isTemplateLiteralReference(value)) {
     let resolvedString = "";
     for (const part of value.parts) {
-      const resolvedPart = resolveParsedValue(part, resolveIdentifier, keepUnresolvedIdentifiers);
+      const resolvedPart = resolveParsedValue(
+        part,
+        resolveIdentifier,
+        keepUnresolvedIdentifiers,
+      );
       if (resolvedPart === UNRESOLVED) {
         return keepUnresolvedIdentifiers ? value : UNRESOLVED;
       }
@@ -909,7 +1089,11 @@ function resolveParsedValue(
   if (Array.isArray(value)) {
     const resolvedArray: unknown[] = [];
     for (const entry of value) {
-      const resolved = resolveParsedValue(entry, resolveIdentifier, keepUnresolvedIdentifiers);
+      const resolved = resolveParsedValue(
+        entry,
+        resolveIdentifier,
+        keepUnresolvedIdentifiers,
+      );
       if (resolved === UNRESOLVED) {
         return UNRESOLVED;
       }
@@ -970,11 +1154,19 @@ export function parseStaticExpression(
   const keepUnresolvedIdentifiers = options.keepUnresolvedIdentifiers === true;
 
   if (!resolveIdentifier) {
-    const unresolved = resolveParsedValue(parsed, () => undefined, keepUnresolvedIdentifiers);
+    const unresolved = resolveParsedValue(
+      parsed,
+      () => undefined,
+      keepUnresolvedIdentifiers,
+    );
     return unresolved === UNRESOLVED ? null : unresolved;
   }
 
-  const resolved = resolveParsedValue(parsed, resolveIdentifier, keepUnresolvedIdentifiers);
+  const resolved = resolveParsedValue(
+    parsed,
+    resolveIdentifier,
+    keepUnresolvedIdentifiers,
+  );
   if (resolved === UNRESOLVED) {
     return null;
   }
@@ -1003,7 +1195,10 @@ function parseCtCallArgumentsInternal(
  * Parse a `ct({ global?, base?, variant?, defaults? })` argument string into style objects.
  * Returns `null` when the input cannot be parsed or validated.
  */
-export function parseCtCallArguments(source: string, options: ParseCtOptions = {}): CtConfig | null {
+export function parseCtCallArguments(
+  source: string,
+  options: ParseCtOptions = {},
+): CtConfig | null {
   return parseCtCallArgumentsInternal(source, () => undefined, options);
 }
 
@@ -1021,7 +1216,9 @@ export function parseCtCallArgumentsWithResolver(
 /**
  * Find `ct(...)` calls in source code and return their locations plus raw arguments.
  */
-export function findCtCalls(code: string): Array<{ start: number; end: number; arg: string }> {
+export function findCtCalls(
+  code: string,
+): Array<{ start: number; end: number; arg: string }> {
   const calls: Array<{ start: number; end: number; arg: string }> = [];
   const matcher = /\bct\s*\(/g;
 
@@ -1224,11 +1421,12 @@ type NewCtDeclaration = {
 
 /**
  * Find `const x = new ct()` declarations and their subsequent property assignments
- * (`x.base = ...`, `x.global = ...`, etc.) for static extraction.
+ * (`x.base = ...`, `x.global = ...`, `x.root = ...`, etc.) for static extraction.
  */
 export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
   const declarations: NewCtDeclaration[] = [];
-  const matcher = /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(\s*\)/g;
+  const matcher =
+    /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(\s*\)/g;
 
   for (let match = matcher.exec(code); match; match = matcher.exec(code)) {
     const varName = match[2];
@@ -1237,7 +1435,7 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
 
     const assignments: NewCtAssignment[] = [];
     const assignmentMatcher = new RegExp(
-      `\\b${varName}\\.(base|global|variant|defaults)\\s*=\\s*`,
+      `\\b${varName}\\.(base|global|root|rootVars|variant|defaults)\\s*=\\s*`,
       "g",
     );
     assignmentMatcher.lastIndex = declEnd;
@@ -1287,7 +1485,12 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
         ? valueEnd + 1
         : valueEnd;
 
-      assignments.push({ property: "import", start: assignStart, end, valueSource });
+      assignments.push({
+        property: "import",
+        start: assignStart,
+        end,
+        valueSource,
+      });
       importMatcher.lastIndex = end;
     }
 

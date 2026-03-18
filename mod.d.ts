@@ -7,16 +7,33 @@ import type {
 } from "./dist/shared.d.ts";
 import type { CssTsPluginOptions } from "./dist/vite.d.ts";
 
-type StyleDeclarationInput = StyleDeclaration | readonly StyleDeclarationInput[];
+type StyleDeclarationInput =
+  | StyleDeclaration
+  | readonly StyleDeclarationInput[];
 type StyleSheetInput = Record<string, StyleDeclarationInput>;
+type RootVarInput =
+  | Record<string, StyleValue>
+  | {
+    vars: Record<string, StyleValue>;
+    layer?: string;
+  };
 type CompiledMap<T extends StyleSheetInput> = Partial<Record<keyof T, string>>;
-type VariantSheet<T extends StyleSheetInput> = Record<string, Record<string, Partial<T>>>;
+type VariantSheet<T extends StyleSheetInput> = Record<
+  string,
+  Record<string, Partial<T>>
+>;
 type VariantClassMap<T extends StyleSheetInput> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
-type CtConfig<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+type CtConfig<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+> = {
   global?: StyleSheetInput;
+  root?: readonly RootVarInput[];
+  /** @deprecated Use `root` instead. */
+  rootVars?: readonly RootVarInput[];
   base?: T;
   variant?: V;
   defaults?: VariantSelection<V>;
@@ -39,10 +56,13 @@ type CompiledConfig<T extends StyleSheetInput> = {
   base?: CompiledMap<T>;
   variant?: VariantClassMap<T>;
 };
-type VariantSelection<V extends VariantSheet<any> | undefined> = V extends VariantSheet<any>
-  ? { [G in keyof V]?: keyof V[G] }
+type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
+  VariantSheet<any> ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
-type Accessor<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> = {
+type Accessor<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+> = {
   [K in keyof T]: StyleAccessor<V>;
 };
 type StyleAccessor<V extends VariantSheet<any> | undefined> =
@@ -51,12 +71,18 @@ type StyleAccessor<V extends VariantSheet<any> | undefined> =
     class: (variants?: VariantSelection<V>) => string;
     style: (variants?: VariantSelection<V>) => string;
   };
-type CtBuilder<T extends StyleSheetInput, V extends VariantSheet<T> | undefined> =
+type CtBuilder<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+> =
   & (() => Accessor<T, V>)
   & Accessor<T, V>
   & {
     base: T | undefined;
     global: StyleSheetInput | undefined;
+    root: readonly RootVarInput[] | undefined;
+    /** @deprecated Use `root` instead. */
+    rootVars: readonly RootVarInput[] | undefined;
     variant: V | undefined;
     defaults: VariantSelection<V> | undefined;
     addContainer: (

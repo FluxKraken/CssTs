@@ -1,14 +1,26 @@
-import { assert, assertEquals, assertMatch, assertThrows } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertThrows,
+} from "jsr:@std/assert";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
-import { cv, toCssDeclaration, toCssRules } from "./src/shared.ts";
+import {
+  cv,
+  toCssDeclaration,
+  toCssGlobalRules,
+  toCssRules,
+} from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
 
 function scopedVirtualId(moduleId: string): string {
-  return `${VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(moduleId)}`;
+  return `${VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${
+    encodeURIComponent(moduleId)
+  }`;
 }
 
 function asHook(
@@ -27,13 +39,14 @@ Deno.test("injects component CSS for direct ct usage in svelte", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
 
-  const source =
-    `<script lang="ts">\nimport ct from "css-ts";\n` +
+  const source = `<script lang="ts">\nimport ct from "css-ts";\n` +
     `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
     `</script>\n\n<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/routes/+page.svelte");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(code.includes('import "virtual:css-ts/styles.css";'));
@@ -45,8 +58,7 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
 
-  const source =
-    `<script lang="ts">\n` +
+  const source = `<script lang="ts">\n` +
     `import ct from "css-ts";\n` +
     `const styles = ct({\n` +
     `  base: {\n` +
@@ -61,8 +73,13 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
     `</script>\n\n` +
     `<main class={styles().container()}></main>`;
 
-  const transformed = transform(source, "/app/src/lib/components/Container.svelte");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    source,
+    "/app/src/lib/components/Container.svelte",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(!code.includes(":global(@media"));
@@ -77,18 +94,22 @@ Deno.test("injects virtual stylesheet import and extracts css for direct ct usag
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const source =
-    `---\n` +
+  const source = `---\n` +
     `import ct from "css-ts";\n` +
     `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
     `---\n\n` +
     `<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/pages/index.astro");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assertMatch(code, /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/);
+  assertMatch(
+    code,
+    /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
@@ -101,18 +122,25 @@ Deno.test("injects module-scoped virtual stylesheet imports for astro ct usage",
   const load = asHook(plugin.load);
   const id = "/app/src/components/card.astro";
 
-  const source =
-    `---\n` +
+  const source = `---\n` +
     `import ct from "css-ts";\n` +
     `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
     `---\n\n` +
     `<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, id);
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assert(code.includes(`virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(id)}`));
+  assert(
+    code.includes(
+      `virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${
+        encodeURIComponent(id)
+      }`,
+    ),
+  );
 
   const scopedCss = load(scopedVirtualId(id));
   assertEquals(typeof scopedCss, "string");
@@ -123,17 +151,22 @@ Deno.test("injects virtual stylesheet import in astro files that only import ct 
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
 
-  const source =
-    `---\n` +
+  const source = `---\n` +
     `import { styles } from "./styles.ts";\n` +
     `---\n\n` +
     `<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/pages/home.astro");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assert(code.includes('---\nimport "virtual:css-ts/styles.css";\nimport { styles } from "./styles.ts";'));
+  assert(
+    code.includes(
+      '---\nimport "virtual:css-ts/styles.css";\nimport { styles } from "./styles.ts";',
+    ),
+  );
 });
 
 Deno.test("injects virtual stylesheet import and extracts css for new ct() usage in astro", () => {
@@ -141,8 +174,7 @@ Deno.test("injects virtual stylesheet import and extracts css for new ct() usage
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const source =
-    `---\n` +
+  const source = `---\n` +
     `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.base = { card: { display: "grid", gap: "1rem" } };\n` +
@@ -150,10 +182,15 @@ Deno.test("injects virtual stylesheet import and extracts css for new ct() usage
     `<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/pages/new-ct.astro");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assertMatch(code, /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/);
+  assertMatch(
+    code,
+    /^---\nimport "virtual:css-ts\/styles\.css";\nimport ct from "css-ts";/,
+  );
   assert(!code.includes("new ct()"));
 
   const loaded = load(VIRTUAL_ID);
@@ -171,10 +208,16 @@ Deno.test("injects plain virtual import when astro transform input is already JS
     `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n`;
 
   const transformed = transform(source, "/app/src/pages/js-shaped.astro");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assert(code.startsWith('import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }'));
+  assert(
+    code.startsWith(
+      'import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }',
+    ),
+  );
   assert(!code.startsWith("---\n"));
 });
 
@@ -188,11 +231,20 @@ Deno.test("injects plain virtual import when JS-shaped astro input uses new ct()
     `const styles = new ct();\n` +
     `styles.base = { card: { display: "grid", gap: "1rem" } };\n`;
 
-  const transformed = transform(source, "/app/src/pages/js-shaped-new-ct.astro");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    source,
+    "/app/src/pages/js-shaped-new-ct.astro",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assert(code.startsWith('import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }'));
+  assert(
+    code.startsWith(
+      'import "virtual:css-ts/styles.css";\nimport { createComponent as $$createComponent }',
+    ),
+  );
   assert(!code.startsWith("---\n"));
   assert(!code.includes("new ct()"));
 });
@@ -204,16 +256,14 @@ Deno.test("module-scoped virtual CSS survives early shared virtual load ordering
   const layoutId = "/app/src/layouts/main.astro";
   const componentId = "/app/src/components/header.astro";
 
-  const layoutSource =
-    `---\n` +
+  const layoutSource = `---\n` +
     `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.global = { body: { color: "white" } };\n` +
     `---\n\n` +
     `<slot />`;
 
-  const componentSource =
-    `---\n` +
+  const componentSource = `---\n` +
     `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.base = { card: { display: "grid", gap: "1rem" } };\n` +
@@ -221,18 +271,26 @@ Deno.test("module-scoped virtual CSS survives early shared virtual load ordering
     `<div class={styles().card()}>hi</div>`;
 
   const transformedLayout = transform(layoutSource, layoutId);
-  assert(transformedLayout && typeof transformedLayout === "object" && "code" in transformedLayout);
+  assert(
+    transformedLayout && typeof transformedLayout === "object" &&
+      "code" in transformedLayout,
+  );
 
   const earlySharedCss = load(VIRTUAL_ID);
   assertEquals(typeof earlySharedCss, "string");
   assert((earlySharedCss as string).includes("body{color:white}"));
 
   const transformedComponent = transform(componentSource, componentId);
-  assert(transformedComponent && typeof transformedComponent === "object" && "code" in transformedComponent);
+  assert(
+    transformedComponent && typeof transformedComponent === "object" &&
+      "code" in transformedComponent,
+  );
 
   const componentCode = transformedComponent.code as string;
   assert(componentCode.includes(
-    `virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${encodeURIComponent(componentId)}`,
+    `virtual:css-ts/styles.css?${MODULE_VIRTUAL_QUERY_KEY}=${
+      encodeURIComponent(componentId)
+    }`,
   ));
 
   const scopedCss = load(scopedVirtualId(componentId));
@@ -253,8 +311,7 @@ Deno.test("limits transforms to src by default", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    card: { display: "grid" },\n` +
@@ -262,9 +319,15 @@ Deno.test("limits transforms to src by default", () => {
       `});`;
 
     const transformedSrc = transform(moduleCode, `${root}/src/app.ts`);
-    assert(transformedSrc && typeof transformedSrc === "object" && "code" in transformedSrc);
+    assert(
+      transformedSrc && typeof transformedSrc === "object" &&
+        "code" in transformedSrc,
+    );
 
-    const transformedNodeModules = transform(moduleCode, `${root}/node_modules/pkg/app.ts`);
+    const transformedNodeModules = transform(
+      moduleCode,
+      `${root}/node_modules/pkg/app.ts`,
+    );
     assertEquals(transformedNodeModules, null);
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -280,8 +343,8 @@ Deno.test("extends transform scope with css.config.ts include paths", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  include: ["./packages/ui"],\n` +
-      `};\n`,
+        `  include: ["./packages/ui"],\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -290,18 +353,26 @@ Deno.test("extends transform scope with css.config.ts include paths", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    card: { display: "grid" },\n` +
       `  },\n` +
       `});`;
 
-    const transformedIncluded = transform(moduleCode, `${root}/packages/ui/button.ts`);
-    assert(transformedIncluded && typeof transformedIncluded === "object" && "code" in transformedIncluded);
+    const transformedIncluded = transform(
+      moduleCode,
+      `${root}/packages/ui/button.ts`,
+    );
+    assert(
+      transformedIncluded && typeof transformedIncluded === "object" &&
+        "code" in transformedIncluded,
+    );
 
-    const transformedUnincluded = transform(moduleCode, `${root}/packages/other/button.ts`);
+    const transformedUnincluded = transform(
+      moduleCode,
+      `${root}/packages/other/button.ts`,
+    );
     assertEquals(transformedUnincluded, null);
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -309,7 +380,10 @@ Deno.test("extends transform scope with css.config.ts include paths", () => {
 });
 
 Deno.test("cv() formats css variable references", () => {
-  assertEquals(toCssDeclaration("backgroundColor", cv("--background")), "background-color:var(--background)");
+  assertEquals(
+    toCssDeclaration("backgroundColor", cv("--background")),
+    "background-color:var(--background)",
+  );
   assertEquals(
     toCssDeclaration("backgroundColor", cv("--background", "#111")),
     "background-color:var(--background, #111)",
@@ -344,7 +418,11 @@ Deno.test("toCssDeclaration and toCssRules support configurable defaultUnit", ()
 
 Deno.test("toCssDeclaration treats tokenized transition arrays as single shorthands", () => {
   assertEquals(
-    toCssDeclaration("transition", ["text-decoration-color", "0.2s", "ease-in-out"]),
+    toCssDeclaration("transition", [
+      "text-decoration-color",
+      "0.2s",
+      "ease-in-out",
+    ]),
     "transition:text-decoration-color 0.2s ease-in-out",
   );
   assertEquals(
@@ -358,7 +436,10 @@ Deno.test("toCssDeclaration quotes string content values and preserves raw conte
   assertEquals(toCssDeclaration("content", "- "), `content:"- "`);
   assertEquals(toCssDeclaration("content", "''"), `content:''`);
   assertEquals(toCssDeclaration("content", "open-quote"), `content:open-quote`);
-  assertEquals(toCssDeclaration("content", "attr(data-label)"), `content:attr(data-label)`);
+  assertEquals(
+    toCssDeclaration("content", "attr(data-label)"),
+    `content:attr(data-label)`,
+  );
 });
 
 Deno.test("toCssRules serializes empty content strings in pseudo elements", () => {
@@ -398,7 +479,11 @@ Deno.test("toCssRules supports nested selectors and nested @media/@container blo
   assert(rules.includes(".test{font-size:1.25rem}"));
   assert(rules.includes(".test ul{display:flex;flex-wrap:wrap;gap:0.5rem}"));
   assert(rules.includes("@media (width < 20rem){.test ul ul{display:grid}}"));
-  assert(rules.includes("@container nav (inline-size > 30rem){.test ul a:hover{text-decoration:underline}}"));
+  assert(
+    rules.includes(
+      "@container nav (inline-size > 30rem){.test ul a:hover{text-decoration:underline}}",
+    ),
+  );
   assert(rules.includes(".test li{flex:1}"));
   assert(rules.includes(".test:hover{opacity:0.8}"));
 });
@@ -430,7 +515,11 @@ Deno.test("toCssRules resolves breakpoint shorthand and ranges", () => {
   assert(rules.includes(".test{display:grid}"));
   assert(rules.includes("@media (width >= 40rem){.test{gap:1rem}}"));
   assert(rules.includes("@media (width <= 40rem){.test{padding:2rem}}"));
-  assert(rules.includes("@media (30rem < width < 80rem){.test{grid-template-columns:1fr 1fr}}"));
+  assert(
+    rules.includes(
+      "@media (30rem < width < 80rem){.test{grid-template-columns:1fr 1fr}}",
+    ),
+  );
 });
 
 Deno.test("toCssRules emits base declarations before breakpoint rules for override semantics", () => {
@@ -473,7 +562,11 @@ Deno.test("toCssRules resolves numeric breakpoint aliases like 2xs/2xl", () => {
   );
 
   assert(rules.includes("@media (width >= 20rem){.test{gap:0.25rem}}"));
-  assert(rules.includes("@media (20rem < width < 96rem){.test{grid-template-columns:1fr 1fr}}"));
+  assert(
+    rules.includes(
+      "@media (20rem < width < 96rem){.test{grid-template-columns:1fr 1fr}}",
+    ),
+  );
 });
 
 Deno.test("toCssRules resolves container shorthand and ranges", () => {
@@ -492,8 +585,34 @@ Deno.test("toCssRules resolves container shorthand and ranges", () => {
     },
   );
 
-  assert(rules.includes("@container card (width < 20rem){.test{background-color:blue}}"));
-  assert(rules.includes("@container (12rem <= width) and (width < 24rem){.test{color:white}}"));
+  assert(
+    rules.includes(
+      "@container card (width < 20rem){.test{background-color:blue}}",
+    ),
+  );
+  assert(
+    rules.includes(
+      "@container (12rem <= width) and (width < 24rem){.test{color:white}}",
+    ),
+  );
+});
+
+Deno.test("toCssGlobalRules supports @scope with nested selectors", () => {
+  const rules = toCssGlobalRules({
+    "@scope": {
+      selector: ".dark",
+      ":scope": {
+        color: "white",
+      },
+      ".accent": {
+        color: "cyan",
+      },
+    },
+  });
+
+  assertEquals(rules, [
+    "@scope (.dark){:scope{color:white}.accent{color:cyan}}",
+  ]);
 });
 
 Deno.test("parser accepts quoted nested selectors and nested @media/@container", () => {
@@ -549,7 +668,8 @@ Deno.test("parser supports space-delimited property arrays", () => {
   }`);
 
   assert(parsed !== null);
-  const rows = (parsed.base.pageWrapper as Record<string, unknown>).gridTemplateRows;
+  const rows =
+    (parsed.base.pageWrapper as Record<string, unknown>).gridTemplateRows;
   assert(Array.isArray(rows));
   assertEquals(rows, ["auto", "1fr", "auto"]);
 });
@@ -627,9 +747,15 @@ Deno.test("parser collects @import paths from stylesheet blocks", () => {
   }`);
 
   assert(parsed !== null);
-  assertEquals(parsed.imports, [`"./styles/reset.css"`, `"$lib/styles/theme.css"`]);
+  assertEquals(parsed.imports, [
+    `"./styles/reset.css"`,
+    `"$lib/styles/theme.css"`,
+  ]);
   assertEquals(parsed.global, {});
-  assertEquals((parsed.base.pageWrapper as Record<string, unknown>).display, "grid");
+  assertEquals(
+    (parsed.base.pageWrapper as Record<string, unknown>).display,
+    "grid",
+  );
 });
 
 Deno.test("parser supports @set with configured containers", () => {
@@ -654,8 +780,14 @@ Deno.test("parser supports @set with configured containers", () => {
   );
 
   assert(parsed !== null);
-  assertEquals((parsed.base.mainContainer as Record<string, unknown>).containerName, "card");
-  assertEquals((parsed.base.mainContainer as Record<string, unknown>).containerType, "inline-size");
+  assertEquals(
+    (parsed.base.mainContainer as Record<string, unknown>).containerName,
+    "card",
+  );
+  assertEquals(
+    (parsed.base.mainContainer as Record<string, unknown>).containerType,
+    "inline-size",
+  );
 });
 
 Deno.test("parser accepts defaults variant selections", () => {
@@ -676,6 +808,116 @@ Deno.test("parser accepts defaults variant selections", () => {
 
   assert(parsed !== null);
   assertEquals(parsed.defaults, { size: "md" });
+});
+
+Deno.test("parser accepts root entries", () => {
+  const parsed = parseCtCallArguments(`{
+    root: [
+      {
+        "--background": "#111",
+        "--text-color": "#fff"
+      },
+      {
+        layer: "theme",
+        vars: {
+          "--accent": "deepskyblue"
+        }
+      }
+    ]
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.root, [
+    {
+      "--background": "#111",
+      "--text-color": "#fff",
+    },
+    {
+      layer: "theme",
+      vars: {
+        "--accent": "deepskyblue",
+      },
+    },
+  ]);
+});
+
+Deno.test("parser keeps rootVars as a compatibility alias", () => {
+  const parsed = parseCtCallArguments(`{
+    rootVars: [
+      {
+        "--background": "#111"
+      }
+    ]
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.root, [
+    {
+      "--background": "#111",
+    },
+  ]);
+  assertEquals(parsed.rootVars, parsed.root);
+});
+
+Deno.test("runtime injects root into :root and layered :root", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = ct({
+      root: [
+        {
+          "--background": "#111",
+        },
+        {
+          layer: "theme",
+          vars: {
+            "--accent": "deepskyblue",
+          },
+        },
+      ],
+    });
+
+    styles();
+    const styleTag = fakeDocument.getElementById("__css_ts_runtime_styles");
+    const text = styleTag?.textContent ?? "";
+    assert(text.includes(":root{--background:#111}"));
+    assert(text.includes("@layer theme{:root{--accent:deepskyblue}}"));
+  } finally {
+    globals.document = originalDocument;
+  }
 });
 
 Deno.test("parser requires unquoted variant keys to be declared in base", () => {
@@ -726,7 +968,10 @@ Deno.test("parser routes quoted variant keys into variantGlobal", () => {
 
   assert(parsed !== null);
   assertEquals(parsed.variant, undefined);
-  assertEquals(parsed.variantGlobal?.theme?.dark?.[":global(html)"]?.colorScheme, "dark");
+  assertEquals(
+    parsed.variantGlobal?.theme?.dark?.[":global(html)"]?.colorScheme,
+    "dark",
+  );
   assertEquals(parsed.defaults, { theme: "dark" });
 });
 
@@ -734,13 +979,18 @@ Deno.test("injects virtual stylesheet import in svelte files that only import ct
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
 
-  const source = `<script lang="ts">\nimport { styles } from "./styles.ts";\n</script>\n\n<div class={styles().card()}>hi</div>`;
+  const source =
+    `<script lang="ts">\nimport { styles } from "./styles.ts";\n</script>\n\n<div class={styles().card()}>hi</div>`;
 
   const transformed = transform(source, "/app/src/routes/+page.svelte");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
-  assert(code.includes('<script lang="ts">\nimport "virtual:css-ts/styles.css";'));
+  assert(
+    code.includes('<script lang="ts">\nimport "virtual:css-ts/styles.css";'),
+  );
 });
 
 Deno.test("extracts css from ts module and serves it through the virtual stylesheet", () => {
@@ -748,11 +998,12 @@ Deno.test("extracts css from ts module and serves it through the virtual stylesh
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/styles.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
@@ -764,11 +1015,12 @@ Deno.test("extracts css from bare identifier declaration values in ct() calls", 
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({ base: { card: { fontSize: revert, borderStyle: solid } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/bare-identifiers.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(code.includes(`"fontSize":"revert"`));
@@ -776,7 +1028,10 @@ Deno.test("extracts css from bare identifier declaration values in ct() calls", 
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
-  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{font-size:revert;border-style:solid\}/);
+  assertMatch(
+    loaded as string,
+    /\.ct_[a-z0-9]+\{font-size:revert;border-style:solid\}/,
+  );
 });
 
 Deno.test("extracts css from scoped package imports in ts modules", () => {
@@ -784,11 +1039,12 @@ Deno.test("extracts css from scoped package imports in ts modules", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "@kt-tools/css-ts";\n` +
+  const moduleCode = `import ct from "@kt-tools/css-ts";\n` +
     `export const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/scoped-styles.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
@@ -800,8 +1056,7 @@ Deno.test("extracts merged declaration arrays at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    myButton: [\n` +
@@ -811,7 +1066,9 @@ Deno.test("extracts merged declaration arrays at build time", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/array-styles.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(
@@ -825,8 +1082,7 @@ Deno.test("extracts space-delimited property arrays at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    pageWrapper: {\n` +
@@ -836,10 +1092,15 @@ Deno.test("extracts space-delimited property arrays at build time", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/list-props.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;grid-template-rows:auto 1fr auto\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{display:grid;grid-template-rows:auto 1fr auto\}/,
+  );
 });
 
 Deno.test("extracts comma-delimited property arrays at build time", () => {
@@ -847,8 +1108,7 @@ Deno.test("extracts comma-delimited property arrays at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    textEl: {\n` +
@@ -858,10 +1118,15 @@ Deno.test("extracts comma-delimited property arrays at build time", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/comma-props.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{font-family:system-ui, sans-serif;transition:opacity 0\.2s, color 0\.3s\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{font-family:system-ui, sans-serif;transition:opacity 0\.2s, color 0\.3s\}/,
+  );
 });
 
 Deno.test("extracts tokenized transition arrays as single shorthands at build time", () => {
@@ -869,8 +1134,7 @@ Deno.test("extracts tokenized transition arrays as single shorthands at build ti
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    textEl: {\n` +
@@ -878,11 +1142,19 @@ Deno.test("extracts tokenized transition arrays as single shorthands at build ti
     `    }\n` +
     `  }\n` +
     `});`;
-  const transformed = transform(moduleCode, "/app/src/lib/transition-token-props.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/transition-token-props.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{transition:text-decoration-color 0\.2s ease-in-out\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{transition:text-decoration-color 0\.2s ease-in-out\}/,
+  );
 });
 
 Deno.test("extracts @apply merge lists at build time", () => {
@@ -890,8 +1162,7 @@ Deno.test("extracts @apply merge lists at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
     `const singleColumn = { gridTemplateRows: ["auto", "1fr", "auto"] };\n` +
     `export const styles = ct({\n` +
@@ -904,7 +1175,9 @@ Deno.test("extracts @apply merge lists at build time", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/apply.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(
@@ -926,8 +1199,7 @@ Deno.test("extracts @import stylesheet imports with relative paths", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  global: {\n` +
       `    "@import": ["./styles/reset.css"],\n` +
@@ -935,7 +1207,9 @@ Deno.test("extracts @import stylesheet imports with relative paths", () => {
       `  base: { page: { display: "grid" } },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/app.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/styles/reset.css";'));
@@ -968,8 +1242,7 @@ Deno.test("extracts @import stylesheet imports with aliased paths", () => {
       },
     });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  global: {\n` +
       `    "@import": ["@styles/reset.css", "$lib/styles/reset.css"],\n` +
@@ -977,7 +1250,9 @@ Deno.test("extracts @import stylesheet imports with aliased paths", () => {
       `  base: { page: { display: "grid" } },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/lib/styles/reset.css";'));
@@ -1000,8 +1275,7 @@ Deno.test("extracts @import from svelte ct() into virtual global stylesheet", ()
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const source =
-      `<script lang="ts">\n` +
+    const source = `<script lang="ts">\n` +
       `import ct from "css-ts";\n` +
       `const styles = ct({\n` +
       `  global: {\n` +
@@ -1015,7 +1289,9 @@ Deno.test("extracts @import from svelte ct() into virtual global stylesheet", ()
       `<main class={styles().page()}></main>`;
 
     const transformed = transform(source, `${root}/src/routes/+layout.svelte`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
     const code = transformed.code as string;
     assert(code.includes('import "virtual:css-ts/styles.css";'));
     assert(!code.includes('@import "/src/lib/styles/reset.css";'));
@@ -1039,21 +1315,25 @@ Deno.test("extracts imported rules passed as array to import()", () => {
     Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `const styles = new ct();\n` +
       `styles.import([\n` +
       `  { rules: { testRule: { color: "red" } }, layer: "test" },\n` +
       `  { "@import": ["./foo.css"] }\n` +
       `]);`;
 
-    const transformed = transform(moduleCode, `${root}/src/lib/array-import.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    const transformed = transform(
+      moduleCode,
+      `${root}/src/lib/array-import.ts`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/lib/foo.css";'));
-    assert(css.includes('@layer test{testRule{color:red}}'));
-    assert(!css.includes('0 rules *'));
+    assert(css.includes("@layer test{testRule{color:red}}"));
+    assert(!css.includes("0 rules *"));
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1067,8 +1347,8 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  resolution: "static",\n` +
-      `};\n`,
+        `  resolution: "static",\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1077,8 +1357,7 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1090,7 +1369,7 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
     assertThrows(
       () => transform(moduleCode, `${root}/src/app.ts`),
       Error,
-      "resolution=\"static\" could not statically resolve ct(...)",
+      'resolution="static" could not statically resolve ct(...)',
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1109,8 +1388,7 @@ Deno.test("astro defaults to static resolution when resolution is not explicitly
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `---\n` +
+    const moduleCode = `---\n` +
       `import ct from "css-ts";\n` +
       `const styles = ct({\n` +
       `  base: {\n` +
@@ -1125,7 +1403,7 @@ Deno.test("astro defaults to static resolution when resolution is not explicitly
     assertThrows(
       () => transform(moduleCode, `${root}/src/pages/index.astro`),
       Error,
-      "resolution=\"static\" could not statically resolve ct(...)",
+      'resolution="static" could not statically resolve ct(...)',
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1144,8 +1422,7 @@ Deno.test("astro defaults to static resolution for unresolved new ct() assignmen
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `---\n` +
+    const moduleCode = `---\n` +
       `import ct from "css-ts";\n` +
       `const styles = new ct();\n` +
       `styles.base = {\n` +
@@ -1159,7 +1436,7 @@ Deno.test("astro defaults to static resolution for unresolved new ct() assignmen
     assertThrows(
       () => transform(moduleCode, `${root}/src/pages/new-ct.astro`),
       Error,
-      "resolution=\"static\" could not statically resolve config for styles",
+      'resolution="static" could not statically resolve config for styles',
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1174,8 +1451,8 @@ Deno.test("resolution=dynamic disables static extraction", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  resolution: "dynamic",\n` +
-      `};\n`,
+        `  resolution: "dynamic",\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1185,8 +1462,7 @@ Deno.test("resolution=dynamic disables static extraction", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1196,9 +1472,11 @@ Deno.test("resolution=dynamic disables static extraction", () => {
       `});`;
 
     const transformed = transform(moduleCode, `${root}/src/app.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
     const code = transformed.code as string;
-    assert(code.includes("undefined, {\"resolution\":\"dynamic\"}"));
+    assert(code.includes('undefined, {"resolution":"dynamic"}'));
 
     const css = load(VIRTUAL_ID) as string;
     assert(!/\.ct_[a-z0-9]+/.test(css));
@@ -1212,8 +1490,7 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
 
   try {
     Deno.mkdirSync(`${root}/src`, { recursive: true });
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1225,8 +1502,8 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  resolution: "static",\n` +
-      `};\n`,
+        `  resolution: "static",\n` +
+        `};\n`,
     );
 
     const staticPlugin = cssTsPlugin();
@@ -1244,14 +1521,14 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
     assertThrows(
       () => staticTransform(moduleCode, `${root}/src/dev-static.ts`),
       Error,
-      "resolution=\"static\" could not statically resolve ct(...)",
+      'resolution="static" could not statically resolve ct(...)',
     );
 
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  resolution: "dynamic",\n` +
-      `};\n`,
+        `  resolution: "dynamic",\n` +
+        `};\n`,
     );
 
     const dynamicPlugin = cssTsPlugin();
@@ -1267,9 +1544,18 @@ Deno.test("resolution modes are enforced in dev server mode", () => {
         invalidateModule: () => undefined,
       },
     });
-    const transformed = dynamicTransform(moduleCode, `${root}/src/dev-dynamic.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
-    assert((transformed.code as string).includes("undefined, {\"resolution\":\"dynamic\"}"));
+    const transformed = dynamicTransform(
+      moduleCode,
+      `${root}/src/dev-dynamic.ts`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+    assert(
+      (transformed.code as string).includes(
+        'undefined, {"resolution":"dynamic"}',
+      ),
+    );
 
     const css = dynamicLoad(VIRTUAL_ID) as string;
     assert(!/\.ct_[a-z0-9]+/.test(css));
@@ -1286,14 +1572,13 @@ Deno.test("debug.logStatic only logs in dev server mode", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  debug: {\n` +
-      `    logStatic: true,\n` +
-      `  },\n` +
-      `};\n`,
+        `  debug: {\n` +
+        `    logStatic: true,\n` +
+        `  },\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({ base: { card: { display: "grid" } } });`;
 
     const originalConsoleLog = console.log;
@@ -1318,8 +1603,14 @@ Deno.test("debug.logStatic only logs in dev server mode", () => {
         },
       });
       const transformed = devTransform(moduleCode, `${root}/src/dev.ts`);
-      assert(transformed && typeof transformed === "object" && "code" in transformed);
-      assert((transformed.code as string).includes("\"debug\":{\"enabled\":true,\"logDynamic\":false,\"logStatic\":true}"));
+      assert(
+        transformed && typeof transformed === "object" && "code" in transformed,
+      );
+      assert(
+        (transformed.code as string).includes(
+          '"debug":{"enabled":true,"logDynamic":false,"logStatic":true}',
+        ),
+      );
     } finally {
       console.log = originalConsoleLog;
     }
@@ -1335,8 +1626,10 @@ Deno.test("debug.logStatic only logs in dev server mode", () => {
 
       buildConfigResolved({ root, resolve: { alias: [] } });
       const transformed = buildTransform(moduleCode, `${root}/src/build.ts`);
-      assert(transformed && typeof transformed === "object" && "code" in transformed);
-      assert(!(transformed.code as string).includes("\"debug\":"));
+      assert(
+        transformed && typeof transformed === "object" && "code" in transformed,
+      );
+      assert(!(transformed.code as string).includes('"debug":'));
     } finally {
       console.log = originalConsoleLog;
     }
@@ -1356,16 +1649,16 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import "./src/global.css";\n` +
-      `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
-      `export default {\n` +
-      `  breakpoints: { md: "48rem" },\n` +
-      `  utilities: {\n` +
-      `    cardBase: {\n` +
-      `      "@apply": [baseColors],\n` +
-      `      borderRadius: "8px",\n` +
-      `    },\n` +
-      `  },\n` +
-      `};\n`,
+        `const baseColors = { backgroundColor: "#4f4f4f", color: "black" };\n` +
+        `export default {\n` +
+        `  breakpoints: { md: "48rem" },\n` +
+        `  utilities: {\n` +
+        `    cardBase: {\n` +
+        `      "@apply": [baseColors],\n` +
+        `      borderRadius: "8px",\n` +
+        `    },\n` +
+        `  },\n` +
+        `};\n`,
     );
     Deno.writeTextFileSync(`${root}/src/global.css`, "/* global */\n");
 
@@ -1376,8 +1669,7 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1393,14 +1685,28 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
       `  },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/app.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/global.css";'));
-    assertMatch(css, /\.u-card-base\{background-color:#4f4f4f;color:black;border-radius:8px\}/);
-    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/);
-    assertMatch(css, /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
-    assertMatch(css, /@media \(width <= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr\}\}/);
+    assertMatch(
+      css,
+      /\.u-card-base\{background-color:#4f4f4f;color:black;border-radius:8px\}/,
+    );
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{background-color:#4f4f4f;color:black;border-radius:8px;display:grid\}/,
+    );
+    assertMatch(
+      css,
+      /@media \(width >= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/,
+    );
+    assertMatch(
+      css,
+      /@media \(width <= 48rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr\}\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1414,13 +1720,13 @@ Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  defaultUnit: "rem",\n` +
-      `  utilities: {\n` +
-      `    cardBase: {\n` +
-      `      marginBlock: 1,\n` +
-      `    },\n` +
-      `  },\n` +
-      `};\n`,
+        `  defaultUnit: "rem",\n` +
+        `  utilities: {\n` +
+        `    cardBase: {\n` +
+        `      marginBlock: 1,\n` +
+        `    },\n` +
+        `  },\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1430,8 +1736,7 @@ Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1443,8 +1748,13 @@ Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
       `  },\n` +
       `});`;
 
-    const transformed = transform(moduleCode, `${root}/src/app-default-unit.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    const transformed = transform(
+      moduleCode,
+      `${root}/src/app-default-unit.ts`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
     assert((transformed.code as string).includes('"defaultUnit":"rem"'));
 
     const css = load(VIRTUAL_ID) as string;
@@ -1466,11 +1776,11 @@ Deno.test("loads css.config.ts breakpoint ranges with @(from,to) shorthand", () 
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  breakpoints: {\n` +
-      `    xs: "30rem",\n` +
-      `    xl: "80rem",\n` +
-      `  },\n` +
-      `};\n`,
+        `  breakpoints: {\n` +
+        `    xs: "30rem",\n` +
+        `    xl: "80rem",\n` +
+        `  },\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1480,8 +1790,7 @@ Deno.test("loads css.config.ts breakpoint ranges with @(from,to) shorthand", () 
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1493,10 +1802,15 @@ Deno.test("loads css.config.ts breakpoint ranges with @(from,to) shorthand", () 
       `  },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/app-range.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /@media \(30rem < width < 80rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/);
+    assertMatch(
+      css,
+      /@media \(30rem < width < 80rem\)\{\.ct_[a-z0-9]+\{grid-template-columns:1fr 1fr\}\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1510,10 +1824,10 @@ Deno.test("loads css.config.ts containers and supports @set/@container shorthand
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-      `  containers: {\n` +
-      `    card: { type: "inline-size", rule: "width < 20rem" },\n` +
-      `  },\n` +
-      `};\n`,
+        `  containers: {\n` +
+        `    card: { type: "inline-size", rule: "width < 20rem" },\n` +
+        `  },\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1523,8 +1837,7 @@ Deno.test("loads css.config.ts containers and supports @set/@container shorthand
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    mainContainer: {\n` +
@@ -1538,11 +1851,19 @@ Deno.test("loads css.config.ts containers and supports @set/@container shorthand
       `  },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/app-container.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{container-name:card;container-type:inline-size\}/);
-    assertMatch(css, /@container card \(width < 20rem\)\{\.ct_[a-z0-9]+\{background-color:blue\}\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{container-name:card;container-type:inline-size\}/,
+    );
+    assertMatch(
+      css,
+      /@container card \(width < 20rem\)\{\.ct_[a-z0-9]+\{background-color:blue\}\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1561,9 +1882,9 @@ Deno.test("loads css.config.ts breakpoints from imported constants", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import { pageWidth } from "./src/lib/styles/tokens";\n` +
-      `export default {\n` +
-      `  breakpoints: { sm: pageWidth },\n` +
-      `};\n`,
+        `export default {\n` +
+        `  breakpoints: { sm: pageWidth },\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1573,8 +1894,7 @@ Deno.test("loads css.config.ts breakpoints from imported constants", () => {
 
     configResolved({ root, resolve: { alias: [] } });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1586,10 +1906,15 @@ Deno.test("loads css.config.ts breakpoints from imported constants", () => {
       `  },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /@media \(width >= 60rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/);
+    assertMatch(
+      css,
+      /@media \(width >= 60rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1609,10 +1934,10 @@ Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alia
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `import "@theme/global.css";\n` +
-      `import { pageWidth } from "@theme/layout";\n` +
-      `export default {\n` +
-      `  breakpoints: { sm: pageWidth },\n` +
-      `};\n`,
+        `import { pageWidth } from "@theme/layout";\n` +
+        `export default {\n` +
+        `  breakpoints: { sm: pageWidth },\n` +
+        `};\n`,
     );
 
     const plugin = cssTsPlugin();
@@ -1632,8 +1957,7 @@ Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alia
       },
     });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
       `    pageWrapper: {\n` +
@@ -1645,11 +1969,16 @@ Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alia
       `  },\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/theme/global.css";'));
-    assertMatch(css, /@media \(width >= 72rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/);
+    assertMatch(
+      css,
+      /@media \(width >= 72rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1668,18 +1997,17 @@ Deno.test("resolves imported style objects and precompiles them", () => {
     Deno.writeTextFileSync(
       `${libDir}/styles.ts`,
       `export const commonColors = {\n` +
-      `  background: "black",\n` +
-      `  color: "white",\n` +
-      `};\n` +
-      `export const buttonStyles = {\n` +
-      `  fontSize: "1.25rem",\n` +
-      `  fontWeight: 600,\n` +
-      `  padding: "1rem",\n` +
-      `};\n`,
+        `  background: "black",\n` +
+        `  color: "white",\n` +
+        `};\n` +
+        `export const buttonStyles = {\n` +
+        `  fontSize: "1.25rem",\n` +
+        `  fontWeight: 600,\n` +
+        `  padding: "1rem",\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { buttonStyles, commonColors } from "$lib/styles";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
@@ -1692,10 +2020,15 @@ Deno.test("resolves imported style objects and precompiles them", () => {
       `  }\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{font-size:1\.25rem;font-weight:600;padding:1rem;background:black;color:white\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{font-size:1\.25rem;font-weight:600;padding:1rem;background:black;color:white\}/,
+    );
     assertMatch(css, /\.ct_[a-z0-9]+\{font-size:2rem\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1715,17 +2048,16 @@ Deno.test("resolves namespace-imported style objects and precompiles them", () =
     Deno.writeTextFileSync(
       `${libDir}/styles.ts`,
       `export const darkBar = {\n` +
-      `  backgroundColor: "oklch(from #00aaff 20% c h)",\n` +
-      `  color: "white",\n` +
-      `};\n` +
-      `export const lightBar = {\n` +
-      `  backgroundColor: "black",\n` +
-      `  color: "white",\n` +
-      `};\n`,
+        `  backgroundColor: "oklch(from #00aaff 20% c h)",\n` +
+        `  color: "white",\n` +
+        `};\n` +
+        `export const lightBar = {\n` +
+        `  backgroundColor: "black",\n` +
+        `  color: "white",\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import * as S from "$lib/styles";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
@@ -1739,10 +2071,15 @@ Deno.test("resolves namespace-imported style objects and precompiles them", () =
       `  }\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/Header.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{background-color:oklch\(from #00aaff 20% c h\);color:white\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{background-color:oklch\(from #00aaff 20% c h\);color:white\}/,
+    );
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:black;color:white\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1763,8 +2100,8 @@ Deno.test("resolves imported constants through Vite resolve.alias", () => {
     Deno.writeTextFileSync(
       `${themeDir}/colors.ts`,
       `export const light = {\n` +
-      `  blue: "#00aaff",\n` +
-      `};\n`,
+        `  blue: "#00aaff",\n` +
+        `};\n`,
     );
 
     configResolved({
@@ -1779,8 +2116,7 @@ Deno.test("resolves imported constants through Vite resolve.alias", () => {
       },
     });
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { light } from "@theme/colors";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
@@ -1791,7 +2127,9 @@ Deno.test("resolves imported constants through Vite resolve.alias", () => {
       `  }\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
@@ -1813,24 +2151,23 @@ Deno.test("resolves imported constants through tsconfig paths aliases", () => {
     Deno.writeTextFileSync(
       `${themeDir}/colors.ts`,
       `export const light = {\n` +
-      `  blue: "#00aaff",\n` +
-      `};\n`,
+        `  blue: "#00aaff",\n` +
+        `};\n`,
     );
     Deno.writeTextFileSync(
       `${root}/tsconfig.json`,
       `{\n` +
-      `  // comment to ensure JSONC parsing works\n` +
-      `  "compilerOptions": {\n` +
-      `    "baseUrl": ".",\n` +
-      `    "paths": {\n` +
-      `      "@theme/*": ["src/custom-theme/*",]\n` +
-      `    },\n` +
-      `  },\n` +
-      `}\n`,
+        `  // comment to ensure JSONC parsing works\n` +
+        `  "compilerOptions": {\n` +
+        `    "baseUrl": ".",\n` +
+        `    "paths": {\n` +
+        `      "@theme/*": ["src/custom-theme/*",]\n` +
+        `    },\n` +
+        `  },\n` +
+        `}\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { light } from "@theme/colors";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
@@ -1841,7 +2178,9 @@ Deno.test("resolves imported constants through tsconfig paths aliases", () => {
       `  }\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
@@ -1866,41 +2205,40 @@ Deno.test("resolves tsconfig paths aliases when extends chain does not define ba
     Deno.writeTextFileSync(
       `${tsconfigDir}/base.json`,
       `{\n` +
-      `  "compilerOptions": {\n` +
-      `    "strict": true\n` +
-      `  }\n` +
-      `}\n`,
+        `  "compilerOptions": {\n` +
+        `    "strict": true\n` +
+        `  }\n` +
+        `}\n`,
     );
     Deno.writeTextFileSync(
       `${tsconfigDir}/strict.json`,
       `{\n` +
-      `  "extends": "./base.json",\n` +
-      `  "compilerOptions": {\n` +
-      `    "noUncheckedIndexedAccess": true\n` +
-      `  }\n` +
-      `}\n`,
+        `  "extends": "./base.json",\n` +
+        `  "compilerOptions": {\n` +
+        `    "noUncheckedIndexedAccess": true\n` +
+        `  }\n` +
+        `}\n`,
     );
     Deno.writeTextFileSync(
       `${root}/tsconfig.json`,
       `{\n` +
-      `  "extends": "astro/tsconfigs/strict",\n` +
-      `  "compilerOptions": {\n` +
-      `    "paths": {\n` +
-      `      "@/*": ["./src/*"]\n` +
-      `    }\n` +
-      `  }\n` +
-      `}\n`,
+        `  "extends": "astro/tsconfigs/strict",\n` +
+        `  "compilerOptions": {\n` +
+        `    "paths": {\n` +
+        `      "@/*": ["./src/*"]\n` +
+        `    }\n` +
+        `  }\n` +
+        `}\n`,
     );
 
     Deno.writeTextFileSync(
       `${libDir}/theme.ts`,
       `export const palette = {\n` +
-      `  accent: "#00aaff",\n` +
-      `};\n`,
+        `  accent: "#00aaff",\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { palette } from "@/lib/theme";\n` +
       `export const styles = ct({\n` +
       `  base: {\n` +
@@ -1911,7 +2249,9 @@ Deno.test("resolves tsconfig paths aliases when extends chain does not define ba
       `  }\n` +
       `});`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{background-color:#00aaff;color:white\}/);
@@ -1933,15 +2273,14 @@ Deno.test("resolves imported constants computed by static helper function calls"
     Deno.writeTextFileSync(
       `${libDir}/stylesheet.ts`,
       `const colorUtils = {\n` +
-      `  oklch: (l: number, c: number, h: number) => \`oklch(\${l}% \${c} \${h})\`,\n` +
-      `};\n` +
-      `export const blue = {\n` +
-      `  l300: colorUtils.oklch(70, 0.1679, 242.04),\n` +
-      `};\n`,
+        `  oklch: (l: number, c: number, h: number) => \`oklch(\${l}% \${c} \${h})\`,\n` +
+        `};\n` +
+        `export const blue = {\n` +
+        `  l300: colorUtils.oklch(70, 0.1679, 242.04),\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { blue } from "$lib/stylesheet";\n` +
       `const styles = new ct();\n` +
       `styles.base = {\n` +
@@ -1954,11 +2293,16 @@ Deno.test("resolves imported constants computed by static helper function calls"
       `};\n` +
       `styles.defaults = { theme: "dark" };\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom:2px solid currentColor\}/);
-    assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -1977,15 +2321,14 @@ Deno.test("resolves imported constants computed by function declarations", () =>
     Deno.writeTextFileSync(
       `${libDir}/stylesheet.ts`,
       `function oklch(l: number, c: number, h: number) {\n` +
-      `  return \`oklch(\${l}% \${c} \${h})\`;\n` +
-      `}\n` +
-      `export const blue = {\n` +
-      `  l300: oklch(70, 0.1679, 242.04),\n` +
-      `};\n`,
+        `  return \`oklch(\${l}% \${c} \${h})\`;\n` +
+        `}\n` +
+        `export const blue = {\n` +
+        `  l300: oklch(70, 0.1679, 242.04),\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { blue } from "$lib/stylesheet";\n` +
       `const styles = new ct();\n` +
       `styles.base = {\n` +
@@ -1998,11 +2341,16 @@ Deno.test("resolves imported constants computed by function declarations", () =>
       `};\n` +
       `styles.defaults = { theme: "dark" };\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const css = load(VIRTUAL_ID) as string;
     assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom:2px solid currentColor\}/);
-    assertMatch(css, /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{border-bottom-color:oklch\(70% 0\.1679 242\.04\)\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -2021,25 +2369,24 @@ Deno.test("new ct() resolves imported default objects without null-cache poisoni
     Deno.writeTextFileSync(
       `${libDir}/theme.ts`,
       `function createPalette(color: string) {\n` +
-      `  return { base: color };\n` +
-      `}\n` +
-      `function fontRegular() {\n` +
-      `  return { fontWeight: 400 };\n` +
-      `}\n` +
-      `const fonts = {\n` +
-      `  regular: fontRegular,\n` +
-      `};\n` +
-      `const colors = {\n` +
-      `  primary: createPalette("#00aaff"),\n` +
-      `};\n` +
-      `export default {\n` +
-      `  font: fonts,\n` +
-      `  color: colors,\n` +
-      `};\n`,
+        `  return { base: color };\n` +
+        `}\n` +
+        `function fontRegular() {\n` +
+        `  return { fontWeight: 400 };\n` +
+        `}\n` +
+        `const fonts = {\n` +
+        `  regular: fontRegular,\n` +
+        `};\n` +
+        `const colors = {\n` +
+        `  primary: createPalette("#00aaff"),\n` +
+        `};\n` +
+        `export default {\n` +
+        `  font: fonts,\n` +
+        `  color: colors,\n` +
+        `};\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import theme from "$lib/theme";\n` +
       `const styles = new ct();\n` +
       `styles.global = {\n` +
@@ -2048,7 +2395,9 @@ Deno.test("new ct() resolves imported default objects without null-cache poisoni
       `  },\n` +
       `};\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const code = transformed.code as string;
     assert(!code.includes("new ct()"));
@@ -2064,8 +2413,7 @@ Deno.test("new ct() extracts styles mixing unquoted value tokens and function ca
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `function responsiveWidth(width: string) {\n` +
     `  return \`min(\${width}, 100%)\`;\n` +
     `}\n` +
@@ -2078,13 +2426,21 @@ Deno.test("new ct() extracts styles mixing unquoted value tokens and function ca
     `    marginInline: "auto",\n` +
     `  },\n` +
     `};\n`;
-  const transformed = transform(moduleCode, "/app/src/lib/new-ct-mixed-unquoted.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/new-ct-mixed-unquoted.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(!code.includes("new ct()"));
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);text-align:center;color:red;margin-inline:auto\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);text-align:center;color:red;margin-inline:auto\}/,
+  );
 });
 
 Deno.test("new ct() extracts styles computed by local function declarations", () => {
@@ -2092,8 +2448,7 @@ Deno.test("new ct() extracts styles computed by local function declarations", ()
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `function responsiveWidth(width: string) {\n` +
     `  return \`min(\${width}, 100%)\`;\n` +
     `}\n` +
@@ -2105,12 +2460,17 @@ Deno.test("new ct() extracts styles computed by local function declarations", ()
     `  },\n` +
     `};\n`;
   const transformed = transform(moduleCode, "/app/src/lib/new-ct-local-fn.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(!code.includes("new ct()"));
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/,
+  );
 });
 
 Deno.test("new ct() extracts styles computed by local const arrow functions", () => {
@@ -2118,8 +2478,7 @@ Deno.test("new ct() extracts styles computed by local const arrow functions", ()
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n` +
     `const styles = new ct();\n` +
     `styles.base = {\n` +
@@ -2128,13 +2487,21 @@ Deno.test("new ct() extracts styles computed by local const arrow functions", ()
     `    marginInline: "auto",\n` +
     `  },\n` +
     `};\n`;
-  const transformed = transform(moduleCode, "/app/src/lib/new-ct-local-arrow.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/new-ct-local-arrow.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(!code.includes("new ct()"));
   const css = load(VIRTUAL_ID) as string;
-  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/,
+  );
 });
 
 Deno.test("new ct() extracts styles computed by imported default const arrow functions", () => {
@@ -2150,11 +2517,10 @@ Deno.test("new ct() extracts styles computed by imported default const arrow fun
     Deno.writeTextFileSync(
       `${libDir}/responsive.ts`,
       `const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n` +
-      `export default responsiveWidth;\n`,
+        `export default responsiveWidth;\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import responsiveWidth from "$lib/responsive";\n` +
       `const styles = new ct();\n` +
       `styles.base = {\n` +
@@ -2164,12 +2530,17 @@ Deno.test("new ct() extracts styles computed by imported default const arrow fun
       `  },\n` +
       `};\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const code = transformed.code as string;
     assert(!code.includes("new ct()"));
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -2190,8 +2561,7 @@ Deno.test("new ct() extracts styles computed by imported named const arrow funct
       `export const responsiveWidth = (width: string) => \`min(\${width}, 100%)\`;\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { responsiveWidth } from "$lib/responsive";\n` +
       `const styles = new ct();\n` +
       `styles.base = {\n` +
@@ -2201,12 +2571,17 @@ Deno.test("new ct() extracts styles computed by imported named const arrow funct
       `  },\n` +
       `};\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const code = transformed.code as string;
     assert(!code.includes("new ct()"));
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{width:min\(60rem, 100%\);margin-inline:auto\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -2217,8 +2592,7 @@ Deno.test("extracts quoted nested selectors and nested @media/@container at buil
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    mainNavigation: {\n` +
@@ -2236,14 +2610,19 @@ Deno.test("extracts quoted nested selectors and nested @media/@container at buil
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/nested.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
   const css = loaded as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{font-size:1\.25rem\}/);
   assertMatch(css, /\.ct_[a-z0-9]+ ul\{display:flex\}/);
-  assertMatch(css, /@media \(width < 20rem\)\{\.ct_[a-z0-9]+ ul ul\{display:grid\}\}/);
+  assertMatch(
+    css,
+    /@media \(width < 20rem\)\{\.ct_[a-z0-9]+ ul ul\{display:grid\}\}/,
+  );
   assertMatch(
     css,
     /@container nav \(inline-size > 30rem\)\{\.ct_[a-z0-9]+ ul a:hover\{text-decoration:underline\}\}/,
@@ -2258,7 +2637,7 @@ Deno.test("does not trigger a websocket full-reload during transform", () => {
   configureServer({
     moduleGraph: {
       getModuleById: () => ({}),
-      invalidateModule: () => { },
+      invalidateModule: () => {},
     },
     ws: {
       send: (payload: { type?: string }) => {
@@ -2272,7 +2651,9 @@ Deno.test("does not trigger a websocket full-reload during transform", () => {
   const moduleCode =
     `import ct from "css-ts";\nexport const styles = ct({ base: { card: { display: "grid" } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/no-reload.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 });
 
 Deno.test("extracts cv() CSS variable usage at build time", () => {
@@ -2280,15 +2661,19 @@ Deno.test("extracts cv() CSS variable usage at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct, { cv } from "css-ts";\n` +
+  const moduleCode = `import ct, { cv } from "css-ts";\n` +
     `export const styles = ct({ base: { card: { backgroundColor: cv("--background") } } });`;
   const transformed = transform(moduleCode, "/app/src/lib/vars.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
-  assertMatch(loaded as string, /\.ct_[a-z0-9]+\{background-color:var\(--background\)\}/);
+  assertMatch(
+    loaded as string,
+    /\.ct_[a-z0-9]+\{background-color:var\(--background\)\}/,
+  );
 });
 
 Deno.test("extracts cv() numeric fallback with property-aware units", () => {
@@ -2296,15 +2681,16 @@ Deno.test("extracts cv() numeric fallback with property-aware units", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct, { cv } from "css-ts";\n` +
+  const moduleCode = `import ct, { cv } from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    card: { padding: cv("--space", 8), fontWeight: cv("--weight", 600) }\n` +
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/vars-fallback.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const loaded = load(VIRTUAL_ID);
   assertEquals(typeof loaded, "string");
@@ -2319,8 +2705,7 @@ Deno.test("extracts variant styles and compiles variant class maps", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    headerText: { display: "grid" },\n` +
@@ -2333,7 +2718,9 @@ Deno.test("extracts variant styles and compiles variant class maps", () => {
     `  },\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/variants.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assertMatch(code, /variant/);
@@ -2350,8 +2737,7 @@ Deno.test("extracts css when defaults are present in ct config", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  base: {\n` +
     `    myButton: { padding: "1rem" }\n` +
@@ -2367,7 +2753,9 @@ Deno.test("extracts css when defaults are present in ct config", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/default-variants.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assertMatch(code, /defaults/);
@@ -2478,7 +2866,9 @@ Deno.test("runtime swaps selected variantGlobal rules in static mode", () => {
     styles.defaults = { theme: "dark" };
 
     styles().app();
-    const variantTag = Array.from(tags.values()).find((tag) => tag.id.includes("variant_global"));
+    const variantTag = Array.from(tags.values()).find((tag) =>
+      tag.id.includes("variant_global")
+    );
     assert(variantTag);
     assertEquals(variantTag.textContent, "html{color-scheme:dark}");
 
@@ -2509,7 +2899,10 @@ Deno.test("runtime style() respects defaultUnit", () => {
     { defaultUnit: "rem" },
   );
 
-  assertEquals(styles().card.style(), "font-size:1rem;margin-block:2rem;line-height:1.25");
+  assertEquals(
+    styles().card.style(),
+    "font-size:1rem;margin-block:2rem;line-height:1.25",
+  );
 });
 
 Deno.test("runtime works without a document global", () => {
@@ -2537,8 +2930,7 @@ Deno.test("extracts global section rules at build time", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `export const styles = ct({\n` +
     `  global: {\n` +
     `    "@layer reset": {\n` +
@@ -2550,7 +2942,9 @@ Deno.test("extracts global section rules at build time", () => {
     `  }\n` +
     `});`;
   const transformed = transform(moduleCode, "/app/src/lib/global.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
@@ -2587,6 +2981,72 @@ Deno.test("new ct() runtime with direct accessor access", () => {
   assertEquals(viaFactory, viaDirect);
 });
 
+Deno.test("new ct() runtime accepts root assignments", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = new (ct as any)();
+    styles.root = [
+      {
+        "--background": "#123",
+      },
+      {
+        layer: "theme",
+        vars: {
+          "--accent": "gold",
+        },
+      },
+    ];
+    styles.base = {
+      card: {
+        display: "grid",
+      },
+    };
+
+    styles().card();
+    const styleTag = fakeDocument.getElementById("__css_ts_runtime_styles");
+    const text = styleTag?.textContent ?? "";
+    assert(text.includes(":root{--background:#123}"));
+    assert(text.includes("@layer theme{:root{--accent:gold}}"));
+    assertMatch(text, /\.ct_[a-z0-9]+\{display:grid\}/);
+  } finally {
+    globals.document = originalDocument;
+  }
+});
+
 Deno.test("runtime accessors expose class() and style()", () => {
   const styles = new (ct as any)();
   styles.base = {
@@ -2620,7 +3080,10 @@ Deno.test("new ct() runtime with variants and defaults", () => {
   assertEquals(withDefaults, styles().myButton({ size: "md" }));
   assert(withDefaults !== styles().myButton({ size: "sm" }));
   assertEquals(styles().myButton.style(), "padding:1rem;font-size:1rem");
-  assertEquals(styles().myButton.style({ size: "sm" }), "padding:1rem;font-size:0.8rem");
+  assertEquals(
+    styles().myButton.style({ size: "sm" }),
+    "padding:1rem;font-size:0.8rem",
+  );
 });
 
 Deno.test("new ct() runtime supports addContainer with @set and @container shorthand", () => {
@@ -2650,14 +3113,16 @@ Deno.test("parser findNewCtDeclarations detects new ct() pattern", () => {
   const code = `import ct from "css-ts";
 const styles = new ct();
 styles.base = { myButton: { backgroundColor: "black" } };
+styles.root = [{ "--accent": "deepskyblue" }];
 styles.global = { html: { margin: 0 } };`;
 
   const decls = findNewCtDeclarations(code);
   assertEquals(decls.length, 1);
   assertEquals(decls[0].varName, "styles");
-  assertEquals(decls[0].assignments.length, 2);
+  assertEquals(decls[0].assignments.length, 3);
   assertEquals(decls[0].assignments[0].property, "base");
-  assertEquals(decls[0].assignments[1].property, "global");
+  assertEquals(decls[0].assignments[1].property, "root");
+  assertEquals(decls[0].assignments[2].property, "global");
 });
 
 Deno.test("vite extracts css from new ct() pattern", () => {
@@ -2665,12 +3130,13 @@ Deno.test("vite extracts css from new ct() pattern", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.base = { card: { display: "grid", gap: "1rem" } };\n`;
   const transformed = transform(moduleCode, "/app/src/lib/new-ct.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(!code.includes("new ct()"));
@@ -2684,12 +3150,16 @@ Deno.test("vite extracts bare identifier declaration values from new ct() patter
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.base = { card: { fontSize: revert, borderStyle: solid } };\n`;
-  const transformed = transform(moduleCode, "/app/src/lib/new-ct-bare-identifiers.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/new-ct-bare-identifiers.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assert(code.includes(`"fontSize":"revert"`));
@@ -2704,8 +3174,7 @@ Deno.test("vite resolves @apply local const objects that use bare identifier val
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const utilityProse = {\n` +
     `  "p": { margin: revert },\n` +
     `  "h1": { fontWeight: revert },\n` +
@@ -2717,8 +3186,13 @@ Deno.test("vite resolves @apply local const objects that use bare identifier val
     `    borderStyle: solid,\n` +
     `  },\n` +
     `};\n`;
-  const transformed = transform(moduleCode, "/app/src/lib/new-ct-bare-identifiers-apply.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/new-ct-bare-identifiers-apply.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{border-style:solid\}/);
@@ -2741,19 +3215,23 @@ Deno.test("vite extracts bare identifier declaration values with template litera
       `export const theme = { width: "100%" };\n`,
     );
 
-    const moduleCode =
-      `import ct from "css-ts";\n` +
+    const moduleCode = `import ct from "css-ts";\n` +
       `import { theme } from "$lib/theme";\n` +
       `const styles = new ct();\n` +
       `styles.base = { card: { width: \`min(\${theme.width}, 60rem)\`, marginInline: auto } };\n`;
     const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
-    assert(transformed && typeof transformed === "object" && "code" in transformed);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
 
     const code = transformed.code as string;
     assert(code.includes(`"marginInline":"auto"`));
 
     const css = load(VIRTUAL_ID) as string;
-    assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(100%, 60rem\);margin-inline:auto\}/);
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{width:min\(100%, 60rem\);margin-inline:auto\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -2764,15 +3242,16 @@ Deno.test("vite extracts new ct() with variants and global", () => {
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.global = { "@layer reset": { "html": { scrollBehavior: "smooth" } } };\n` +
     `styles.base = { card: { display: "grid" } };\n` +
     `styles.variant = { theme: { dark: { card: { backgroundColor: "black" } } } };\n` +
     `styles.defaults = { theme: "dark" };\n`;
   const transformed = transform(moduleCode, "/app/src/lib/new-ct-full.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /@layer reset\{html\{scroll-behavior:smooth\}\}/);
@@ -2780,13 +3259,33 @@ Deno.test("vite extracts new ct() with variants and global", () => {
   assertMatch(css, /\.ct_[a-z0-9]+\{background-color:black\}/);
 });
 
+Deno.test("vite extracts new ct() root assignments", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct from "css-ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.root = [{ "--background": "#111" }, { layer: "theme", vars: { "--accent": "deepskyblue" } }];\n` +
+    `styles.base = { card: { display: "grid" } };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-root.ts");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assertMatch(code, /"root":\[/);
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+});
+
 Deno.test("vite compiles quoted variant selectors into runtime-managed variantGlobal rules", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
 
-  const moduleCode =
-    `import ct from "css-ts";\n` +
+  const moduleCode = `import ct from "css-ts";\n` +
     `const styles = new ct();\n` +
     `styles.base = { app: { display: "block" } };\n` +
     `styles.variant = {\n` +
@@ -2796,8 +3295,13 @@ Deno.test("vite compiles quoted variant selectors into runtime-managed variantGl
     `  }\n` +
     `};\n` +
     `styles.defaults = { theme: "dark" };\n`;
-  const transformed = transform(moduleCode, "/app/src/lib/new-ct-variant-global.ts");
-  assert(transformed && typeof transformed === "object" && "code" in transformed);
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/new-ct-variant-global.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
 
   const code = transformed.code as string;
   assertMatch(code, /variantGlobal/);
