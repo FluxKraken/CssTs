@@ -1376,6 +1376,50 @@ Deno.test("resolution=static throws when ct() cannot be statically resolved", ()
   }
 });
 
+Deno.test("resolution=static extracts root vars from ct() config", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "static",\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  root: [{ "--blue": "#00aaff" }],\n` +
+      `  base: {\n` +
+      `    headerText: {\n` +
+      `      color: "var(--blue)",\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(code.includes('"global":true'));
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes(":root{--blue:#00aaff}"));
+    assertMatch(css, /\.ct_[a-z0-9]+\{color:var\(--blue\)\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("astro defaults to static resolution when resolution is not explicitly configured", () => {
   const root = Deno.makeTempDirSync();
 
@@ -1438,6 +1482,45 @@ Deno.test("astro defaults to static resolution for unresolved new ct() assignmen
       Error,
       'resolution="static" could not statically resolve config for styles',
     );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolution=static extracts root assignments from new ct()", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  resolution: "static",\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct from "css-ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.root = [{ "--blue": "#00aaff" }];\n` +
+      `styles.base = { headerText: { color: "var(--blue)" } };\n`;
+    const transformed = transform(moduleCode, `${root}/src/new-ct.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(code.includes('"global":true'));
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes(":root{--blue:#00aaff}"));
+    assertMatch(css, /\.ct_[a-z0-9]+\{color:var\(--blue\)\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

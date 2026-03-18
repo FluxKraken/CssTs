@@ -2,6 +2,8 @@ import {
   createClassName,
   CssSerializationOptions,
   isCssVarRef,
+  RootVarInput,
+  rootVarsToGlobalRules,
   StyleDeclaration,
   StyleSheet,
   StyleValue,
@@ -37,12 +39,6 @@ type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
   VariantSheet<any> ? { [G in keyof V]?: keyof V[G] }
   : Record<string, string>;
 
-type RootVarInput =
-  | Record<string, StyleValue>
-  | {
-    vars: Record<string, StyleValue>;
-    layer?: string;
-  };
 /** Configuration object accepted by `ct()`. */
 type CtConfig<
   T extends StyleSheetInput,
@@ -444,43 +440,6 @@ function normalizeStyleSheetInput(
   }
 
   return normalized;
-}
-
-function rootVarsToGlobalRules(
-  rootVars: readonly RootVarInput[] | undefined,
-): StyleSheet {
-  const globalRules: StyleSheet = {};
-  if (!rootVars) {
-    return globalRules;
-  }
-
-  for (const entry of rootVars) {
-    const vars = ("vars" in entry ? entry.vars : entry) as Record<
-      string,
-      StyleValue
-    >;
-    const layer = "layer" in entry && typeof entry.layer === "string" &&
-        entry.layer.trim().length > 0
-      ? entry.layer.trim()
-      : null;
-
-    if (layer) {
-      const layerKey = `@layer ${layer}`;
-      const layerRules =
-        (globalRules[layerKey] as StyleDeclaration | undefined) ?? {};
-      const rootDeclaration =
-        (layerRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
-      layerRules[":root"] = { ...rootDeclaration, ...vars };
-      globalRules[layerKey] = layerRules;
-      continue;
-    }
-
-    const rootDeclaration =
-      (globalRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
-    globalRules[":root"] = { ...rootDeclaration, ...vars };
-  }
-
-  return globalRules;
 }
 
 function isInlineStyleValue(value: unknown): value is StyleValue {

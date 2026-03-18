@@ -10,6 +10,7 @@ import {
 import {
   camelToKebab,
   createClassName,
+  rootVarsToGlobalRules,
   type StyleSheet,
   type StyleValue,
   toCssGlobalRules,
@@ -2836,9 +2837,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.imports = true;
         }
 
-        if (parsed.global) {
+        const extractedGlobalRules = {
+          ...rootVarsToGlobalRules(parsed.root ?? parsed.rootVars),
+          ...(parsed.global ?? {}),
+        };
+        if (Object.keys(extractedGlobalRules).length > 0) {
           for (
-            const rule of toCssGlobalRules(parsed.global, {
+            const rule of toCssGlobalRules(extractedGlobalRules, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
               defaultUnit: cssConfig.defaultUnit,
@@ -2847,7 +2852,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             rules.add(rule);
           }
           compiledConfig.global = true;
-          for (const selector of Object.keys(parsed.global)) {
+          for (const selector of Object.keys(extractedGlobalRules)) {
             logStatic(`global.${selector}`);
           }
         }
@@ -3192,9 +3197,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           compiledConfig.imports = true;
         }
 
-        if (parsed.global) {
+        const extractedGlobalRules = {
+          ...rootVarsToGlobalRules(parsed.root ?? parsed.rootVars),
+          ...(parsed.global ?? {}),
+        };
+        if (Object.keys(extractedGlobalRules).length > 0) {
           for (
-            const rule of toCssGlobalRules(parsed.global, {
+            const rule of toCssGlobalRules(extractedGlobalRules, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
               defaultUnit: cssConfig.defaultUnit,
@@ -3203,7 +3212,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             rules.add(rule);
           }
           compiledConfig.global = true;
-          for (const selector of Object.keys(parsed.global)) {
+          for (const selector of Object.keys(extractedGlobalRules)) {
             logStatic(`global.${selector}`);
           }
         }

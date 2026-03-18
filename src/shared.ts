@@ -15,6 +15,13 @@ export type StyleValue =
   | PrimitiveStyleValue
   | CssVarRef
   | readonly (PrimitiveStyleValue | CssVarRef)[];
+/** CSS custom properties emitted on `:root` (optionally within a layer). */
+export type RootVarInput =
+  | Record<string, StyleValue>
+  | {
+    vars: Record<string, StyleValue>;
+    layer?: string;
+  };
 /** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
@@ -497,6 +504,44 @@ export function toCssGlobalRules(
     collectGlobalCssRules(selectorOrAtRule, declaration, [], rules, options);
   }
   return rules;
+}
+
+/** Convert `root`/`rootVars` inputs into global `:root` rules. */
+export function rootVarsToGlobalRules(
+  rootVars: readonly RootVarInput[] | undefined,
+): StyleSheet {
+  const globalRules: StyleSheet = {};
+  if (!rootVars) {
+    return globalRules;
+  }
+
+  for (const entry of rootVars) {
+    const vars = ("vars" in entry ? entry.vars : entry) as Record<
+      string,
+      StyleValue
+    >;
+    const layer = "layer" in entry && typeof entry.layer === "string" &&
+        entry.layer.trim().length > 0
+      ? entry.layer.trim()
+      : null;
+
+    if (layer) {
+      const layerKey = `@layer ${layer}`;
+      const layerRules =
+        (globalRules[layerKey] as StyleDeclaration | undefined) ?? {};
+      const rootDeclaration =
+        (layerRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
+      layerRules[":root"] = { ...rootDeclaration, ...vars };
+      globalRules[layerKey] = layerRules;
+      continue;
+    }
+
+    const rootDeclaration =
+      (globalRules[":root"] as Record<string, StyleValue> | undefined) ?? {};
+    globalRules[":root"] = { ...rootDeclaration, ...vars };
+  }
+
+  return globalRules;
 }
 
 /**
