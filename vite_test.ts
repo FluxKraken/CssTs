@@ -3608,6 +3608,44 @@ Deno.test("vite extracts new ct() importThemes assignments defined with Theme in
   );
 });
 
+Deno.test("vite extracts tv references from new ct() builder assignments", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const id = `${Deno.cwd()}/src/theme-builder-tv.astro`;
+
+  const moduleCode = `---\n` +
+    `import ct, { Theme, tv } from "./index.ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.importThemes = {\n` +
+    `  default: new Theme({ headerBG: "black", headerFG: "white" }),\n` +
+    `  dark: new Theme({ headerBG: "white", headerFG: "black" }),\n` +
+    `};\n` +
+    `styles.base = {\n` +
+    `  header: {\n` +
+    `    backgroundColor: tv.headerBG,\n` +
+    `    color: tv.headerFG,\n` +
+    `  },\n` +
+    `};\n` +
+    `---\n` +
+    `<div class={styles().header()}>hi</div>`;
+  const transformed = transform(moduleCode, id);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct()"));
+
+  const css = load(VIRTUAL_ID) as string;
+  assert(css.includes(":root{--header-bg:black;--header-fg:white}"));
+  assert(css.includes("@scope (.dark){:scope{--header-bg:white;--header-fg:black}}"));
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\);color:var\(--header-fg\)\}/,
+  );
+});
+
 Deno.test("vite compiles quoted variant selectors into runtime-managed variantGlobal rules", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);

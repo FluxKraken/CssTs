@@ -1694,6 +1694,67 @@ function evaluateExpression(
   source: string,
   scope: Record<string, unknown>,
 ): unknown | null {
+  const IDENTIFIER_PROXY_PATH = Symbol("css-ts-identifier-proxy-path");
+  const createIdentifierProxy = (path: string[]): unknown =>
+    new Proxy({ [IDENTIFIER_PROXY_PATH]: path }, {
+      get(_target, key) {
+        if (key === IDENTIFIER_PROXY_PATH) {
+          return path;
+        }
+        if (key === Symbol.toPrimitive) {
+          return () => path[path.length - 1] ?? "";
+        }
+        if (key === "toString" || key === "valueOf") {
+          return () => path[path.length - 1] ?? "";
+        }
+        if (typeof key === "string") {
+          return createIdentifierProxy([...path, key]);
+        }
+        return undefined;
+      },
+    });
+  const materializeIdentifierProxies = (
+    value: unknown,
+    seen = new WeakMap<object, unknown>(),
+  ): unknown => {
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+
+    const proxyPath = (value as Record<PropertyKey, unknown>)[
+      IDENTIFIER_PROXY_PATH
+    ];
+    if (
+      Array.isArray(proxyPath) &&
+      proxyPath.every((segment) => typeof segment === "string")
+    ) {
+      return {
+        kind: "identifier-ref",
+        path: [...proxyPath],
+      };
+    }
+
+    if (seen.has(value)) {
+      return seen.get(value);
+    }
+
+    if (Array.isArray(value)) {
+      const resolved: unknown[] = [];
+      seen.set(value, resolved);
+      for (const entry of value) {
+        resolved.push(materializeIdentifierProxies(entry, seen));
+      }
+      return resolved;
+    }
+
+    const resolved: Record<string, unknown> = {};
+    seen.set(value, resolved);
+    for (const [key, entry] of Object.entries(value)) {
+      resolved[key] = materializeIdentifierProxies(entry, seen);
+    }
+    return resolved;
+  };
+
   const jsSource = transpileTsSnippet(`(${source})`);
   try {
     const proxyScope = new Proxy(scope, {
@@ -1710,7 +1771,10 @@ function evaluateExpression(
         if (typeof key === "string" && key in globalThis) {
           return globalThis[key as keyof typeof globalThis];
         }
-        return key;
+        if (typeof key === "string") {
+          return createIdentifierProxy([key]);
+        }
+        return undefined;
       },
     });
 
@@ -1718,7 +1782,7 @@ function evaluateExpression(
       "__scope",
       `with (__scope) { return ${jsSource}; }`,
     );
-    return fn(proxyScope);
+    return materializeIdentifierProxies(fn(proxyScope));
   } catch {
     return null;
   }
