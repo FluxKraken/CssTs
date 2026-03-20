@@ -5,13 +5,15 @@
 import runtimeCt from "./runtime.js";
 import type { CtBuilder } from "./runtime.js";
 import { cssTsPlugin } from "./vite.js";
-import { cv } from "./shared.js";
+import { cv, Theme, tv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
   new(): CtBuilder;
   vite: typeof cssTsPlugin;
   cv: typeof cv;
   var: typeof cv;
+  Theme: typeof Theme;
+  tv: typeof tv;
 };
 
 /**
@@ -23,6 +25,8 @@ const ct = Object.assign(runtimeCt, {
   vite: cssTsPlugin,
   cv,
   var: cv,
+  Theme,
+  tv,
 }) as Ct;
 
 /** Default export for the CSS-TS runtime API. */
@@ -31,6 +35,10 @@ export default ct;
 export { cssTsPlugin as vite };
 /** Named export for creating CSS variable references. */
 export { cv };
+/** Named export for defining theme token maps. */
+export { Theme };
+/** Named export for referencing theme-backed CSS variables. */
+export { tv };
 /** Re-exported Vite plugin options. */
 export type { CssTsPluginOptions } from "./vite.js";
 /** Re-exported builder type. */
@@ -43,3 +51,7 @@ export type { StyleSheet } from "./shared.js";
 export type { StyleValue } from "./shared.js";
 /** Valid input for importing external styles or global style objects. */
 export type { ImportInput } from "./shared.js";
+/** Theme token map accepted by `new Theme(...)`. */
+export type { ThemeTokenInput } from "./shared.js";
+/** Theme map accepted by `importThemes`. */
+export type { ImportedThemesInput } from "./shared.js";

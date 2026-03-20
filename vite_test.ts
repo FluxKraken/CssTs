@@ -9,9 +9,11 @@ import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
 import {
   cv,
+  Theme,
   toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
+  tv,
 } from "./src/shared.ts";
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
@@ -395,6 +397,22 @@ Deno.test("cv() formats css variable references", () => {
   assertEquals(
     toCssDeclaration("fontWeight", cv("--weight", 600)),
     "font-weight:var(--weight, 600)",
+  );
+});
+
+Deno.test("Theme and tv map friendly theme tokens to css custom properties", () => {
+  const theme = new Theme({
+    headerBG: "black",
+    "--header-fg": "white",
+  });
+
+  assertEquals(theme.vars, {
+    "--header-bg": "black",
+    "--header-fg": "white",
+  });
+  assertEquals(
+    toCssDeclaration("backgroundColor", tv.headerBG),
+    "background-color:var(--header-bg)",
   );
 });
 
@@ -859,6 +877,39 @@ Deno.test("parser keeps rootVars as a compatibility alias", () => {
   assertEquals(parsed.rootVars, parsed.root);
 });
 
+Deno.test("parser expands importThemes and resolves tv references", () => {
+  const parsed = parseCtCallArguments(`{
+    importThemes: {
+      default: {
+        headerBG: "black"
+      },
+      dark: {
+        headerBG: "white"
+      }
+    },
+    base: {
+      header: {
+        backgroundColor: tv.headerBG
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const darkScope = parsed.global?.["@scope (.dark)"] as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  assertEquals(parsed.root, [
+    {
+      "--header-bg": "black",
+    },
+  ]);
+  assertEquals(
+    darkScope?.[":scope"]?.["--header-bg"],
+    "white",
+  );
+  assertEquals(parsed.base.header.backgroundColor, cv("--header-bg"));
+});
+
 Deno.test("runtime injects root into :root and layered :root", () => {
   type FakeStyleTag = {
     id: string;
@@ -915,6 +966,70 @@ Deno.test("runtime injects root into :root and layered :root", () => {
     const text = styleTag?.textContent ?? "";
     assert(text.includes(":root{--background:#111}"));
     assert(text.includes("@layer theme{:root{--accent:deepskyblue}}"));
+  } finally {
+    globals.document = originalDocument;
+  }
+});
+
+Deno.test("runtime injects importThemes root vars and scoped theme rules", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = ct({
+      importThemes: {
+        default: new Theme({
+          headerBG: "black",
+        }),
+        dark: new Theme({
+          headerBG: "white",
+        }),
+      },
+      base: {
+        header: {
+          backgroundColor: tv.headerBG,
+        },
+      },
+    });
+
+    styles();
+    const styleTag = fakeDocument.getElementById("__css_ts_runtime_styles");
+    const text = styleTag?.textContent ?? "";
+    assert(text.includes(":root{--header-bg:black}"));
+    assert(text.includes("@scope (.dark){:scope{--header-bg:white}}"));
+    assertMatch(text, /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\)\}/);
   } finally {
     globals.document = originalDocument;
   }
@@ -1795,6 +1910,53 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
   }
 });
 
+Deno.test("loads css.config.ts importThemes into the shared stylesheet", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  importThemes: {\n` +
+        `    default: { headerBG: "black" },\n` +
+        `    dark: { headerBG: "white" },\n` +
+        `  },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct, { tv } from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    header: {\n` +
+      `      backgroundColor: tv.headerBG,\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/app.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes(":root{--header-bg:black}"));
+    assert(css.includes("@scope (.dark){:scope{--header-bg:white}}"));
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\)\}/,
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
   const root = Deno.makeTempDirSync();
 
@@ -2113,6 +2275,56 @@ Deno.test("resolves imported style objects and precompiles them", () => {
       /\.ct_[a-z0-9]+\{font-size:1\.25rem;font-weight:600;padding:1rem;background:black;color:white\}/,
     );
     assertMatch(css, /\.ct_[a-z0-9]+\{font-size:2rem\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("resolves imported theme objects for importThemes", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const libDir = `${root}/src/lib`;
+    Deno.mkdirSync(libDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${libDir}/theme.ts`,
+      `export default {\n` +
+        `  light: {\n` +
+        `    headerBG: "black",\n` +
+        `  },\n` +
+        `  dark: {\n` +
+        `    headerBG: "white",\n` +
+        `  },\n` +
+        `};\n`,
+    );
+
+    const moduleCode = `import ct, { tv } from "css-ts";\n` +
+      `import SiteTheme from "$lib/theme";\n` +
+      `export const styles = ct({\n` +
+      `  importThemes: {\n` +
+      `    default: SiteTheme.light,\n` +
+      `    dark: SiteTheme.dark,\n` +
+      `  },\n` +
+      `  base: {\n` +
+      `    header: { backgroundColor: tv.headerBG },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.includes(":root{--header-bg:black}"));
+    assert(css.includes("@scope (.dark){:scope{--header-bg:white}}"));
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\)\}/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -3361,6 +3573,39 @@ Deno.test("vite extracts new ct() root assignments", () => {
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+});
+
+Deno.test("vite extracts new ct() importThemes assignments defined with Theme instances", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const id = `${Deno.cwd()}/src/theme-imports.astro`;
+
+  const moduleCode = `---\n` +
+    `import ct, { Theme, cv } from "./index.ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.importThemes = {\n` +
+    `  default: new Theme({ headerBG: "black" }),\n` +
+    `  dark: new Theme({ headerBG: "white" }),\n` +
+    `};\n` +
+    `styles.base = { header: { backgroundColor: cv("--header-bg") } };\n` +
+    `---\n` +
+    `<div class={styles().header()}>hi</div>`;
+  const transformed = transform(moduleCode, id);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(!code.includes("styles.importThemes ="));
+
+  const css = load(VIRTUAL_ID) as string;
+  assert(css.includes(":root{--header-bg:black}"));
+  assert(css.includes("@scope (.dark){:scope{--header-bg:white}}"));
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\)\}/,
+  );
 });
 
 Deno.test("vite compiles quoted variant selectors into runtime-managed variantGlobal rules", () => {

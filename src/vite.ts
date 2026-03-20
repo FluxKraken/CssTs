@@ -110,6 +110,7 @@ type LoadedCssConfig = {
   defaultUnit?: string;
   include: string[];
   utilities: StyleSheet;
+  configCss: string;
   utilityCss: string;
   runtimeOptions: {
     breakpoints?: Record<string, string>;
@@ -1279,6 +1280,7 @@ function loadCssConfig(
       defaultUnit: undefined,
       include: [],
       utilities: {},
+      configCss: "",
       utilityCss: "",
       runtimeOptions: {},
     };
@@ -1562,6 +1564,12 @@ function loadCssConfig(
   const containers = normalizeContainers(configObject.containers);
   const defaultUnit = normalizeDefaultUnit(configObject.defaultUnit);
 
+  const parsedThemes = Object.prototype.hasOwnProperty.call(
+      configObject,
+      "importThemes",
+    )
+    ? parseCtConfig({ importThemes: configObject.importThemes }, { containers })
+    : null;
   const parsedUtilities = isRecord(configObject.utilities)
     ? parseCtConfig({ base: configObject.utilities }, { containers })
     : null;
@@ -1582,6 +1590,20 @@ function loadCssConfig(
   const allImports = Array.from(new Set(resolvedImports));
 
   const include = normalizeIncludePaths(configObject.include, projectRoot);
+  const themeRules = parsedThemes
+    ? toCssGlobalRules(
+      {
+        ...rootVarsToGlobalRules(parsedThemes.root ?? parsedThemes.rootVars),
+        ...(parsedThemes.global ?? {}),
+      },
+      {
+        breakpoints,
+        containers,
+        defaultUnit,
+      },
+    )
+    : [];
+  const configCss = themeRules.join("\n");
   const utilitiesParsed = parsedUtilities?.base ?? {};
 
   const utilityRules = Object.entries(utilitiesParsed)
@@ -1620,6 +1642,7 @@ function loadCssConfig(
     defaultUnit,
     include,
     utilities: utilitiesParsed,
+    configCss,
     utilityCss,
     runtimeOptions,
   };
@@ -2328,6 +2351,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     defaultUnit: undefined,
     include: [],
     utilities: {},
+    configCss: "",
     utilityCss: "",
     runtimeOptions: {},
   };
@@ -2361,6 +2385,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     }
     for (const cssImport of dedupedModuleImports) {
       parts.push(`@import ${cssImport};`);
+    }
+    if (cssConfig.configCss) {
+      parts.push(cssConfig.configCss);
     }
     if (cssConfig.utilityCss) {
       parts.push(cssConfig.utilityCss);
@@ -3036,6 +3063,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             if (
               assignment.property === "base" ||
               assignment.property === "global" ||
+              assignment.property === "importThemes" ||
               assignment.property === "root" ||
               assignment.property === "rootVars" ||
               assignment.property === "variant" ||
@@ -3059,16 +3087,39 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               );
 
               if (partialParsed) {
+                const parsedRoot = partialParsed.root ?? partialParsed.rootVars;
                 if (assignment.property === "base") {
                   configParts.base = partialParsed.base;
                 } else if (assignment.property === "global") {
                   configParts.global = partialParsed.global ?? {};
                 } else if (
+                  assignment.property === "importThemes" &&
+                  Object.keys(partialParsed.global ?? {}).length > 0
+                ) {
+                  configParts.global = {
+                    ...(configParts.global as Record<string, unknown> ?? {}),
+                    ...(partialParsed.global as Record<string, unknown>),
+                  };
+                  if (parsedRoot) {
+                    configParts.root = [
+                      ...((configParts.root as unknown[]) ?? []),
+                      ...parsedRoot,
+                    ];
+                  }
+                } else if (
                   (assignment.property === "root" ||
                     assignment.property === "rootVars") &&
-                  (partialParsed.root ?? partialParsed.rootVars)
+                  parsedRoot
                 ) {
-                  configParts.root = partialParsed.root ?? partialParsed.rootVars;
+                  configParts.root = parsedRoot;
+                } else if (
+                  assignment.property === "importThemes" &&
+                  parsedRoot
+                ) {
+                  configParts.root = [
+                    ...((configParts.root as unknown[]) ?? []),
+                    ...parsedRoot,
+                  ];
                 } else if (
                   assignment.property === "variant" && partialParsed.variant
                 ) {

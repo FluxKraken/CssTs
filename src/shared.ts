@@ -22,6 +22,12 @@ export type RootVarInput =
     vars: Record<string, StyleValue>;
     layer?: string;
   };
+/** Friendly token map accepted by {@link Theme}. */
+export type ThemeTokenInput = Record<string, StyleValue>;
+/** Theme-like value accepted by `importThemes`. */
+export type ThemeInput = Theme | ThemeTokenInput;
+/** Map of imported theme names/selectors to theme definitions. */
+export type ImportedThemesInput = Record<string, ThemeInput>;
 /** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
@@ -67,6 +73,148 @@ export interface CssSerializationOptions {
   containers?: Record<string, { type?: string; rule: string }>;
   /** Default unit for numeric style values (for example `"px"` or `"rem"`). */
   defaultUnit?: string;
+}
+
+function isPrimitiveThemeValue(
+  value: unknown,
+): value is PrimitiveStyleValue | CssVarRef {
+  return typeof value === "string" || typeof value === "number" ||
+    isCssVarRef(value);
+}
+
+function isThemeStyleValue(value: unknown): value is StyleValue {
+  return isPrimitiveThemeValue(value) ||
+    (Array.isArray(value) && value.every((entry) => isPrimitiveThemeValue(entry)));
+}
+
+/** Convert a theme token name like `headerBG` to a CSS custom property name. */
+export function toThemeVarName(token: string): string {
+  const trimmed = token.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Theme token names must not be empty.");
+  }
+
+  return trimmed.startsWith("--") ? trimmed : `--${camelToKebab(trimmed)}`;
+}
+
+function normalizeThemeTokens(
+  tokens: Record<string, unknown>,
+): Record<string, StyleValue> {
+  const vars: Record<string, StyleValue> = {};
+
+  for (const [token, value] of Object.entries(tokens)) {
+    if (!isThemeStyleValue(value)) {
+      throw new Error(
+        `Theme token "${token}" must be a string, number, css-ts variable reference, or array of those values.`,
+      );
+    }
+    vars[toThemeVarName(token)] = value;
+  }
+
+  return vars;
+}
+
+/** First-class theme definition used by `importThemes`. */
+export class Theme {
+  /** Discriminator used for theme detection across parsing/runtime paths. */
+  readonly kind = "css-ts-theme" as const;
+  /** Normalized CSS custom properties emitted for this theme. */
+  readonly vars: Record<string, StyleValue>;
+
+  constructor(tokens: ThemeTokenInput) {
+    this.vars = normalizeThemeTokens(tokens);
+  }
+}
+
+/** Type guard for {@link Theme} values. */
+export function isTheme(value: unknown): value is Theme {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    (value as { kind?: unknown }).kind === "css-ts-theme" &&
+    "vars" in value &&
+    typeof (value as { vars?: unknown }).vars === "object" &&
+    (value as { vars?: unknown }).vars !== null &&
+    !Array.isArray((value as { vars?: unknown }).vars)
+  );
+}
+
+/** Create a theme-backed CSS variable reference from a friendly token name. */
+export function themeVar(
+  token: string,
+  fallback?: PrimitiveStyleValue,
+): CssVarRef {
+  return cv(toThemeVarName(token), fallback);
+}
+
+/** Proxy that maps `tv.headerBG` to `var(--header-bg)`. */
+export const tv = new Proxy({} as Record<string, CssVarRef>, {
+  get(_target, prop) {
+    if (typeof prop !== "string") {
+      return undefined;
+    }
+    return themeVar(prop);
+  },
+}) as Record<string, CssVarRef>;
+
+function resolveImportedThemeVars(theme: ThemeInput): Record<string, StyleValue> {
+  return isTheme(theme) ? theme.vars : normalizeThemeTokens(theme);
+}
+
+function toThemeScopeSelector(scope: string): string | null {
+  const trimmed = scope.trim();
+  if (
+    trimmed.length === 0 || trimmed === "default" || trimmed === "root" ||
+    trimmed === ":root"
+  ) {
+    return null;
+  }
+
+  if (
+    /^[.#:[*]/.test(trimmed) ||
+    /[.#:[\]\s>+~]/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+
+  return `.${trimmed}`;
+}
+
+/** Expand `importThemes` into `root` vars and scoped global rules. */
+export function importedThemesToConfig(
+  importedThemes: ImportedThemesInput | undefined,
+): {
+  root: RootVarInput[];
+  global: StyleSheet;
+} {
+  const root: RootVarInput[] = [];
+  const global: StyleSheet = {};
+
+  if (!importedThemes) {
+    return { root, global };
+  }
+
+  for (const [scope, theme] of Object.entries(importedThemes)) {
+    const vars = resolveImportedThemeVars(theme);
+    const selector = toThemeScopeSelector(scope);
+
+    if (selector === null) {
+      root.push(vars);
+      continue;
+    }
+
+    const scopeKey = `@scope (${selector})`;
+    const currentRule =
+      (global[scopeKey] as Record<string, StyleValue | StyleDeclaration> | undefined) ??
+        {};
+    const currentScope =
+      (currentRule[":scope"] as Record<string, StyleValue> | undefined) ?? {};
+    currentRule[":scope"] = { ...currentScope, ...vars };
+    global[scopeKey] = currentRule as StyleDeclaration;
+  }
+
+  return { root, global };
 }
 
 const UNITLESS_PROPERTIES = new Set([
@@ -260,6 +408,25 @@ function unwrapGlobalSelector(value: string): string {
   return value.replace(/:global\(([^()]+)\)/g, "$1");
 }
 
+function extractScopeSelector(
+  key: string,
+  declaration: StyleDeclaration,
+): string | null {
+  if (key === "@scope") {
+    const selector = declaration.selector;
+    return typeof selector === "string" && selector.trim().length > 0
+      ? unwrapGlobalSelector(selector.trim())
+      : null;
+  }
+
+  const embeddedMatch = key.match(/^@scope\s*\((.+)\)$/);
+  if (!embeddedMatch || embeddedMatch[1].trim().length === 0) {
+    return null;
+  }
+
+  return unwrapGlobalSelector(embeddedMatch[1].trim());
+}
+
 function isScopeDirectiveDeclaration(
   value: unknown,
 ): value is StyleDeclaration {
@@ -427,17 +594,14 @@ function collectGlobalCssRules(
   rules: string[],
   options?: CssSerializationOptions,
 ): void {
-  if (selectorOrAtRule === "@scope") {
-    const scopeSelector = declaration.selector;
-    if (
-      typeof scopeSelector !== "string" || scopeSelector.trim().length === 0
-    ) {
-      return;
-    }
-
+  const scopeSelector = extractScopeSelector(selectorOrAtRule, declaration);
+  if (scopeSelector !== null) {
     const scopedRules: string[] = [];
     for (const [name, value] of Object.entries(declaration)) {
-      if (name === "selector" || !isScopeDirectiveDeclaration(value)) {
+      if (
+        (selectorOrAtRule === "@scope" && name === "selector") ||
+        !isScopeDirectiveDeclaration(value)
+      ) {
         continue;
       }
       collectGlobalCssRules(name, value, [], scopedRules, options);
@@ -445,9 +609,7 @@ function collectGlobalCssRules(
 
     rules.push(
       wrapInAtRules(
-        `@scope (${unwrapGlobalSelector(scopeSelector.trim())}){${
-          scopedRules.join("")
-        }}`,
+        `@scope (${scopeSelector}){${scopedRules.join("")}}`,
         atRules,
       ),
     );

@@ -1,9 +1,12 @@
-import type {
+import {
   CssVarRef,
+  ImportedThemesInput,
   PrimitiveStyleValue,
   StyleDeclaration,
   StyleSheet,
   StyleValue,
+  Theme,
+  ThemeTokenInput,
 } from "./dist/shared.d.ts";
 import type { CssTsPluginOptions } from "./dist/vite.d.ts";
 
@@ -31,6 +34,7 @@ type CtConfig<
   V extends VariantSheet<T> | undefined,
 > = {
   global?: StyleSheetInput;
+  importThemes?: ImportedThemesInput;
   root?: readonly RootVarInput[];
   /** @deprecated Use `root` instead. */
   rootVars?: readonly RootVarInput[];
@@ -80,6 +84,7 @@ type CtBuilder<
   & {
     base: T | undefined;
     global: StyleSheetInput | undefined;
+    importThemes: ImportedThemesInput | undefined;
     root: readonly RootVarInput[] | undefined;
     /** @deprecated Use `root` instead. */
     rootVars: readonly RootVarInput[] | undefined;
@@ -92,6 +97,9 @@ type CtBuilder<
         rule: string;
       },
     ) => CtBuilder<T, V>;
+    import: (
+      inputs: import("./dist/shared.d.ts").ImportInput,
+    ) => CtBuilder<T, V>;
   };
 
 /** Re-exported Vite plugin options. */
@@ -102,6 +110,12 @@ export type { StyleDeclaration };
 export type { StyleSheet };
 /** Re-exported style value type. */
 export type { StyleValue };
+/** Re-exported theme token input type. */
+export type { ThemeTokenInput };
+/** Re-exported imported theme map type. */
+export type { ImportedThemesInput };
+/** Re-exported Theme constructor. */
+export { Theme };
 
 /** Combined CSS-TS runtime API. */
 export interface Ct {
@@ -123,6 +137,10 @@ export interface Ct {
   cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
   /** Alias for {@link Ct.cv}. */
   var: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
+  /** Theme constructor. */
+  Theme: typeof Theme;
+  /** Theme variable proxy. */
+  tv: Record<string, CssVarRef>;
 }
 
 /** Default export for the CSS-TS runtime API. */
@@ -132,3 +150,7 @@ export default ct;
 export const vite: (options?: CssTsPluginOptions) => any;
 /** Named export for creating CSS variable references. */
 export const cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
+/** Named export for defining theme token maps. */
+export { Theme };
+/** Named export for referencing theme-backed CSS variables. */
+export const tv: Record<string, CssVarRef>;

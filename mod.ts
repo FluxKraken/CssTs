@@ -8,6 +8,10 @@ export { default } from "./src/index.ts";
 export { vite } from "./src/index.ts";
 /** Named export for creating CSS variable references. */
 export { cv } from "./src/index.ts";
+/** Named export for defining theme token maps. */
+export { Theme } from "./src/index.ts";
+/** Named export for referencing theme-backed CSS variables. */
+export { tv } from "./src/index.ts";
 /** Re-exported Vite plugin options type. */
 export type { CssTsPluginOptions } from "./src/index.ts";
 /** Style object for a single class name. */
@@ -16,3 +20,7 @@ export type { StyleDeclaration } from "./src/index.ts";
 export type { StyleSheet } from "./src/index.ts";
 /** CSS value accepted by style declarations. */
 export type { StyleValue } from "./src/index.ts";
+/** Theme token map accepted by `new Theme(...)`. */
+export type { ThemeTokenInput } from "./src/index.ts";
+/** Theme map accepted by `importThemes`. */
+export type { ImportedThemesInput } from "./src/index.ts";

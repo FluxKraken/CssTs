@@ -198,6 +198,44 @@ export default config;
 </header>
 ```
 
+### Theming
+
+`Theme` turns friendly token names into CSS custom properties, `tv` references
+those variables inside style objects, and `importThemes` expands themes into
+`:root` plus scoped `@scope` rules.
+
+```ts
+import ct, { Theme, tv } from "@kt-tools/css-ts";
+
+const light = new Theme({
+  headerBG: "black",
+  headerFG: "white",
+});
+
+const dark = new Theme({
+  headerBG: "white",
+  headerFG: "black",
+});
+
+const styles = ct({
+  importThemes: {
+    default: light,
+    dark,
+  },
+  base: {
+    header: {
+      backgroundColor: tv.headerBG,
+      color: tv.headerFG,
+    },
+  },
+});
+```
+
+Non-`default` keys in `importThemes` are treated as scoped selectors. A key like
+`dark` becomes `@scope (.dark) { ... }`, while quoted selectors like
+`".contrast"` are used as-is. You can also place the same `importThemes` object
+in `css.config.ts` to make themes available project-wide.
+
 ### Inline style output (`style={...}`)
 
 Each accessor now includes:

@@ -1,6 +1,9 @@
 import {
   cv,
+  Theme,
+  isTheme,
   isCssVarRef,
+  toThemeVarName,
   type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
@@ -34,6 +37,13 @@ type CtConfig = {
   variantGlobal?: VariantGlobalSheet;
   defaults?: VariantSelection;
 };
+
+type RootVarEntry =
+  | Record<string, StyleValue>
+  | {
+    vars: Record<string, StyleValue>;
+    layer?: string;
+  };
 type ParseCtOptions = {
   imports?: Set<string>;
   utilities?: StyleSheet;
@@ -50,6 +60,11 @@ type TemplateLiteralReference = {
   parts: ParsedValue[];
 };
 
+type ThemeConstructorReference = {
+  kind: "theme-constructor";
+  tokens: ParsedObject;
+};
+
 interface ParsedObject {
   [key: string]: ParsedValue;
 }
@@ -64,6 +79,7 @@ type ParsedValue =
   | ReturnType<typeof cv>
   | IdentifierReference
   | TemplateLiteralReference
+  | ThemeConstructorReference
   | ParsedObject
   | ParsedArray;
 
@@ -244,6 +260,43 @@ function parseIdentifierReference(
   return [{ kind: "identifier-ref", path }, cursor];
 }
 
+function parseThemeConstructor(
+  input: string,
+  index: number,
+): [ThemeConstructorReference, number] {
+  const [constructorName, constructorEnd] = parseIdentifier(input, index);
+  if (constructorName !== "Theme") {
+    throw new Error(`Unsupported constructor "${constructorName}"`);
+  }
+
+  let cursor = skipWhitespace(input, constructorEnd);
+  if (input[cursor] !== "(") {
+    throw new Error("Expected '(' after Theme");
+  }
+
+  cursor = skipWhitespace(input, cursor + 1);
+  const [argumentValue, argumentEnd] = parseValue(input, cursor);
+  if (
+    typeof argumentValue !== "object" || argumentValue === null ||
+    Array.isArray(argumentValue) || isCssVarRef(argumentValue)
+  ) {
+    throw new Error("Theme() expects an object literal");
+  }
+
+  cursor = skipWhitespace(input, argumentEnd);
+  if (input[cursor] === ",") {
+    throw new Error("Theme() accepts a single object argument");
+  }
+  if (input[cursor] !== ")") {
+    throw new Error("Expected ')' after Theme() call");
+  }
+
+  return [{
+    kind: "theme-constructor",
+    tokens: argumentValue,
+  }, cursor + 1];
+}
+
 function parseDashedIdentifierLiteral(
   input: string,
   identifier: string,
@@ -329,6 +382,10 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
+    if (identifier === "new") {
+      const constructorIndex = skipWhitespace(input, identifierEnd);
+      return parseThemeConstructor(input, constructorIndex);
+    }
     const dashedLiteral = parseDashedIdentifierLiteral(
       input,
       identifier,
@@ -463,6 +520,16 @@ function isTemplateLiteralReference(
   );
 }
 
+function isThemeConstructorReference(
+  value: unknown,
+): value is ThemeConstructorReference {
+  return (
+    isPlainObject(value) &&
+    value.kind === "theme-constructor" &&
+    isPlainObject(value.tokens)
+  );
+}
+
 function identifierReferenceToCssLiteral(value: unknown): string | null {
   if (!isIdentifierReference(value) || value.path.length !== 1) {
     return null;
@@ -483,12 +550,61 @@ function identifierReferenceToCssLiteral(value: unknown): string | null {
   return identifier;
 }
 
+function identifierReferenceToThemeVar(value: unknown): ReturnType<typeof cv> | null {
+  if (!isIdentifierReference(value) || value.path.length !== 2) {
+    return null;
+  }
+
+  const [head, token] = value.path;
+  if (head !== "tv" || token.length === 0) {
+    return null;
+  }
+
+  return cv(toThemeVarName(token));
+}
+
+function normalizeStyleLeafValue(value: unknown): StyleValue | null {
+  const themeVar = identifierReferenceToThemeVar(value);
+  if (themeVar) {
+    return themeVar;
+  }
+
+  const cssIdentifierLiteral = identifierReferenceToCssLiteral(value);
+  if (cssIdentifierLiteral !== null) {
+    return cssIdentifierLiteral;
+  }
+
+  if (
+    typeof value === "string" || typeof value === "number" || isCssVarRef(value)
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const normalizedArray: Array<string | number | ReturnType<typeof cv>> = [];
+    for (const entry of value) {
+      const normalizedEntry = normalizeStyleLeafValue(entry);
+      if (
+        normalizedEntry === null || Array.isArray(normalizedEntry) ||
+        typeof normalizedEntry === "object" && !isCssVarRef(normalizedEntry)
+      ) {
+        return null;
+      }
+      normalizedArray.push(normalizedEntry);
+    }
+    return normalizedArray;
+  }
+
+  return null;
+}
+
 function isPrimitiveStyleLeaf(value: unknown): boolean {
   return (
     typeof value === "string" ||
     typeof value === "number" ||
     isCssVarRef(value) ||
-    identifierReferenceToCssLiteral(value) !== null
+    identifierReferenceToCssLiteral(value) !== null ||
+    identifierReferenceToThemeVar(value) !== null
   );
 }
 
@@ -658,20 +774,11 @@ function normalizeStyleDeclaration(
     }
 
     if (isStyleLeaf(declarationValue)) {
-      const cssIdentifierLiteral = identifierReferenceToCssLiteral(
-        declarationValue,
-      );
-      if (cssIdentifierLiteral !== null) {
-        (merged as Record<string, StyleValue>)[key] = cssIdentifierLiteral;
-      } else if (Array.isArray(declarationValue)) {
-        const normalizedArray = declarationValue.map((entry) =>
-          identifierReferenceToCssLiteral(entry) ?? entry
-        ) as StyleValue;
-        (merged as Record<string, StyleValue>)[key] = normalizedArray;
-      } else {
-        (merged as Record<string, StyleValue>)[key] =
-          declarationValue as StyleValue;
+      const normalizedLeaf = normalizeStyleLeafValue(declarationValue);
+      if (normalizedLeaf === null) {
+        return null;
       }
+      (merged as Record<string, StyleValue>)[key] = normalizedLeaf;
       continue;
     }
 
@@ -769,23 +876,13 @@ function normalizeRootVars(
   value: unknown,
   options: ParseCtOptions,
 ):
-  | Array<
-    Record<string, StyleValue> | {
-      vars: Record<string, StyleValue>;
-      layer?: string;
-    }
-  >
+  | RootVarEntry[]
   | null {
   if (!Array.isArray(value)) {
     return null;
   }
 
-  const normalized: Array<
-    Record<string, StyleValue> | {
-      vars: Record<string, StyleValue>;
-      layer?: string;
-    }
-  > = [];
+  const normalized: RootVarEntry[] = [];
   for (const entry of value) {
     if (isIdentifierReference(entry)) {
       return null;
@@ -827,6 +924,93 @@ function normalizeRootVars(
   }
 
   return normalized;
+}
+
+function toThemeScopeSelector(scope: string): string | null {
+  const trimmed = scope.trim();
+  if (
+    trimmed.length === 0 || trimmed === "default" || trimmed === "root" ||
+    trimmed === ":root"
+  ) {
+    return null;
+  }
+
+  if (
+    /^[.#:[*]/.test(trimmed) ||
+    /[.#:[\]\s>+~]/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+
+  return `.${trimmed}`;
+}
+
+function normalizeThemeVarsRecord(
+  value: unknown,
+  options: ParseCtOptions,
+): Record<string, StyleValue> | null {
+  if (!isPlainObject(value) || isCssVarRef(value)) {
+    return null;
+  }
+
+  const normalizedVars: Record<string, StyleValue> = {};
+  for (const [token, tokenValue] of Object.entries(value)) {
+    const normalizedValue = normalizeStyleLeafValue(tokenValue);
+    if (normalizedValue === null) {
+      return null;
+    }
+    normalizedVars[token.startsWith("--") ? token : toThemeVarName(token)] =
+      normalizedValue;
+  }
+
+  return normalizedVars;
+}
+
+function normalizeImportedThemes(
+  value: unknown,
+  options: ParseCtOptions,
+): { root: RootVarEntry[]; global: StyleSheet } | null {
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const root: RootVarEntry[] = [];
+  const global: StyleSheet = {};
+
+  for (const [scope, themeValue] of Object.entries(value)) {
+    let vars: Record<string, StyleValue> | null = null;
+
+    if (isTheme(themeValue)) {
+      vars = normalizeThemeVarsRecord(themeValue.vars, options);
+    } else {
+      vars = normalizeThemeVarsRecord(themeValue, options);
+    }
+
+    if (!vars) {
+      return null;
+    }
+
+    const selector = toThemeScopeSelector(scope);
+    if (selector === null) {
+      root.push(vars);
+      continue;
+    }
+
+    const scopeKey = `@scope (${selector})`;
+    const scopeRule =
+      (global[scopeKey] as Record<string, StyleDeclaration | StyleValue> | undefined) ??
+        {};
+    const currentScope =
+      (scopeRule[":scope"] as Record<string, StyleValue> | undefined) ?? {};
+    scopeRule[":scope"] = { ...currentScope, ...vars };
+    global[scopeKey] = scopeRule as StyleDeclaration;
+  }
+
+  return { root, global };
 }
 
 function normalizeVariantSheet(
@@ -938,7 +1122,7 @@ function normalizeVariantSelection(
 
 /**
  * Validate and normalize a parsed config object into a {@link CtConfig}.
- * Allowed top-level keys: `global`, `root`, `rootVars`, `base`, `variant`, `defaults`.
+ * Allowed top-level keys: `global`, `importThemes`, `root`, `rootVars`, `base`, `variant`, `defaults`.
  * Returns `null` when the input cannot be validated.
  */
 export function parseCtConfig(
@@ -947,6 +1131,7 @@ export function parseCtConfig(
 ): CtConfig | null {
   const allowed = new Set([
     "global",
+    "importThemes",
     "root",
     "rootVars",
     "base",
@@ -966,33 +1151,34 @@ export function parseCtConfig(
   };
 
   let global: StyleSheet | undefined;
-  let root:
-    | Array<
-      Record<string, StyleValue> | {
-        vars: Record<string, StyleValue>;
-        layer?: string;
-      }
-    >
-    | undefined;
+  let root: RootVarEntry[] | undefined;
   let base: StyleSheet = {};
   let variant: VariantSheet | undefined;
   let variantGlobal: VariantGlobalSheet | undefined;
   let defaults: VariantSelection | undefined;
+  const rootEntries: RootVarEntry[] = [];
+
+  if ("importThemes" in value) {
+    const normalizedThemes = normalizeImportedThemes(
+      value.importThemes,
+      parseOptions,
+    );
+    if (!normalizedThemes) {
+      return null;
+    }
+    rootEntries.push(...normalizedThemes.root);
+    if (Object.keys(normalizedThemes.global).length > 0) {
+      global = normalizedThemes.global;
+    }
+  }
 
   if ("global" in value) {
     const normalized = normalizeStyleSheet(value.global, parseOptions);
     if (!normalized) {
       return null;
     }
-    global = normalized;
+    global = { ...(global ?? {}), ...normalized };
   }
-
-  const rootEntries: Array<
-    Record<string, StyleValue> | {
-      vars: Record<string, StyleValue>;
-      layer?: string;
-    }
-  > = [];
 
   if ("root" in value) {
     const normalizedRoot = normalizeRootVars(value.root, parseOptions);
@@ -1084,6 +1270,25 @@ function resolveParsedValue(
       resolvedString += String(resolvedPart);
     }
     return resolvedString;
+  }
+
+  if (isThemeConstructorReference(value)) {
+    const resolvedTokens = resolveParsedValue(
+      value.tokens,
+      resolveIdentifier,
+      keepUnresolvedIdentifiers,
+    );
+    if (resolvedTokens === UNRESOLVED) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    if (!isPlainObject(resolvedTokens)) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    try {
+      return new Theme(resolvedTokens as Record<string, StyleValue>);
+    } catch {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
   }
 
   if (Array.isArray(value)) {
@@ -1435,7 +1640,7 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
 
     const assignments: NewCtAssignment[] = [];
     const assignmentMatcher = new RegExp(
-      `\\b${varName}\\.(base|global|root|rootVars|variant|defaults)\\s*=\\s*`,
+      `\\b${varName}\\.(base|global|importThemes|root|rootVars|variant|defaults)\\s*=\\s*`,
       "g",
     );
     assignmentMatcher.lastIndex = declEnd;
