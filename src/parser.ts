@@ -1,5 +1,6 @@
 import {
   cv,
+  evalThemeTemplate,
   Theme,
   isTheme,
   isCssVarRef,
@@ -260,6 +261,32 @@ function parseIdentifierReference(
   return [{ kind: "identifier-ref", path }, cursor];
 }
 
+function parseThemeEval(
+  input: string,
+  index: number,
+): [string, number] {
+  let cursor = skipWhitespace(input, index);
+  if (input[cursor] !== "(") {
+    throw new Error("Expected '(' after tv.eval");
+  }
+
+  cursor = skipWhitespace(input, cursor + 1);
+  const [templateValue, templateEnd] = parseValue(input, cursor);
+  if (typeof templateValue !== "string") {
+    throw new Error('tv.eval() expects a single string argument');
+  }
+
+  cursor = skipWhitespace(input, templateEnd);
+  if (input[cursor] === ",") {
+    throw new Error("tv.eval() accepts a single string argument");
+  }
+  if (input[cursor] !== ")") {
+    throw new Error("Expected ')' after tv.eval() call");
+  }
+
+  return [evalThemeTemplate(templateValue), cursor + 1];
+}
+
 function parseThemeConstructor(
   input: string,
   index: number,
@@ -395,6 +422,25 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
       return dashedLiteral;
     }
     let cursor = skipWhitespace(input, identifierEnd);
+    if (cursor < input.length && input[cursor] === ".") {
+      const [reference, referenceEnd] = parseIdentifierReference(
+        input,
+        identifier,
+        identifierEnd,
+      );
+      cursor = skipWhitespace(input, referenceEnd);
+      if (
+        reference.path.length === 2 &&
+        reference.path[0] === "tv" &&
+        reference.path[1] === "eval" &&
+        input[cursor] === "("
+      ) {
+        return parseThemeEval(input, cursor);
+      }
+      if (input[cursor] !== "(") {
+        return [reference, referenceEnd];
+      }
+    }
     if (input[cursor] !== "(") {
       return parseIdentifierReference(input, identifier, identifierEnd);
     }

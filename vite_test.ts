@@ -414,6 +414,10 @@ Deno.test("Theme and tv map friendly theme tokens to css custom properties", () 
     toCssDeclaration("backgroundColor", tv.headerBG),
     "background-color:var(--header-bg)",
   );
+  assertEquals(
+    tv.eval("linear-gradient(147deg, {headerBG}, {headerFG})"),
+    "linear-gradient(147deg, var(--header-bg), var(--header-fg))",
+  );
 });
 
 Deno.test("toCssDeclaration and toCssRules support configurable defaultUnit", () => {
@@ -908,6 +912,22 @@ Deno.test("parser expands importThemes and resolves tv references", () => {
     "white",
   );
   assertEquals(parsed.base.header.backgroundColor, cv("--header-bg"));
+});
+
+Deno.test("parser resolves tv.eval() theme templates", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      hero: {
+        backgroundImage: tv.eval("linear-gradient(147deg, {bgGradient1}, {bgGradient2})")
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(
+    parsed.base.hero.backgroundImage,
+    "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
+  );
 });
 
 Deno.test("runtime injects root into :root and layered :root", () => {
@@ -3643,6 +3663,40 @@ Deno.test("vite extracts tv references from new ct() builder assignments", () =>
   assertMatch(
     css,
     /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\);color:var\(--header-fg\)\}/,
+  );
+});
+
+Deno.test("vite extracts tv.eval() theme templates from new ct() builder assignments", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const id = `${Deno.cwd()}/src/theme-builder-tv-eval.astro`;
+
+  const moduleCode = `---\n` +
+    `import ct, { Theme, tv } from "./index.ts";\n` +
+    `const styles = new ct();\n` +
+    `styles.importThemes = {\n` +
+    `  default: new Theme({ bgGradient1: "#00aaff", bgGradient2: "#fff6a3" }),\n` +
+    `  dark: new Theme({ bgGradient1: "#001018", bgGradient2: "#00334d" }),\n` +
+    `};\n` +
+    `styles.base = {\n` +
+    `  hero: {\n` +
+    `    backgroundImage: tv.eval("linear-gradient(147deg, {bgGradient1}, {bgGradient2})"),\n` +
+    `  },\n` +
+    `};\n` +
+    `---\n` +
+    `<div class={styles().hero()}>hi</div>`;
+  const transformed = transform(moduleCode, id);
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const css = load(VIRTUAL_ID) as string;
+  assert(css.includes(":root{--bg-gradient1:#00aaff;--bg-gradient2:#fff6a3}"));
+  assert(css.includes("@scope (.dark){:scope{--bg-gradient1:#001018;--bg-gradient2:#00334d}}"));
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{background-image:linear-gradient\(147deg, var\(--bg-gradient1\), var\(--bg-gradient2\)\)\}/,
   );
 });
 

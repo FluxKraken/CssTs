@@ -148,15 +148,31 @@ export function themeVar(
   return cv(toThemeVarName(token), fallback);
 }
 
+/** Expand `{token}` placeholders into `var(--token)` references. */
+export function evalThemeTemplate(template: string): string {
+  return template.replace(/\{([^{}]+)\}/g, (_match, token: string) => {
+    const varName = toThemeVarName(token.trim());
+    return `var(${varName})`;
+  });
+}
+
+export type ThemeVarAccessor = Record<string, CssVarRef> & {
+  /** Expand a CSS string template containing `{token}` placeholders. */
+  eval(template: string): string;
+};
+
 /** Proxy that maps `tv.headerBG` to `var(--header-bg)`. */
-export const tv = new Proxy({} as Record<string, CssVarRef>, {
+export const tv = new Proxy({} as ThemeVarAccessor, {
   get(_target, prop) {
     if (typeof prop !== "string") {
       return undefined;
     }
+    if (prop === "eval") {
+      return evalThemeTemplate;
+    }
     return themeVar(prop);
   },
-}) as Record<string, CssVarRef>;
+}) as ThemeVarAccessor;
 
 function resolveImportedThemeVars(theme: ThemeInput): Record<string, StyleValue> {
   return isTheme(theme) ? theme.vars : normalizeThemeTokens(theme);
