@@ -3733,3 +3733,43 @@ Deno.test("vite compiles quoted variant selectors into runtime-managed variantGl
   assert(!css.includes("color-scheme:dark"));
   assert(!css.includes("color-scheme:light"));
 });
+
+Deno.test("toCssRules resolves $ prefixed keys as @scope blocks", () => {
+  const rules = toCssRules(
+    "test",
+    {
+      display: "grid",
+      "$dark": {
+        color: "white",
+      },
+      "$[data-theme='light']": {
+        color: "black",
+      },
+    },
+  );
+
+  assert(rules.includes(".test{display:grid}"));
+  assert(rules.includes("@scope (.dark){.test{color:white}}"));
+  assert(rules.includes("@scope ([data-theme='light']){.test{color:black}}"));
+});
+
+Deno.test("parser preserves $ prefixed keys", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      card: {
+        display: "grid",
+        "$dark": {
+          backgroundColor: "black"
+        }
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const card = parsed.base.card as Record<string, unknown>;
+  assertEquals(card.display, "grid");
+  assertEquals(
+    (card["$dark"] as Record<string, unknown>).backgroundColor,
+    "black",
+  );
+});

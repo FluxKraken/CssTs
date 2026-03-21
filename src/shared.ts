@@ -490,10 +490,16 @@ function wrapInAtRules(rule: string, atRules: readonly string[]): string {
 }
 
 function isSupportedAtRule(key: string): boolean {
-  return key.startsWith("@") || key.startsWith("!@");
+  return key.startsWith("@") || key.startsWith("!@") || key.startsWith("$");
 }
 
 function resolveAtRule(key: string, options?: CssSerializationOptions): string {
+  if (key.startsWith("$")) {
+    const scope = key.slice(1);
+    const selector = toThemeScopeSelector(scope);
+    return selector ? `@scope (${selector})` : `@scope (:root)`;
+  }
+
   if (!(key.startsWith("@") || key.startsWith("!@"))) {
     return key;
   }
