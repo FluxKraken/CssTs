@@ -201,7 +201,7 @@ export default config;
 ### Theming
 
 `Theme` turns friendly token names into CSS custom properties, `tv` references
-those variables inside style objects, and `importThemes` expands themes into
+those variables inside style objects, and `themes` expands themes into
 `:root` plus scoped `@scope` rules.
 
 ```ts
@@ -218,7 +218,7 @@ const dark = new Theme({
 });
 
 const styles = ct({
-  importThemes: {
+  themes: {
     default: light,
     dark,
   },
@@ -231,9 +231,9 @@ const styles = ct({
 });
 ```
 
-Non-`default` keys in `importThemes` are treated as scoped selectors. A key like
+Non-`default` keys in `themes` are treated as scoped selectors. A key like
 `dark` becomes `@scope (.dark) { ... }`, while quoted selectors like
-`".contrast"` are used as-is. You can also place the same `importThemes` object
+`".contrast"` are used as-is. You can also place the same `themes` object
 in `css.config.ts` to make themes available project-wide.
 
 ### Inline style output (`style={...}`)

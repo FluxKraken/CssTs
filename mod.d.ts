@@ -34,7 +34,7 @@ type CtConfig<
   V extends VariantSheet<T> | undefined,
 > = {
   global?: StyleSheetInput;
-  importThemes?: ImportedThemesInput;
+  themes?: ImportedThemesInput;
   root?: readonly RootVarInput[];
   /** @deprecated Use `root` instead. */
   rootVars?: readonly RootVarInput[];
@@ -84,7 +84,7 @@ type CtBuilder<
   & {
     base: T | undefined;
     global: StyleSheetInput | undefined;
-    importThemes: ImportedThemesInput | undefined;
+    themes: ImportedThemesInput | undefined;
     root: readonly RootVarInput[] | undefined;
     /** @deprecated Use `root` instead. */
     rootVars: readonly RootVarInput[] | undefined;

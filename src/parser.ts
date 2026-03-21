@@ -1168,7 +1168,7 @@ function normalizeVariantSelection(
 
 /**
  * Validate and normalize a parsed config object into a {@link CtConfig}.
- * Allowed top-level keys: `global`, `importThemes`, `root`, `rootVars`, `base`, `variant`, `defaults`.
+ * Allowed top-level keys: `global`, `themes`, `root`, `rootVars`, `base`, `variant`, `defaults`.
  * Returns `null` when the input cannot be validated.
  */
 export function parseCtConfig(
@@ -1177,7 +1177,7 @@ export function parseCtConfig(
 ): CtConfig | null {
   const allowed = new Set([
     "global",
-    "importThemes",
+    "themes",
     "root",
     "rootVars",
     "base",
@@ -1204,9 +1204,9 @@ export function parseCtConfig(
   let defaults: VariantSelection | undefined;
   const rootEntries: RootVarEntry[] = [];
 
-  if ("importThemes" in value) {
+  if ("themes" in value) {
     const normalizedThemes = normalizeImportedThemes(
-      value.importThemes,
+      value.themes,
       parseOptions,
     );
     if (!normalizedThemes) {
@@ -1686,7 +1686,7 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
 
     const assignments: NewCtAssignment[] = [];
     const assignmentMatcher = new RegExp(
-      `\\b${varName}\\.(base|global|importThemes|root|rootVars|variant|defaults)\\s*=\\s*`,
+      `\\b${varName}\\.(base|global|themes|root|rootVars|variant|defaults)\\s*=\\s*`,
       "g",
     );
     assignmentMatcher.lastIndex = declEnd;

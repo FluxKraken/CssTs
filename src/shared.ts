@@ -24,7 +24,7 @@ export type RootVarInput =
   };
 /** Friendly token map accepted by {@link Theme}. */
 export type ThemeTokenInput = Record<string, StyleValue>;
-/** Theme-like value accepted by `importThemes`. */
+/** Theme-like value accepted by `themes`. */
 export type ThemeInput = Theme | ThemeTokenInput;
 /** Map of imported theme names/selectors to theme definitions. */
 export type ImportedThemesInput = Record<string, ThemeInput>;
@@ -114,7 +114,7 @@ function normalizeThemeTokens(
   return vars;
 }
 
-/** First-class theme definition used by `importThemes`. */
+/** First-class theme definition used by `themes`. */
 export class Theme {
   /** Discriminator used for theme detection across parsing/runtime paths. */
   readonly kind = "css-ts-theme" as const;
@@ -197,9 +197,9 @@ function toThemeScopeSelector(scope: string): string | null {
   return `.${trimmed}`;
 }
 
-/** Expand `importThemes` into `root` vars and scoped global rules. */
-export function importedThemesToConfig(
-  importedThemes: ImportedThemesInput | undefined,
+/** Expand `themes` into `root` vars and scoped global rules. */
+export function themesToConfig(
+  themes: ImportedThemesInput | undefined,
 ): {
   root: RootVarInput[];
   global: StyleSheet;
@@ -207,11 +207,11 @@ export function importedThemesToConfig(
   const root: RootVarInput[] = [];
   const global: StyleSheet = {};
 
-  if (!importedThemes) {
+  if (!themes) {
     return { root, global };
   }
 
-  for (const [scope, theme] of Object.entries(importedThemes)) {
+  for (const [scope, theme] of Object.entries(themes)) {
     const vars = resolveImportedThemeVars(theme);
     const selector = toThemeScopeSelector(scope);
 

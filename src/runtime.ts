@@ -1,7 +1,7 @@
 import {
   createClassName,
   CssSerializationOptions,
-  importedThemesToConfig,
+  themesToConfig,
   ImportedThemesInput,
   isCssVarRef,
   RootVarInput,
@@ -49,7 +49,7 @@ type CtConfig<
   /** Global stylesheet rules applied without class names. */
   global?: StyleSheetInput;
   /** Theme definitions expanded into root vars and scoped global rules. */
-  importThemes?: ImportedThemesInput;
+  themes?: ImportedThemesInput;
   /** CSS custom properties to emit on `:root` (optionally under a layer). */
   root?: readonly RootVarInput[];
   /** CSS custom properties to emit on `:root` (optionally under a layer). */
@@ -581,7 +581,7 @@ function compileConfig<
     defaultUnit: runtimeOptions.defaultUnit,
   };
 
-  const importedThemes = importedThemesToConfig(config.importThemes);
+  const importedThemes = themesToConfig(config.themes);
   const rootVarStyles = rootVarsToGlobalRules([
     ...importedThemes.root,
     ...(config.root ?? config.rootVars ?? []),
@@ -886,7 +886,7 @@ function compileConfig<
 const CONFIG_KEYS = new Set([
   "base",
   "global",
-  "importThemes",
+  "themes",
   "root",
   "rootVars",
   "variant",
@@ -919,7 +919,7 @@ type CtBuilder<
   /** Global stylesheet rules (selectors and at-rules applied without class names). */
   global: StyleSheetInput | undefined;
   /** Theme definitions expanded into root vars and scoped global rules. */
-  importThemes: ImportedThemesInput | undefined;
+  themes: ImportedThemesInput | undefined;
   /** CSS custom properties to emit on `:root` (optionally under a layer). */
   root: readonly RootVarInput[] | undefined;
   /** @deprecated Use `root` instead. */

@@ -881,9 +881,9 @@ Deno.test("parser keeps rootVars as a compatibility alias", () => {
   assertEquals(parsed.rootVars, parsed.root);
 });
 
-Deno.test("parser expands importThemes and resolves tv references", () => {
+Deno.test("parser expands themes and resolves tv references", () => {
   const parsed = parseCtCallArguments(`{
-    importThemes: {
+    themes: {
       default: {
         headerBG: "black"
       },
@@ -991,7 +991,7 @@ Deno.test("runtime injects root into :root and layered :root", () => {
   }
 });
 
-Deno.test("runtime injects importThemes root vars and scoped theme rules", () => {
+Deno.test("runtime injects themes root vars and scoped theme rules", () => {
   type FakeStyleTag = {
     id: string;
     textContent: string;
@@ -1029,7 +1029,7 @@ Deno.test("runtime injects importThemes root vars and scoped theme rules", () =>
 
   try {
     const styles = ct({
-      importThemes: {
+      themes: {
         default: new Theme({
           headerBG: "black",
         }),
@@ -1930,7 +1930,7 @@ Deno.test("loads css.config.ts utilities and breakpoint aliases", () => {
   }
 });
 
-Deno.test("loads css.config.ts importThemes into the shared stylesheet", () => {
+Deno.test("loads css.config.ts themes into the shared stylesheet", () => {
   const root = Deno.makeTempDirSync();
 
   try {
@@ -1938,7 +1938,7 @@ Deno.test("loads css.config.ts importThemes into the shared stylesheet", () => {
     Deno.writeTextFileSync(
       `${root}/css.config.ts`,
       `export default {\n` +
-        `  importThemes: {\n` +
+        `  themes: {\n` +
         `    default: { headerBG: "black" },\n` +
         `    dark: { headerBG: "white" },\n` +
         `  },\n` +
@@ -2300,7 +2300,7 @@ Deno.test("resolves imported style objects and precompiles them", () => {
   }
 });
 
-Deno.test("resolves imported theme objects for importThemes", () => {
+Deno.test("resolves imported theme objects for themes", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
@@ -2325,7 +2325,7 @@ Deno.test("resolves imported theme objects for importThemes", () => {
     const moduleCode = `import ct, { tv } from "css-ts";\n` +
       `import SiteTheme from "$lib/theme";\n` +
       `export const styles = ct({\n` +
-      `  importThemes: {\n` +
+      `  themes: {\n` +
       `    default: SiteTheme.light,\n` +
       `    dark: SiteTheme.dark,\n` +
       `  },\n` +
@@ -3595,7 +3595,7 @@ Deno.test("vite extracts new ct() root assignments", () => {
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
 });
 
-Deno.test("vite extracts new ct() importThemes assignments defined with Theme instances", () => {
+Deno.test("vite extracts new ct() themes assignments defined with Theme instances", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
   const load = asHook(plugin.load);
@@ -3604,7 +3604,7 @@ Deno.test("vite extracts new ct() importThemes assignments defined with Theme in
   const moduleCode = `---\n` +
     `import ct, { Theme, cv } from "./index.ts";\n` +
     `const styles = new ct();\n` +
-    `styles.importThemes = {\n` +
+    `styles.themes = {\n` +
     `  default: new Theme({ headerBG: "black" }),\n` +
     `  dark: new Theme({ headerBG: "white" }),\n` +
     `};\n` +
@@ -3617,7 +3617,7 @@ Deno.test("vite extracts new ct() importThemes assignments defined with Theme in
   );
 
   const code = transformed.code as string;
-  assert(!code.includes("styles.importThemes ="));
+  assert(!code.includes("styles.themes ="));
 
   const css = load(VIRTUAL_ID) as string;
   assert(css.includes(":root{--header-bg:black}"));
@@ -3637,7 +3637,7 @@ Deno.test("vite extracts tv references from new ct() builder assignments", () =>
   const moduleCode = `---\n` +
     `import ct, { Theme, tv } from "./index.ts";\n` +
     `const styles = new ct();\n` +
-    `styles.importThemes = {\n` +
+    `styles.themes = {\n` +
     `  default: new Theme({ headerBG: "black", headerFG: "white" }),\n` +
     `  dark: new Theme({ headerBG: "white", headerFG: "black" }),\n` +
     `};\n` +
@@ -3675,7 +3675,7 @@ Deno.test("vite extracts tv.eval() theme templates from new ct() builder assignm
   const moduleCode = `---\n` +
     `import ct, { Theme, tv } from "./index.ts";\n` +
     `const styles = new ct();\n` +
-    `styles.importThemes = {\n` +
+    `styles.themes = {\n` +
     `  default: new Theme({ bgGradient1: "#00aaff", bgGradient2: "#fff6a3" }),\n` +
     `  dark: new Theme({ bgGradient1: "#001018", bgGradient2: "#00334d" }),\n` +
     `};\n` +

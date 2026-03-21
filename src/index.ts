@@ -53,5 +53,5 @@ export type { StyleValue } from "./shared.js";
 export type { ImportInput } from "./shared.js";
 /** Theme token map accepted by `new Theme(...)`. */
 export type { ThemeTokenInput } from "./shared.js";
-/** Theme map accepted by `importThemes`. */
+/** Theme map accepted by `themes`. */
 export type { ImportedThemesInput } from "./shared.js";

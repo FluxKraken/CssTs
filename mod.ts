@@ -22,5 +22,5 @@ export type { StyleSheet } from "./src/index.ts";
 export type { StyleValue } from "./src/index.ts";
 /** Theme token map accepted by `new Theme(...)`. */
 export type { ThemeTokenInput } from "./src/index.ts";
-/** Theme map accepted by `importThemes`. */
+/** Theme map accepted by `themes`. */
 export type { ImportedThemesInput } from "./src/index.ts";

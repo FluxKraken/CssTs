@@ -1566,9 +1566,9 @@ function loadCssConfig(
 
   const parsedThemes = Object.prototype.hasOwnProperty.call(
       configObject,
-      "importThemes",
+      "themes",
     )
-    ? parseCtConfig({ importThemes: configObject.importThemes }, { containers })
+    ? parseCtConfig({ themes: configObject.themes }, { containers })
     : null;
   const parsedUtilities = isRecord(configObject.utilities)
     ? parseCtConfig({ base: configObject.utilities }, { containers })
@@ -3127,7 +3127,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             if (
               assignment.property === "base" ||
               assignment.property === "global" ||
-              assignment.property === "importThemes" ||
+              assignment.property === "themes" ||
               assignment.property === "root" ||
               assignment.property === "rootVars" ||
               assignment.property === "variant" ||
@@ -3157,7 +3157,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 } else if (assignment.property === "global") {
                   configParts.global = partialParsed.global ?? {};
                 } else if (
-                  assignment.property === "importThemes" &&
+                  assignment.property === "themes" &&
                   Object.keys(partialParsed.global ?? {}).length > 0
                 ) {
                   configParts.global = {
@@ -3177,7 +3177,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 ) {
                   configParts.root = parsedRoot;
                 } else if (
-                  assignment.property === "importThemes" &&
+                  assignment.property === "themes" &&
                   parsedRoot
                 ) {
                   configParts.root = [
