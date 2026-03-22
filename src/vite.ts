@@ -7,14 +7,18 @@ import {
   parseCtConfig,
   parseStaticExpression,
 } from "./parser.js";
+import runtimeCt from "./runtime.js";
 import {
   camelToKebab,
   createClassName,
+  cv,
   rootVarsToGlobalRules,
   type StyleSheet,
   type StyleValue,
+  Theme,
   toCssGlobalRules,
   toCssRules,
+  tv,
 } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
@@ -340,6 +344,75 @@ const CSS_TS_IMPORT_SOURCES = [
   "@kt-tools/css-ts",
   "@jsr/kt-tools__css-ts",
 ] as const;
+let staticCssTsDefaultExport: Record<string, unknown> | null = null;
+
+function isCssTsImportSource(source: string): boolean {
+  return (CSS_TS_IMPORT_SOURCES as readonly string[]).includes(source);
+}
+
+function getStaticCssTsDefaultExport(): Record<string, unknown> {
+  if (staticCssTsDefaultExport) {
+    return staticCssTsDefaultExport;
+  }
+
+  const callable = function (
+    ...args: unknown[]
+  ): unknown {
+    return (runtimeCt as (...args: unknown[]) => unknown)(...args);
+  };
+  Object.defineProperty(callable, "prototype", {
+    value: (runtimeCt as unknown as { prototype: unknown }).prototype,
+  });
+
+  staticCssTsDefaultExport = Object.assign(
+    callable as unknown as Record<string, unknown>,
+    {
+      vite: cssTsPlugin,
+      cv,
+      var: cv,
+      Theme,
+      tv,
+    },
+  );
+  return staticCssTsDefaultExport;
+}
+
+function getStaticCssTsNamespace(): Record<string, unknown> {
+  return {
+    default: getStaticCssTsDefaultExport(),
+    vite: cssTsPlugin,
+    cv,
+    var: cv,
+    Theme,
+    tv,
+  };
+}
+
+function resolveStaticCssTsImport(
+  binding: ImportBinding,
+  tail: readonly string[],
+): unknown | null {
+  if (!isCssTsImportSource(binding.source)) {
+    return null;
+  }
+
+  if (binding.kind === "namespace") {
+    const namespaceValue = getStaticCssTsNamespace();
+    return tail.length > 0
+      ? readMemberPath(namespaceValue, tail)
+      : namespaceValue;
+  }
+
+  const importedValue = binding.kind === "default"
+    ? getStaticCssTsDefaultExport()
+    : getStaticCssTsNamespace()[binding.imported];
+
+  if (importedValue === undefined) {
+    return null;
+  }
+
+  return tail.length > 0 ? readMemberPath(importedValue, tail) : importedValue;
+}
 
 function hasCssTsImport(code: string): boolean {
   for (const source of CSS_TS_IMPORT_SOURCES) {
@@ -1431,47 +1504,50 @@ function loadCssConfig(
       if (resolved === null) {
         const binding = moduleInfo.imports.get(head);
         if (binding) {
-          const resolvedImportFile = resolveImportToFile(
-            moduleId,
-            binding.source,
-            {
-              projectRoot,
-              viteAliases: resolverOptions.viteAliases,
-              tsconfigResolver: resolverOptions.tsconfigResolver,
-            },
-          );
-          if (resolvedImportFile) {
-            const importedModuleInfo = getModuleInfo(resolvedImportFile);
-            if (importedModuleInfo) {
-              if (binding.kind === "namespace") {
-                if (tail.length > 0) {
-                  const [namespaceExport, ...namespaceTail] = tail;
-                  const exportedLocalName =
-                    importedModuleInfo.exportedConsts.get(namespaceExport) ??
-                      namespaceExport;
-                  const namespaceValue = resolveIdentifierInModule(
-                    [exportedLocalName],
+          resolved = resolveStaticCssTsImport(binding, tail);
+          if (resolved === null) {
+            const resolvedImportFile = resolveImportToFile(
+              moduleId,
+              binding.source,
+              {
+                projectRoot,
+                viteAliases: resolverOptions.viteAliases,
+                tsconfigResolver: resolverOptions.tsconfigResolver,
+              },
+            );
+            if (resolvedImportFile) {
+              const importedModuleInfo = getModuleInfo(resolvedImportFile);
+              if (importedModuleInfo) {
+                if (binding.kind === "namespace") {
+                  if (tail.length > 0) {
+                    const [namespaceExport, ...namespaceTail] = tail;
+                    const exportedLocalName =
+                      importedModuleInfo.exportedConsts.get(namespaceExport) ??
+                        namespaceExport;
+                    const namespaceValue = resolveIdentifierInModule(
+                      [exportedLocalName],
+                      resolvedImportFile,
+                    );
+                    resolved = namespaceTail.length > 0
+                      ? readMemberPath(namespaceValue, namespaceTail)
+                      : namespaceValue;
+                  }
+                } else {
+                  const importedName = binding.kind === "default"
+                    ? "default"
+                    : binding.imported;
+                  const exportedLocalName = importedName === "default"
+                    ? null
+                    : (importedModuleInfo.exportedConsts.get(importedName) ??
+                      importedName);
+                  const importedValue = resolveIdentifierInModule(
+                    exportedLocalName ? [exportedLocalName] : ["default"],
                     resolvedImportFile,
                   );
-                  resolved = namespaceTail.length > 0
-                    ? readMemberPath(namespaceValue, namespaceTail)
-                    : namespaceValue;
+                  resolved = tail.length > 0
+                    ? readMemberPath(importedValue, tail)
+                    : importedValue;
                 }
-              } else {
-                const importedName = binding.kind === "default"
-                  ? "default"
-                  : binding.imported;
-                const exportedLocalName = importedName === "default"
-                  ? null
-                  : (importedModuleInfo.exportedConsts.get(importedName) ??
-                    importedName);
-                const importedValue = resolveIdentifierInModule(
-                  exportedLocalName ? [exportedLocalName] : ["default"],
-                  resolvedImportFile,
-                );
-                resolved = tail.length > 0
-                  ? readMemberPath(importedValue, tail)
-                  : importedValue;
               }
             }
           }
@@ -2777,48 +2853,53 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           if (resolved === null) {
             const binding = moduleInfo.imports.get(head);
             if (binding) {
-              const resolvedImportFile = resolveImportToFile(
-                moduleId,
-                binding.source,
-                {
-                  projectRoot,
-                  viteAliases,
-                  tsconfigResolver,
-                },
-              );
-              if (resolvedImportFile) {
-                const importedModuleInfo = getModuleInfo(resolvedImportFile);
-                if (importedModuleInfo) {
-                  if (binding.kind === "namespace") {
-                    if (tail.length > 0) {
-                      const [namespaceExport, ...namespaceTail] = tail;
-                      const exportedLocalName =
-                        importedModuleInfo.exportedConsts.get(
-                          namespaceExport,
-                        ) ?? namespaceExport;
-                      const namespaceValue = resolveIdentifierInModule(
-                        [exportedLocalName],
+              resolved = resolveStaticCssTsImport(binding, tail);
+              if (resolved === null) {
+                const resolvedImportFile = resolveImportToFile(
+                  moduleId,
+                  binding.source,
+                  {
+                    projectRoot,
+                    viteAliases,
+                    tsconfigResolver,
+                  },
+                );
+                if (resolvedImportFile) {
+                  const importedModuleInfo = getModuleInfo(resolvedImportFile);
+                  if (importedModuleInfo) {
+                    if (binding.kind === "namespace") {
+                      if (tail.length > 0) {
+                        const [namespaceExport, ...namespaceTail] = tail;
+                        const exportedLocalName =
+                          importedModuleInfo.exportedConsts.get(
+                            namespaceExport,
+                          ) ?? namespaceExport;
+                        const namespaceValue = resolveIdentifierInModule(
+                          [exportedLocalName],
+                          resolvedImportFile,
+                        );
+                        resolved = namespaceTail.length > 0
+                          ? readMemberPath(namespaceValue, namespaceTail)
+                          : namespaceValue;
+                      }
+                    } else {
+                      const importedName = binding.kind === "default"
+                        ? "default"
+                        : binding.imported;
+                      const exportedLocalName = importedName === "default"
+                        ? null
+                        : (importedModuleInfo.exportedConsts.get(
+                          importedName,
+                        ) ??
+                          importedName);
+                      const importedValue = resolveIdentifierInModule(
+                        exportedLocalName ? [exportedLocalName] : ["default"],
                         resolvedImportFile,
                       );
-                      resolved = namespaceTail.length > 0
-                        ? readMemberPath(namespaceValue, namespaceTail)
-                        : namespaceValue;
+                      resolved = tail.length > 0
+                        ? readMemberPath(importedValue, tail)
+                        : importedValue;
                     }
-                  } else {
-                    const importedName = binding.kind === "default"
-                      ? "default"
-                      : binding.imported;
-                    const exportedLocalName = importedName === "default"
-                      ? null
-                      : (importedModuleInfo.exportedConsts.get(importedName) ??
-                        importedName);
-                    const importedValue = resolveIdentifierInModule(
-                      exportedLocalName ? [exportedLocalName] : ["default"],
-                      resolvedImportFile,
-                    );
-                    resolved = tail.length > 0
-                      ? readMemberPath(importedValue, tail)
-                      : importedValue;
                   }
                 }
               }
@@ -3207,9 +3288,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           if (assignment.property === "import") {
             importParts.push(value);
           } else {
-            configParts[assignment.property === "rootVars"
-              ? "root"
-              : assignment.property] = value;
+            configParts[
+              assignment.property === "rootVars" ? "root" : assignment.property
+            ] = value;
           }
         }
 

@@ -1474,6 +1474,51 @@ Deno.test("extracts imported rules passed as array to import()", () => {
   }
 });
 
+Deno.test("extracts layered imported rules that use tv.eval from css-ts package imports", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/src/lib/general.ts`,
+      `import { tv } from "@kt-tools/css-ts";\n` +
+        `export default {\n` +
+        `  body: {\n` +
+        `    background: tv.eval("linear-gradient(147deg, {bgStart}, {bgEnd})"),\n` +
+        `    fontFamily: ["system-ui", "sans-serif"],\n` +
+        `  },\n` +
+        `} as const;\n`,
+    );
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct from "@kt-tools/css-ts";\n` +
+      `import GeneralRules from "./general";\n` +
+      `const styles = new ct();\n` +
+      `styles.import([{ rules: GeneralRules, layer: "general" }]);`;
+
+    const transformed = transform(
+      moduleCode,
+      `${root}/src/lib/layered-import.ts`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(
+      css,
+      /@layer general\{body\{background:linear-gradient\(147deg, var\(--bg-start\), var\(--bg-end\)\);font-family:system-ui, sans-serif\}\}/,
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("resolution=static throws when ct() cannot be statically resolved", () => {
   const root = Deno.makeTempDirSync();
 
@@ -3659,7 +3704,9 @@ Deno.test("vite extracts tv references from new ct() builder assignments", () =>
 
   const css = load(VIRTUAL_ID) as string;
   assert(css.includes(":root{--header-bg:black;--header-fg:white}"));
-  assert(css.includes("@scope (.dark){:scope{--header-bg:white;--header-fg:black}}"));
+  assert(
+    css.includes("@scope (.dark){:scope{--header-bg:white;--header-fg:black}}"),
+  );
   assertMatch(
     css,
     /\.ct_[a-z0-9]+\{background-color:var\(--header-bg\);color:var\(--header-fg\)\}/,
@@ -3693,7 +3740,11 @@ Deno.test("vite extracts tv.eval() theme templates from new ct() builder assignm
 
   const css = load(VIRTUAL_ID) as string;
   assert(css.includes(":root{--bg-gradient1:#00aaff;--bg-gradient2:#fff6a3}"));
-  assert(css.includes("@scope (.dark){:scope{--bg-gradient1:#001018;--bg-gradient2:#00334d}}"));
+  assert(
+    css.includes(
+      "@scope (.dark){:scope{--bg-gradient1:#001018;--bg-gradient2:#00334d}}",
+    ),
+  );
   assertMatch(
     css,
     /\.ct_[a-z0-9]+\{background-image:linear-gradient\(147deg, var\(--bg-gradient1\), var\(--bg-gradient2\)\)\}/,

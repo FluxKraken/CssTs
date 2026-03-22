@@ -1,13 +1,13 @@
 import {
   cv,
   evalThemeTemplate,
-  Theme,
-  isTheme,
   isCssVarRef,
-  toThemeVarName,
+  isTheme,
   type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
+  Theme,
+  toThemeVarName,
 } from "./shared.js";
 
 interface ParseResult {
@@ -273,7 +273,7 @@ function parseThemeEval(
   cursor = skipWhitespace(input, cursor + 1);
   const [templateValue, templateEnd] = parseValue(input, cursor);
   if (typeof templateValue !== "string") {
-    throw new Error('tv.eval() expects a single string argument');
+    throw new Error("tv.eval() expects a single string argument");
   }
 
   cursor = skipWhitespace(input, templateEnd);
@@ -596,7 +596,9 @@ function identifierReferenceToCssLiteral(value: unknown): string | null {
   return identifier;
 }
 
-function identifierReferenceToThemeVar(value: unknown): ReturnType<typeof cv> | null {
+function identifierReferenceToThemeVar(
+  value: unknown,
+): ReturnType<typeof cv> | null {
   if (!isIdentifierReference(value) || value.path.length !== 2) {
     return null;
   }
@@ -1047,9 +1049,10 @@ function normalizeImportedThemes(
     }
 
     const scopeKey = `@scope (${selector})`;
-    const scopeRule =
-      (global[scopeKey] as Record<string, StyleDeclaration | StyleValue> | undefined) ??
-        {};
+    const scopeRule = (global[scopeKey] as
+      | Record<string, StyleDeclaration | StyleValue>
+      | undefined) ??
+      {};
     const currentScope =
       (scopeRule[":scope"] as Record<string, StyleValue> | undefined) ?? {};
     scopeRule[":scope"] = { ...currentScope, ...vars };
@@ -1381,6 +1384,10 @@ function parseExpression(source: string): ParsedValue | null {
     const [parsed, end] = parseValue(source, index);
     const cursor = skipWhitespace(source, end);
     if (cursor !== source.length) {
+      const remainder = source.slice(cursor).trim();
+      if (remainder === "as const") {
+        return parsed;
+      }
       return null;
     }
     return parsed;
