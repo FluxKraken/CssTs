@@ -3785,6 +3785,110 @@ Deno.test("vite compiles quoted variant selectors into runtime-managed variantGl
   assert(!css.includes("color-scheme:light"));
 });
 
+Deno.test("vite watches statically imported theme modules used by new ct()", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const transform = asHook(plugin.transform);
+    const themesId = `${root}/src/lib/themes.ts`;
+    const pageId = `${root}/src/routes/+page.svelte`;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.mkdirSync(`${root}/src/routes`, { recursive: true });
+    Deno.writeTextFileSync(
+      themesId,
+      `import { Theme } from "css-ts";\n` +
+        `const light = new Theme({ bg: "white", fg: "black" });\n` +
+        `const dark = new Theme({ bg: "black", fg: "white" });\n` +
+        `export default { light, dark } as const;\n`,
+    );
+
+    const source = `<script lang="ts">\n` +
+      `import ct, { tv } from "css-ts";\n` +
+      `import Themes from "../lib/themes.ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.themes = { default: Themes.light, dark: Themes.dark };\n` +
+      `styles.base = { header: { backgroundColor: tv.bg, color: tv.fg } };\n` +
+      `</script>\n` +
+      `<header class={styles().header()}>hi</header>`;
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const watched: string[] = [];
+    const transformed = transform.call(
+      {
+        addWatchFile: (id: string) => watched.push(id),
+      },
+      source,
+      pageId,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    assert(watched.includes(themesId));
+    assert((transformed.code as string).includes("--bg:black"));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("vite invalidates style owner modules when imported theme files change", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const configureServer = asHook(plugin.configureServer);
+    const transform = asHook(plugin.transform);
+    const handleHotUpdate = asHook(plugin.handleHotUpdate);
+    const themesId = `${root}/src/lib/themes.ts`;
+    const pageId = `${root}/src/routes/+page.svelte`;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.mkdirSync(`${root}/src/routes`, { recursive: true });
+    Deno.writeTextFileSync(
+      themesId,
+      `import { Theme } from "css-ts";\n` +
+        `const light = new Theme({ bg: "white", fg: "black" });\n` +
+        `const dark = new Theme({ bg: "black", fg: "white" });\n` +
+        `export default { light, dark } as const;\n`,
+    );
+
+    const source = `<script lang="ts">\n` +
+      `import ct, { tv } from "css-ts";\n` +
+      `import Themes from "../lib/themes.ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.themes = { default: Themes.light, dark: Themes.dark };\n` +
+      `styles.base = { header: { backgroundColor: tv.bg, color: tv.fg } };\n` +
+      `</script>\n` +
+      `<header class={styles().header()}>hi</header>`;
+
+    const invalidated: string[] = [];
+    configResolved({ root, resolve: { alias: [] } });
+    configureServer({
+      moduleGraph: {
+        getModuleById: (id: string) => ({ id }),
+        invalidateModule: (module: { id: string }) => {
+          invalidated.push(module.id);
+        },
+      },
+    });
+
+    const transformed = transform(source, pageId);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    handleHotUpdate({ file: themesId });
+
+    assert(invalidated.includes(pageId));
+    assert(invalidated.includes(VIRTUAL_ID));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("toCssRules resolves $ prefixed keys as @scope blocks", () => {
   const rules = toCssRules(
     "test",

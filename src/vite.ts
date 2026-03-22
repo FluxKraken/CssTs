@@ -94,6 +94,10 @@ type ViteResolvedConfigLike = {
   };
 };
 
+type ViteTransformContextLike = {
+  addWatchFile?: (id: string) => void;
+};
+
 type ImportResolverOptions = {
   projectRoot: string;
   viteAliases: readonly ViteAliasEntry[];
@@ -102,6 +106,7 @@ type ImportResolverOptions = {
 
 type LoadedCssConfig = {
   path: string | null;
+  dependencies: string[];
   imports: string[];
   resolution: "static" | "dynamic" | "hybrid";
   hasExplicitResolution: boolean;
@@ -582,6 +587,12 @@ function addModuleVirtualImportToAstro(code: string, importId: string): string {
 
 function moduleVirtualImportId(moduleId: string): string {
   return `${PUBLIC_VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${
+    encodeURIComponent(moduleId)
+  }`;
+}
+
+function resolvedModuleVirtualId(moduleId: string): string {
+  return `${RESOLVED_VIRTUAL_ID}?${MODULE_VIRTUAL_QUERY_KEY}=${
     encodeURIComponent(moduleId)
   }`;
 }
@@ -1341,6 +1352,7 @@ function loadCssConfig(
   if (!configPath) {
     return {
       path: null,
+      dependencies: [],
       imports: [],
       resolution: "hybrid",
       hasExplicitResolution: false,
@@ -1360,6 +1372,7 @@ function loadCssConfig(
   }
 
   const source = getNodeFs().readFileSync(configPath, "utf8");
+  const dependencies = new Set<string>();
   const sideEffectImports: string[] = [];
   const cssImportMatcher = /import\s*["']([^"']+\.css(?:\?[^"']*)?)["']\s*;?/g;
   for (
@@ -1379,6 +1392,7 @@ function loadCssConfig(
       return source;
     }
     try {
+      dependencies.add(cleanId(moduleId));
       return getNodeFs().readFileSync(moduleId, "utf8");
     } catch {
       return null;
@@ -1709,6 +1723,7 @@ function loadCssConfig(
 
   return {
     path: configPath,
+    dependencies: Array.from(dependencies),
     imports: allImports,
     resolution,
     hasExplicitResolution,
@@ -2664,12 +2679,16 @@ export interface CssTsPluginOptions {
 export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   const moduleImports = new Map<string, string[]>();
   const moduleCss = new Map<string, string>();
+  const managedModules = new Set<string>();
+  const moduleStaticDependencies = new Map<string, Set<string>>();
+  const dependencyOwners = new Map<string, Set<string>>();
   let server: ViteDevServerLike | undefined;
   let projectRoot = process.cwd();
   let viteAliases: ViteAliasEntry[] = [];
   let tsconfigResolver: TsconfigPathResolver | null = null;
   let cssConfig: LoadedCssConfig = {
     path: null,
+    dependencies: [],
     imports: [],
     resolution: "hybrid",
     hasExplicitResolution: false,
@@ -2740,12 +2759,98 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     return parts.join("\n");
   }
 
-  function invalidateVirtualModule(): void {
+  function updateModuleStaticDependencies(
+    moduleId: string,
+    dependencies: Iterable<string>,
+  ): void {
+    const previous = moduleStaticDependencies.get(moduleId);
+    if (previous) {
+      for (const dependency of previous) {
+        const owners = dependencyOwners.get(dependency);
+        if (!owners) {
+          continue;
+        }
+        owners.delete(moduleId);
+        if (owners.size === 0) {
+          dependencyOwners.delete(dependency);
+        }
+      }
+      moduleStaticDependencies.delete(moduleId);
+    }
+
+    const next = new Set<string>();
+    for (const dependency of dependencies) {
+      const normalizedDependency = cleanId(dependency);
+      if (!normalizedDependency || normalizedDependency === moduleId) {
+        continue;
+      }
+      next.add(normalizedDependency);
+    }
+
+    if (next.size === 0) {
+      return;
+    }
+
+    moduleStaticDependencies.set(moduleId, next);
+    for (const dependency of next) {
+      const owners = dependencyOwners.get(dependency) ?? new Set<string>();
+      owners.add(moduleId);
+      dependencyOwners.set(dependency, owners);
+    }
+  }
+
+  function clearManagedModuleState(moduleId: string): boolean {
+    managedModules.delete(moduleId);
+    updateModuleStaticDependencies(moduleId, []);
+
+    let didChange = false;
+    if (moduleCss.delete(moduleId)) {
+      didChange = true;
+    }
+    if (moduleImports.delete(moduleId)) {
+      didChange = true;
+    }
+    return didChange;
+  }
+
+  function addWatchFiles(
+    ctx: ViteTransformContextLike | undefined,
+    dependencies: Iterable<string>,
+  ): void {
+    if (typeof ctx?.addWatchFile !== "function") {
+      return;
+    }
+
+    for (const dependency of dependencies) {
+      ctx.addWatchFile(dependency);
+    }
+  }
+
+  function invalidateModuleById(id: string): void {
     if (!server) return;
-    const module = server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ID);
+    const module = server.moduleGraph.getModuleById(id);
     if (module) {
       server.moduleGraph.invalidateModule(module);
     }
+  }
+
+  function invalidateVirtualModules(moduleIds: Iterable<string> = []): void {
+    invalidateModuleById(RESOLVED_VIRTUAL_ID);
+    for (const moduleId of moduleIds) {
+      invalidateModuleById(resolvedModuleVirtualId(moduleId));
+    }
+  }
+
+  function invalidateManagedModules(moduleIds: Iterable<string>): void {
+    const normalizedIds = new Set<string>();
+    for (const moduleId of moduleIds) {
+      normalizedIds.add(cleanId(moduleId));
+    }
+
+    for (const moduleId of normalizedIds) {
+      invalidateModuleById(moduleId);
+    }
+    invalidateVirtualModules(normalizedIds);
   }
 
   return {
@@ -2781,7 +2886,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       return null;
     },
 
-    transform(code: string, id: string) {
+    transform(
+      this: ViteTransformContextLike | undefined,
+      code: string,
+      id: string,
+    ) {
       if (isVirtualSubRequest(id)) {
         return null;
       }
@@ -2852,6 +2961,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const moduleInfoCache = new Map<string, ModuleStaticInfo>();
       const constValueCache = new Map<string, unknown | null>();
       const resolving = new Set<string>();
+      const staticDependencies = new Set<string>();
 
       function lineAt(index: number): number {
         let line = 1;
@@ -2912,6 +3022,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           return code;
         }
         try {
+          staticDependencies.add(cleanId(moduleId));
           return getNodeFs().readFileSync(moduleId, "utf8");
         } catch {
           return null;
@@ -3710,6 +3821,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       nextCode = stripUnusedStaticHelperConsts(nextCode);
+      managedModules.add(normalizedId);
+      updateModuleStaticDependencies(normalizedId, staticDependencies);
+      addWatchFiles(this, staticDependencies);
 
       let didVirtualCssChange = false;
       let scopedVirtualImport: string | null = null;
@@ -3771,7 +3885,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           : addVirtualImport(nextCode, scopedVirtualImport);
       }
       if (didVirtualCssChange) {
-        invalidateVirtualModule();
+        invalidateVirtualModules(scopedVirtualImport ? [normalizedId] : []);
       }
 
       return {
@@ -3782,20 +3896,25 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
     handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
-      if (cssConfig.path && normalizedId === cleanId(cssConfig.path)) {
+      const configChanged = (cssConfig.path &&
+        normalizedId === cleanId(cssConfig.path)) ||
+        cssConfig.dependencies.includes(normalizedId);
+      if (configChanged) {
         cssConfig = loadCssConfig(projectRoot, {
           viteAliases,
           tsconfigResolver,
         });
-        invalidateVirtualModule();
+        invalidateManagedModules(managedModules);
+        return;
       }
-      if (moduleCss.has(normalizedId)) {
-        moduleCss.delete(normalizedId);
-        invalidateVirtualModule();
+
+      const affectedOwners = dependencyOwners.get(normalizedId);
+      if (affectedOwners && affectedOwners.size > 0) {
+        invalidateManagedModules(affectedOwners);
       }
-      if (moduleImports.has(normalizedId)) {
-        moduleImports.delete(normalizedId);
-        invalidateVirtualModule();
+
+      if (clearManagedModuleState(normalizedId)) {
+        invalidateVirtualModules([normalizedId]);
       }
     },
   };
