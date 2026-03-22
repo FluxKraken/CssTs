@@ -1751,10 +1751,201 @@ function getTsTranspiler(): ((source: string) => string) | null {
   return tsTranspiler;
 }
 
+function splitTopLevelSegments(
+  source: string,
+  separator: string,
+): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      current += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      current += char;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      current += char;
+      continue;
+    }
+    if (char === "[") {
+      bracketDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      current += char;
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      current += char;
+      continue;
+    }
+
+    if (
+      char === separator &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  segments.push(current);
+  return segments;
+}
+
+function findTopLevelCharacter(source: string, target: string): number {
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      continue;
+    }
+    if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+    if (char === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (char === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+
+    if (
+      char === target &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function stripTypeAnnotationsFromParameters(source: string): string {
+  return splitTopLevelSegments(source, ",")
+    .map((segment) => {
+      const trimmed = segment.trim();
+      if (trimmed.length === 0) {
+        return trimmed;
+      }
+
+      const equalsIndex = findTopLevelCharacter(trimmed, "=");
+      const head = equalsIndex === -1
+        ? trimmed
+        : trimmed.slice(0, equalsIndex).trimEnd();
+      const tail = equalsIndex === -1
+        ? ""
+        : trimmed.slice(equalsIndex).trimStart();
+
+      const typeAnnotationIndex = findTopLevelCharacter(head, ":");
+      let strippedHead = typeAnnotationIndex === -1
+        ? head
+        : head.slice(0, typeAnnotationIndex).trimEnd();
+      strippedHead = strippedHead.replace(/\?$/, "");
+
+      return tail.length > 0 ? `${strippedHead} ${tail}` : strippedHead;
+    })
+    .join(", ");
+}
+
+function stripTypeScriptSnippetFallback(source: string): string {
+  return source
+    .replace(
+      /function(\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)\s*(?::\s*[^({=]+)?\s*\{/g,
+      (_match, name: string | undefined, params: string) =>
+        `function${name ?? ""}(${
+          stripTypeAnnotationsFromParameters(params)
+        }) {`,
+    )
+    .replace(
+      /\(([^)]*)\)\s*(?::\s*[^=({]+)?\s*=>/g,
+      (_match, params: string) =>
+        `(${stripTypeAnnotationsFromParameters(params)}) =>`,
+    )
+    .replace(/\s+as\s+const\b/g, "")
+    .trim();
+}
+
 function transpileTsSnippet(source: string): string {
   const transpile = getTsTranspiler();
   if (!transpile) {
-    return source.trim();
+    return stripTypeScriptSnippetFallback(source);
   }
 
   let output = transpile(source)
