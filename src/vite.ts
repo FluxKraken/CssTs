@@ -80,6 +80,7 @@ type TsconfigPathResolver = {
 
 type ViteModuleGraphLike = {
   getModuleById: (id: string) => unknown;
+  getModulesByFile?: (file: string) => Set<unknown> | undefined;
   invalidateModule: (module: unknown) => void;
 };
 
@@ -2834,6 +2835,29 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     }
   }
 
+  function invalidateModulesByFile(file: string): unknown[] {
+    if (!server) {
+      return [];
+    }
+
+    const modules = server.moduleGraph.getModulesByFile?.(file);
+    if (modules && modules.size > 0) {
+      const invalidated = Array.from(modules);
+      for (const module of invalidated) {
+        server.moduleGraph.invalidateModule(module);
+      }
+      return invalidated;
+    }
+
+    const fallback = server.moduleGraph.getModuleById(file);
+    if (!fallback) {
+      return [];
+    }
+
+    server.moduleGraph.invalidateModule(fallback);
+    return [fallback];
+  }
+
   function invalidateVirtualModules(moduleIds: Iterable<string> = []): void {
     invalidateModuleById(RESOLVED_VIRTUAL_ID);
     for (const moduleId of moduleIds) {
@@ -2841,16 +2865,20 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     }
   }
 
-  function invalidateManagedModules(moduleIds: Iterable<string>): void {
+  function invalidateManagedModules(moduleIds: Iterable<string>): unknown[] {
     const normalizedIds = new Set<string>();
     for (const moduleId of moduleIds) {
       normalizedIds.add(cleanId(moduleId));
     }
 
+    const invalidated = new Set<unknown>();
     for (const moduleId of normalizedIds) {
-      invalidateModuleById(moduleId);
+      for (const module of invalidateModulesByFile(moduleId)) {
+        invalidated.add(module);
+      }
     }
     invalidateVirtualModules(normalizedIds);
+    return Array.from(invalidated);
   }
 
   return {
@@ -3896,6 +3924,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
     handleHotUpdate(ctx: { file: string }) {
       const normalizedId = cleanId(ctx.file);
+      const affectedModules = new Set<unknown>();
       const configChanged = (cssConfig.path &&
         normalizedId === cleanId(cssConfig.path)) ||
         cssConfig.dependencies.includes(normalizedId);
@@ -3904,18 +3933,29 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           viteAliases,
           tsconfigResolver,
         });
-        invalidateManagedModules(managedModules);
-        return;
+        for (const module of invalidateManagedModules(managedModules)) {
+          affectedModules.add(module);
+        }
+        return affectedModules.size > 0
+          ? Array.from(affectedModules)
+          : undefined;
       }
 
       const affectedOwners = dependencyOwners.get(normalizedId);
       if (affectedOwners && affectedOwners.size > 0) {
-        invalidateManagedModules(affectedOwners);
+        for (const module of invalidateManagedModules(affectedOwners)) {
+          affectedModules.add(module);
+        }
       }
 
       if (clearManagedModuleState(normalizedId)) {
         invalidateVirtualModules([normalizedId]);
+        for (const module of invalidateModulesByFile(normalizedId)) {
+          affectedModules.add(module);
+        }
       }
+
+      return affectedModules.size > 0 ? Array.from(affectedModules) : undefined;
     },
   };
 }

@@ -3889,6 +3889,68 @@ Deno.test("vite invalidates style owner modules when imported theme files change
   }
 });
 
+Deno.test("vite hot updates resolve owner modules through moduleGraph.getModulesByFile", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const configureServer = asHook(plugin.configureServer);
+    const transform = asHook(plugin.transform);
+    const handleHotUpdate = asHook(plugin.handleHotUpdate);
+    const themesId = `${root}/src/lib/themes.ts`;
+    const pageId = `${root}/src/routes/+layout.svelte`;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.mkdirSync(`${root}/src/routes`, { recursive: true });
+    Deno.writeTextFileSync(
+      themesId,
+      `import { Theme } from "css-ts";\n` +
+        `const light = new Theme({ bg: "white", fg: "black" });\n` +
+        `const dark = new Theme({ bg: "black", fg: "white" });\n` +
+        `export default { light, dark } as const;\n`,
+    );
+
+    const source = `<script lang="ts">\n` +
+      `import ct from "css-ts";\n` +
+      `import Themes from "../lib/themes.ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.themes = { default: Themes.light, dark: Themes.dark };\n` +
+      `</script>\n` +
+      `<div></div>`;
+
+    const scriptModule = { id: `${pageId}?svelte&type=script&lang.ts` };
+    const mainModule = { id: pageId };
+    const invalidated: string[] = [];
+
+    configResolved({ root, resolve: { alias: [] } });
+    configureServer({
+      moduleGraph: {
+        getModuleById: () => null,
+        getModulesByFile: (file: string) =>
+          file === pageId ? new Set([mainModule, scriptModule]) : undefined,
+        invalidateModule: (module: { id: string }) => {
+          invalidated.push(module.id);
+        },
+      },
+    });
+
+    const transformed = transform(source, pageId);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const affected = handleHotUpdate({ file: themesId });
+
+    assert(Array.isArray(affected));
+    assert(invalidated.includes(pageId));
+    assert(
+      invalidated.includes(`${pageId}?svelte&type=script&lang.ts`),
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("toCssRules resolves $ prefixed keys as @scope blocks", () => {
   const rules = toCssRules(
     "test",
