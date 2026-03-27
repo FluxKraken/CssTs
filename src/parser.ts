@@ -1706,9 +1706,7 @@ function maskStringsAndComments(input: string): string {
         continue;
       }
       if (char === "\\") {
-        if (char !== "\n") {
-          chars[i] = " ";
-        }
+        chars[i] = " ";
         escaped = true;
         continue;
       }
