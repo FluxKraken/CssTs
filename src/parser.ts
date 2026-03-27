@@ -276,15 +276,14 @@ function parseThemeEval(
     throw new Error("tv.eval() expects a single string argument");
   }
 
-  cursor = skipWhitespace(input, templateEnd);
-  if (input[cursor] === ",") {
-    throw new Error("tv.eval() accepts a single string argument");
-  }
-  if (input[cursor] !== ")") {
-    throw new Error("Expected ')' after tv.eval() call");
-  }
+  cursor = parseCallTerminator(
+    input,
+    templateEnd,
+    "tv.eval() accepts a single string argument",
+    "Expected ')' after tv.eval() call",
+  );
 
-  return [evalThemeTemplate(templateValue), cursor + 1];
+  return [evalThemeTemplate(templateValue), cursor];
 }
 
 function parseThemeConstructor(
@@ -310,18 +309,39 @@ function parseThemeConstructor(
     throw new Error("Theme() expects an object literal");
   }
 
-  cursor = skipWhitespace(input, argumentEnd);
-  if (input[cursor] === ",") {
-    throw new Error("Theme() accepts a single object argument");
-  }
-  if (input[cursor] !== ")") {
-    throw new Error("Expected ')' after Theme() call");
-  }
+  cursor = parseCallTerminator(
+    input,
+    argumentEnd,
+    "Theme() accepts a single object argument",
+    "Expected ')' after Theme() call",
+  );
 
   return [{
     kind: "theme-constructor",
     tokens: argumentValue,
-  }, cursor + 1];
+  }, cursor];
+}
+
+function parseCallTerminator(
+  input: string,
+  index: number,
+  extraArgumentError: string,
+  missingTerminatorError: string,
+): number {
+  let cursor = skipWhitespace(input, index);
+
+  if (input[cursor] === ",") {
+    cursor = skipWhitespace(input, cursor + 1);
+    if (input[cursor] !== ")") {
+      throw new Error(extraArgumentError);
+    }
+  }
+
+  if (input[cursor] !== ")") {
+    throw new Error(missingTerminatorError);
+  }
+
+  return cursor + 1;
 }
 
 function parseDashedIdentifierLiteral(
@@ -455,21 +475,30 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
       let fallback: string | number | undefined;
       if (input[cursor] === ",") {
-        const [fallbackValue, fallbackEnd] = parseValue(input, cursor + 1);
-        if (
-          typeof fallbackValue !== "string" && typeof fallbackValue !== "number"
-        ) {
-          throw new Error("cv() fallback must be a string or number");
+        const fallbackStart = skipWhitespace(input, cursor + 1);
+        if (input[fallbackStart] !== ")") {
+          const [fallbackValue, fallbackEnd] = parseValue(input, fallbackStart);
+          if (
+            typeof fallbackValue !== "string" &&
+            typeof fallbackValue !== "number"
+          ) {
+            throw new Error("cv() fallback must be a string or number");
+          }
+          fallback = fallbackValue;
+          cursor = fallbackEnd;
+        } else {
+          cursor = cursor + 1;
         }
-        fallback = fallbackValue;
-        cursor = skipWhitespace(input, fallbackEnd);
       }
 
-      if (input[cursor] !== ")") {
-        throw new Error("Expected ')' after cv() call");
-      }
+      cursor = parseCallTerminator(
+        input,
+        cursor,
+        "cv() accepts at most two arguments",
+        "Expected ')' after cv() call",
+      );
 
-      return [cv(variableName, fallback), cursor + 1];
+      return [cv(variableName, fallback), cursor];
     }
 
     return parseIdentifierReference(input, identifier, identifierEnd);

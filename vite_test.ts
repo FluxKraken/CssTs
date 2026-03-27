@@ -948,6 +948,49 @@ Deno.test("parser resolves multiline tv.eval() theme templates", () => {
   );
 });
 
+Deno.test("parser accepts trailing comma in tv.eval() calls", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      hero: {
+        backgroundImage: tv.eval(
+          "linear-gradient(147deg, {bgGradient1}, {bgGradient2})",
+        )
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(
+    parsed.base.hero.backgroundImage,
+    "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
+  );
+});
+
+Deno.test("parser accepts trailing commas in Theme() and cv() calls", () => {
+  const parsed = parseCtCallArguments(`{
+    themes: {
+      default: new Theme({
+        bg: "#123456",
+      },),
+    },
+    base: {
+      hero: {
+        backgroundColor: cv("--bg",),
+        padding: cv("--space", 8,),
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.root, [
+    {
+      "--bg": "#123456",
+    },
+  ]);
+  assertEquals(parsed.base.hero.backgroundColor, cv("--bg"));
+  assertEquals(parsed.base.hero.padding, cv("--space", 8));
+});
+
 Deno.test("runtime injects root into :root and layered :root", () => {
   type FakeStyleTag = {
     id: string;
