@@ -507,6 +507,19 @@ function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
     return code;
   }
 
+  const styleOpenMatch = code.match(/<style\b[^>]*>/);
+  if (styleOpenMatch && styleOpenMatch.index !== undefined) {
+    const styleOpenEnd = styleOpenMatch.index + styleOpenMatch[0].length;
+    const styleCloseIndex = code.indexOf("</style>", styleOpenEnd);
+    if (styleCloseIndex !== -1) {
+      const needsLeadingNewline = !code.slice(0, styleCloseIndex).endsWith("\n");
+      const cssPrefix = needsLeadingNewline ? "\n" : "";
+      return code.slice(0, styleCloseIndex) +
+        `${cssPrefix}${css}\n` +
+        code.slice(styleCloseIndex);
+    }
+  }
+
   return `${code}\n<style>\n${css}\n</style>\n`;
 }
 
@@ -1940,8 +1953,244 @@ function stripTypeAnnotationsFromParameters(source: string): string {
     .join(", ");
 }
 
+function findMatchingParen(source: string, openIndex: number): number {
+  let depth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = openIndex; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (inLineComment) {
+      if (char === "\n" || char === "\r") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function findArrowAfterParams(
+  source: string,
+  closeIndex: number,
+): { arrowIndex: number; returnTypeStart: number | null } | null {
+  let cursor = closeIndex + 1;
+  while (cursor < source.length && /\s/.test(source[cursor])) {
+    cursor += 1;
+  }
+
+  if (source[cursor] === "=" && source[cursor + 1] === ">") {
+    return { arrowIndex: cursor, returnTypeStart: null };
+  }
+
+  if (source[cursor] !== ":") {
+    return null;
+  }
+
+  const returnTypeStart = cursor;
+  cursor += 1;
+
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let angleDepth = 0;
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (; cursor < source.length; cursor += 1) {
+    const char = source[cursor];
+    const next = source[cursor + 1];
+
+    if (inLineComment) {
+      if (char === "\n" || char === "\r") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        cursor += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === inString) {
+        inString = "";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      cursor += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      cursor += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      continue;
+    }
+    if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+    if (char === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (char === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (char === "<") {
+      angleDepth += 1;
+      continue;
+    }
+    if (char === ">") {
+      angleDepth = Math.max(0, angleDepth - 1);
+      continue;
+    }
+
+    if (
+      char === "=" &&
+      next === ">" &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0 &&
+      angleDepth === 0
+    ) {
+      return { arrowIndex: cursor, returnTypeStart };
+    }
+  }
+
+  return null;
+}
+
+function stripArrowFunctionTypeAnnotations(source: string): string {
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const openIndex = source.indexOf("(", cursor);
+    if (openIndex === -1) {
+      output += source.slice(cursor);
+      break;
+    }
+
+    const closeIndex = findMatchingParen(source, openIndex);
+    if (closeIndex === -1) {
+      output += source.slice(cursor);
+      break;
+    }
+
+    const arrowInfo = findArrowAfterParams(source, closeIndex);
+    if (!arrowInfo) {
+      output += source.slice(cursor, openIndex + 1);
+      cursor = openIndex + 1;
+      continue;
+    }
+
+    output += source.slice(cursor, openIndex + 1);
+    output += stripTypeAnnotationsFromParameters(
+      source.slice(openIndex + 1, closeIndex),
+    );
+    output += ")";
+    if (arrowInfo.returnTypeStart === null) {
+      output += source.slice(closeIndex + 1, arrowInfo.arrowIndex);
+    } else {
+      output += source.slice(closeIndex + 1, arrowInfo.returnTypeStart);
+    }
+    output += "=>";
+    cursor = arrowInfo.arrowIndex + 2;
+  }
+
+  return output;
+}
+
 function stripTypeScriptSnippetFallback(source: string): string {
-  return source
+  return stripArrowFunctionTypeAnnotations(
+    source
     .replace(
       /function(\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)\s*(?::\s*[^({=]+)?\s*\{/g,
       (_match, name: string | undefined, params: string) =>
@@ -1949,13 +2198,9 @@ function stripTypeScriptSnippetFallback(source: string): string {
           stripTypeAnnotationsFromParameters(params)
         }) {`,
     )
-    .replace(
-      /\(([^)]*)\)\s*(?::\s*[^=({]+)?\s*=>/g,
-      (_match, params: string) =>
-        `(${stripTypeAnnotationsFromParameters(params)}) =>`,
-    )
     .replace(/\s+as\s+const\b/g, "")
-    .trim();
+    .trim(),
+  );
 }
 
 function transpileTsSnippet(source: string): string {

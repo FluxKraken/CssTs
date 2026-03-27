@@ -91,6 +91,27 @@ Deno.test("svelte style block keeps @media outside :global wrappers", () => {
   );
 });
 
+Deno.test("merges css-ts component CSS into an existing svelte style block", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+
+  const source = `<script lang="ts">\nimport ct from "css-ts";\n` +
+    `const styles = ct({ base: { card: { display: "grid", gap: "1rem" } } });\n` +
+    `</script>\n\n` +
+    `<style>\n.card-shell { padding: 1rem; }\n</style>\n\n` +
+    `<div class={styles().card()}></div>`;
+
+  const transformed = transform(source, "/app/src/lib/components/Card.svelte");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assertEquals((code.match(/<style\b/g) ?? []).length, 1);
+  assert(code.includes(".card-shell { padding: 1rem; }"));
+  assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid;gap:1rem\}/);
+});
+
 Deno.test("injects virtual stylesheet import and extracts css for direct ct usage in astro", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
