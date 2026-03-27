@@ -930,6 +930,24 @@ Deno.test("parser resolves tv.eval() theme templates", () => {
   );
 });
 
+Deno.test("parser resolves multiline tv.eval() theme templates", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      hero: {
+        backgroundImage: tv.eval(
+          "linear-gradient(147deg, {bgGradient1}, {bgGradient2})"
+        )
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(
+    parsed.base.hero.backgroundImage,
+    "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
+  );
+});
+
 Deno.test("runtime injects root into :root and layered :root", () => {
   type FakeStyleTag = {
     id: string;
@@ -3483,6 +3501,19 @@ styles.global = { html: { margin: 0 } };`;
   assertEquals(decls[0].assignments[0].property, "base");
   assertEquals(decls[0].assignments[1].property, "root");
   assertEquals(decls[0].assignments[2].property, "global");
+});
+
+Deno.test("parser findNewCtDeclarations ignores commented assignments", () => {
+  const code = `import ct from "css-ts";
+const styles = new ct();
+styles.base = { myButton: { backgroundColor: "black" } };
+// styles.global = { body: { background: tv.eval("linear-gradient(147deg, {bgGradient1}, {bgGradient2})") } };
+/* styles.root = [{ "--accent": "deepskyblue" }]; */`;
+
+  const decls = findNewCtDeclarations(code);
+  assertEquals(decls.length, 1);
+  assertEquals(decls[0].assignments.length, 1);
+  assertEquals(decls[0].assignments[0].property, "base");
 });
 
 Deno.test("vite extracts css from new ct() pattern", () => {

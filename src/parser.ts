@@ -1663,6 +1663,91 @@ export function findExpressionTerminator(input: string, start: number): number {
   return input.length;
 }
 
+function maskStringsAndComments(input: string): string {
+  const chars = input.split("");
+  let inString: "" | '"' | "'" | "`" = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < chars.length; i += 1) {
+    const char = chars[i];
+    const next = chars[i + 1];
+
+    if (inLineComment) {
+      if (char === "\n") {
+        inLineComment = false;
+        continue;
+      }
+      chars[i] = " ";
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        chars[i] = " ";
+        chars[i + 1] = " ";
+        inBlockComment = false;
+        i += 1;
+        continue;
+      }
+      if (char !== "\n") {
+        chars[i] = " ";
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        if (char !== "\n") {
+          chars[i] = " ";
+        }
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        if (char !== "\n") {
+          chars[i] = " ";
+        }
+        escaped = true;
+        continue;
+      }
+      if (char === inString) {
+        chars[i] = " ";
+        inString = "";
+        continue;
+      }
+      if (char !== "\n") {
+        chars[i] = " ";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      chars[i] = " ";
+      chars[i + 1] = " ";
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      chars[i] = " ";
+      chars[i + 1] = " ";
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      chars[i] = " ";
+      inString = char;
+    }
+  }
+
+  return chars.join("");
+}
+
 type NewCtAssignment = {
   property: string;
   start: number;
@@ -1683,10 +1768,15 @@ type NewCtDeclaration = {
  */
 export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
   const declarations: NewCtDeclaration[] = [];
+  const searchable = maskStringsAndComments(code);
   const matcher =
     /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(\s*\)/g;
 
-  for (let match = matcher.exec(code); match; match = matcher.exec(code)) {
+  for (
+    let match = matcher.exec(searchable);
+    match;
+    match = matcher.exec(searchable)
+  ) {
     const varName = match[2];
     const declStart = match.index;
     const declEnd = matcher.lastIndex;
@@ -1699,9 +1789,9 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
     assignmentMatcher.lastIndex = declEnd;
 
     for (
-      let aMatch = assignmentMatcher.exec(code);
+      let aMatch = assignmentMatcher.exec(searchable);
       aMatch;
-      aMatch = assignmentMatcher.exec(code)
+      aMatch = assignmentMatcher.exec(searchable)
     ) {
       const property = aMatch[1];
       const assignStart = aMatch.index;
@@ -1724,9 +1814,9 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
     importMatcher.lastIndex = declEnd;
 
     for (
-      let iMatch = importMatcher.exec(code);
+      let iMatch = importMatcher.exec(searchable);
       iMatch;
-      iMatch = importMatcher.exec(code)
+      iMatch = importMatcher.exec(searchable)
     ) {
       const assignStart = iMatch.index;
       const valueStart = iMatch.index + iMatch[0].length;
