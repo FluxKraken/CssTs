@@ -402,6 +402,52 @@ Deno.test("extends transform scope with css.config.ts include paths", () => {
   }
 });
 
+Deno.test("nested vite roots load parent css.config.ts and transform vite-root svelte files", () => {
+  const root = Deno.makeTempDirSync();
+  const viteRoot = `${root}/src/mainview`;
+
+  try {
+    Deno.mkdirSync(viteRoot, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  defaultUnit: "rem",\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root: viteRoot, resolve: { alias: [] } });
+
+    const source = `<script lang="ts">\n` +
+      `import ct from "css-ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = {\n` +
+      `  wrapper: {\n` +
+      `    display: "grid",\n` +
+      `    gap: 1,\n` +
+      `  },\n` +
+      `};\n` +
+      `</script>\n\n` +
+      `<div class={styles().wrapper()}></div>`;
+
+    const transformed = transform(source, `${viteRoot}/App.svelte`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(code.includes('import "virtual:css-ts/styles.css";'));
+    assert(code.includes('"defaultUnit":"rem"'));
+    assert(!code.includes("new ct()"));
+    assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{display:grid;gap:1rem\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("cv() formats css variable references", () => {
   assertEquals(
     toCssDeclaration("backgroundColor", cv("--background")),

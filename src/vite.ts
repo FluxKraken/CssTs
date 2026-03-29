@@ -34,6 +34,20 @@ const STATIC_STYLE_EXTENSIONS = [
   ".mts",
   ".cts",
 ];
+const CSS_CONFIG_FILENAMES = [
+  "css.config.ts",
+  "css.config.mts",
+  "css.config.js",
+  "css.config.mjs",
+  "css.config.cts",
+  "css.config.cjs",
+] as const;
+const PROJECT_ROOT_MARKERS = [
+  ...CSS_CONFIG_FILENAMES,
+  "package.json",
+  "deno.json",
+  "tsconfig.json",
+] as const;
 
 type ImportBinding =
   | {
@@ -101,6 +115,7 @@ type ViteTransformContextLike = {
 
 type ImportResolverOptions = {
   projectRoot: string;
+  viteRoot: string;
   viteAliases: readonly ViteAliasEntry[];
   tsconfigResolver: TsconfigPathResolver | null;
 };
@@ -512,7 +527,9 @@ function addSvelteStyleBlock(code: string, rules: Iterable<string>): string {
     const styleOpenEnd = styleOpenMatch.index + styleOpenMatch[0].length;
     const styleCloseIndex = code.indexOf("</style>", styleOpenEnd);
     if (styleCloseIndex !== -1) {
-      const needsLeadingNewline = !code.slice(0, styleCloseIndex).endsWith("\n");
+      const needsLeadingNewline = !code.slice(0, styleCloseIndex).endsWith(
+        "\n",
+      );
       const cssPrefix = needsLeadingNewline ? "\n" : "";
       return code.slice(0, styleCloseIndex) +
         `${cssPrefix}${css}\n` +
@@ -1009,24 +1026,44 @@ function parseModuleStaticInfo(code: string): ModuleStaticInfo {
   };
 }
 
-function findCssConfigPath(projectRoot: string): string | null {
-  const candidates = [
-    "css.config.ts",
-    "css.config.mts",
-    "css.config.js",
-    "css.config.mjs",
-    "css.config.cts",
-    "css.config.cjs",
-  ];
+function findFileUpwards(
+  startDir: string,
+  candidates: readonly string[],
+): string | null {
+  let currentDir = getNodePath().resolve(startDir);
 
-  for (const candidate of candidates) {
-    const fullPath = getNodePath().resolve(projectRoot, candidate);
-    if (getNodeFs().existsSync(fullPath)) {
-      return fullPath;
+  while (true) {
+    for (const candidate of candidates) {
+      const fullPath = getNodePath().resolve(currentDir, candidate);
+      if (
+        getNodeFs().existsSync(fullPath) &&
+        getNodeFs().statSync(fullPath).isFile()
+      ) {
+        return fullPath;
+      }
     }
-  }
 
-  return null;
+    const parentDir = getNodePath().dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
+
+function findCssConfigPath(searchStart: string): string | null {
+  return findFileUpwards(searchStart, CSS_CONFIG_FILENAMES);
+}
+
+function findProjectRoot(searchStart: string): string {
+  const markerPath = findFileUpwards(searchStart, PROJECT_ROOT_MARKERS);
+  return markerPath
+    ? getNodePath().dirname(markerPath)
+    : getNodePath().resolve(searchStart);
+}
+
+function findTsconfigPath(searchStart: string): string | null {
+  return findFileUpwards(searchStart, ["tsconfig.json"]);
 }
 
 function extractDefaultExportExpression(source: string): string | null {
@@ -1136,7 +1173,7 @@ function normalizeDebugOptions(
   };
 }
 
-function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
+function normalizeIncludePaths(value: unknown, baseDir: string): string[] {
   const entries = typeof value === "string"
     ? [value]
     : Array.isArray(value)
@@ -1150,7 +1187,7 @@ function normalizeIncludePaths(value: unknown, projectRoot: string): string[] {
       getNodePath().normalize(
         getNodePath().isAbsolute(entry)
           ? entry
-          : getNodePath().resolve(projectRoot, entry),
+          : getNodePath().resolve(baseDir, entry),
       )
     );
 
@@ -1180,7 +1217,7 @@ function toBrowserStylesheetPath(
   };
 
   const toProjectPath = (resolvedFile: string): string | null => {
-    const relative = getNodePath().relative(options.projectRoot, resolvedFile)
+    const relative = getNodePath().relative(options.viteRoot, resolvedFile)
       .split(getNodePath().sep).join("/");
     if (relative.startsWith("..")) {
       return null;
@@ -1356,13 +1393,15 @@ function toRuntimeCtConfigLiteral(parsed: {
 }
 
 function loadCssConfig(
-  projectRoot: string,
+  searchStart: string,
   resolverOptions: {
+    projectRoot: string;
+    viteRoot: string;
     viteAliases: readonly ViteAliasEntry[];
     tsconfigResolver: TsconfigPathResolver | null;
   },
 ): LoadedCssConfig {
-  const configPath = findCssConfigPath(projectRoot);
+  const configPath = findCssConfigPath(searchStart);
   if (!configPath) {
     return {
       path: null,
@@ -1386,6 +1425,7 @@ function loadCssConfig(
   }
 
   const source = getNodeFs().readFileSync(configPath, "utf8");
+  const configDir = getNodePath().dirname(configPath);
   const dependencies = new Set<string>();
   const sideEffectImports: string[] = [];
   const cssImportMatcher = /import\s*["']([^"']+\.css(?:\?[^"']*)?)["']\s*;?/g;
@@ -1538,7 +1578,8 @@ function loadCssConfig(
               moduleId,
               binding.source,
               {
-                projectRoot,
+                projectRoot: resolverOptions.projectRoot,
+                viteRoot: resolverOptions.viteRoot,
                 viteAliases: resolverOptions.viteAliases,
                 tsconfigResolver: resolverOptions.tsconfigResolver,
               },
@@ -1685,7 +1726,8 @@ function loadCssConfig(
   const resolvedImports = dedupedRawImports
     .map((importPath) =>
       toBrowserStylesheetPath(importPath, configPath, {
-        projectRoot,
+        projectRoot: resolverOptions.projectRoot,
+        viteRoot: resolverOptions.viteRoot,
         viteAliases: resolverOptions.viteAliases,
         tsconfigResolver: resolverOptions.tsconfigResolver,
       })
@@ -1693,7 +1735,7 @@ function loadCssConfig(
     .filter((entry): entry is string => Boolean(entry));
   const allImports = Array.from(new Set(resolvedImports));
 
-  const include = normalizeIncludePaths(configObject.include, projectRoot);
+  const include = normalizeIncludePaths(configObject.include, configDir);
   const themeRules = parsedThemes
     ? toCssGlobalRules(
       {
@@ -2191,15 +2233,15 @@ function stripArrowFunctionTypeAnnotations(source: string): string {
 function stripTypeScriptSnippetFallback(source: string): string {
   return stripArrowFunctionTypeAnnotations(
     source
-    .replace(
-      /function(\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)\s*(?::\s*[^({=]+)?\s*\{/g,
-      (_match, name: string | undefined, params: string) =>
-        `function${name ?? ""}(${
-          stripTypeAnnotationsFromParameters(params)
-        }) {`,
-    )
-    .replace(/\s+as\s+const\b/g, "")
-    .trim(),
+      .replace(
+        /function(\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)\s*(?::\s*[^({=]+)?\s*\{/g,
+        (_match, name: string | undefined, params: string) =>
+          `function${name ?? ""}(${
+            stripTypeAnnotationsFromParameters(params)
+          }) {`,
+      )
+      .replace(/\s+as\s+const\b/g, "")
+      .trim(),
   );
 }
 
@@ -2613,13 +2655,10 @@ function loadTsconfigCompilerOptions(
 }
 
 function createTsconfigResolver(
-  projectRoot: string,
+  searchStart: string,
 ): TsconfigPathResolver | null {
-  const tsconfigPath = getNodePath().resolve(projectRoot, "tsconfig.json");
-  if (
-    !getNodeFs().existsSync(tsconfigPath) ||
-    !getNodeFs().statSync(tsconfigPath).isFile()
-  ) {
+  const tsconfigPath = findTsconfigPath(searchStart);
+  if (!tsconfigPath) {
     return null;
   }
 
@@ -2628,7 +2667,8 @@ function createTsconfigResolver(
     return null;
   }
 
-  const baseUrl = compilerOptions.baseUrl ?? projectRoot;
+  const tsconfigDir = getNodePath().dirname(tsconfigPath);
+  const baseUrl = compilerOptions.baseUrl ?? tsconfigDir;
   const pathMatchers: TsconfigPathMatcher[] = [];
 
   for (const [pattern, targets] of Object.entries(compilerOptions.paths)) {
@@ -2746,7 +2786,7 @@ function applyViteAlias(source: string, alias: ViteAliasEntry): string | null {
 function resolveAliasedPath(
   importerId: string,
   source: string,
-  projectRoot: string,
+  options: Pick<ImportResolverOptions, "projectRoot" | "viteRoot">,
 ): string | null {
   if (source.startsWith(".")) {
     return resolveFileFromBase(
@@ -2756,7 +2796,7 @@ function resolveAliasedPath(
 
   if (getNodePath().isAbsolute(source)) {
     const rootRelative = resolveFileFromBase(
-      getNodePath().resolve(projectRoot, `.${source}`),
+      getNodePath().resolve(options.viteRoot, `.${source}`),
     );
     if (rootRelative) {
       return rootRelative;
@@ -2768,7 +2808,18 @@ function resolveAliasedPath(
     return null;
   }
 
-  return resolveFileFromBase(getNodePath().resolve(projectRoot, source));
+  const projectRelative = resolveFileFromBase(
+    getNodePath().resolve(options.projectRoot, source),
+  );
+  if (projectRelative) {
+    return projectRelative;
+  }
+
+  if (options.viteRoot !== options.projectRoot) {
+    return resolveFileFromBase(getNodePath().resolve(options.viteRoot, source));
+  }
+
+  return null;
 }
 
 function inferProjectRootFromImporter(importerId: string): string | null {
@@ -2797,7 +2848,7 @@ function resolveImportToFile(
 
   if (source.startsWith("/")) {
     const resolvedRootRelative = resolveFileFromBase(
-      getNodePath().resolve(options.projectRoot, `.${source}`),
+      getNodePath().resolve(options.viteRoot, `.${source}`),
     );
     if (resolvedRootRelative) {
       return resolvedRootRelative;
@@ -2814,7 +2865,7 @@ function resolveImportToFile(
     const resolvedAliased = resolveAliasedPath(
       importerId,
       aliased,
-      options.projectRoot,
+      options,
     );
     if (resolvedAliased) {
       return resolvedAliased;
@@ -2843,7 +2894,7 @@ function resolveImportToFile(
   return null;
 }
 
-function moduleIdToFilePath(id: string, projectRoot: string): string | null {
+function moduleIdToFilePath(id: string, viteRoot: string): string | null {
   if (id.startsWith("\0")) {
     return null;
   }
@@ -2870,7 +2921,7 @@ function moduleIdToFilePath(id: string, projectRoot: string): string | null {
       return absolute;
     }
 
-    const rootRelative = getNodePath().resolve(projectRoot, `.${normalizedId}`);
+    const rootRelative = getNodePath().resolve(viteRoot, `.${normalizedId}`);
     if (getNodeFs().existsSync(rootRelative)) {
       return getNodePath().normalize(rootRelative);
     }
@@ -2879,7 +2930,7 @@ function moduleIdToFilePath(id: string, projectRoot: string): string | null {
   }
 
   return getNodePath().normalize(
-    getNodePath().resolve(projectRoot, normalizedId),
+    getNodePath().resolve(viteRoot, normalizedId),
   );
 }
 
@@ -2891,12 +2942,17 @@ function isPathWithinScope(filePath: string, scopePath: string): boolean {
 
 function isInDefaultTransformScope(
   id: string,
+  viteRoot: string,
   projectRoot: string,
   includePaths: readonly string[],
 ): boolean {
-  const modulePath = moduleIdToFilePath(id, projectRoot);
+  const modulePath = moduleIdToFilePath(id, viteRoot);
   if (!modulePath) {
     return false;
+  }
+
+  if (viteRoot !== projectRoot && isPathWithinScope(modulePath, viteRoot)) {
+    return true;
   }
 
   const srcPath = getNodePath().resolve(projectRoot, "src");
@@ -2929,6 +2985,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   const moduleStaticDependencies = new Map<string, Set<string>>();
   const dependencyOwners = new Map<string, Set<string>>();
   let server: ViteDevServerLike | undefined;
+  let viteRoot = process.cwd();
   let projectRoot = process.cwd();
   let viteAliases: ViteAliasEntry[] = [];
   let tsconfigResolver: TsconfigPathResolver | null = null;
@@ -2954,9 +3011,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
   let resolverInitialized = false;
 
   function initializeResolvers(root: string): void {
-    projectRoot = root;
-    tsconfigResolver = createTsconfigResolver(root);
-    cssConfig = loadCssConfig(root, { viteAliases, tsconfigResolver });
+    viteRoot = root;
+    projectRoot = findProjectRoot(root);
+    tsconfigResolver = createTsconfigResolver(viteRoot);
+    cssConfig = loadCssConfig(viteRoot, {
+      projectRoot,
+      viteRoot,
+      viteAliases,
+      tsconfigResolver,
+    });
     resolverInitialized = true;
   }
 
@@ -2965,7 +3028,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       return;
     }
     const inferredRoot = inferProjectRootFromImporter(importerId);
-    initializeResolvers(inferredRoot ?? projectRoot);
+    initializeResolvers(inferredRoot ?? viteRoot);
   }
 
   function combinedCss(): string {
@@ -3135,9 +3198,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     },
 
     configResolved(config: ViteResolvedConfigLike) {
-      projectRoot = config.root;
+      viteRoot = config.root;
       viteAliases = normalizeViteAliases(config.resolve.alias);
-      initializeResolvers(projectRoot);
+      initializeResolvers(viteRoot);
     },
 
     resolveId(id: string) {
@@ -3178,7 +3241,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
       if (
         !options.include &&
-        !isInDefaultTransformScope(normalizedId, projectRoot, cssConfig.include)
+        !isInDefaultTransformScope(
+          normalizedId,
+          viteRoot,
+          projectRoot,
+          cssConfig.include,
+        )
       ) {
         return null;
       }
@@ -3435,6 +3503,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   binding.source,
                   {
                     projectRoot,
+                    viteRoot,
                     viteAliases,
                     tsconfigResolver,
                   },
@@ -3562,6 +3631,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             normalizedId,
             {
               projectRoot,
+              viteRoot,
               viteAliases,
               tsconfigResolver,
             },
@@ -3946,6 +4016,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             normalizedId,
             {
               projectRoot,
+              viteRoot,
               viteAliases,
               tsconfigResolver,
             },
@@ -4174,7 +4245,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         normalizedId === cleanId(cssConfig.path)) ||
         cssConfig.dependencies.includes(normalizedId);
       if (configChanged) {
-        cssConfig = loadCssConfig(projectRoot, {
+        cssConfig = loadCssConfig(viteRoot, {
+          projectRoot,
+          viteRoot,
           viteAliases,
           tsconfigResolver,
         });

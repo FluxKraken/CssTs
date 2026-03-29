@@ -32,8 +32,10 @@ export default defineConfig({
 ```
 
 By default, `ctVite()` only transforms modules inside `<project-root>/src/**`.
-This avoids transforming third-party code in `node_modules`. Supported file
-types include `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte`, and `.astro`.
+When Vite `root` is nested (for example `src/mainview`), files under that Vite
+root are also included by default. This avoids transforming third-party code in
+`node_modules`. Supported file types include `.ts`, `.tsx`, `.js`, `.jsx`,
+`.svelte`, and `.astro`.
 
 To include extra directories, add `include` paths in root `css.config.ts`:
 
@@ -634,7 +636,9 @@ styles.addContainer({
 ### Global `css.config.ts`
 
 Create a config file at project root to define project-wide imports,
-breakpoints, containers, and utility classes. Supported filenames:
+breakpoints, containers, and utility classes. `css-ts` searches upward from the
+configured Vite root until it finds the nearest matching config file. Supported
+filenames:
 `css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`,
 `css.config.cts`, `css.config.cjs`.
 
