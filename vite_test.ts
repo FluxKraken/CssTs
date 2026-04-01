@@ -4084,6 +4084,65 @@ Deno.test("vite invalidates style owner modules when imported theme files change
   }
 });
 
+Deno.test("vite hot updates return virtual CSS modules for managed style files", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const configureServer = asHook(plugin.configureServer);
+    const transform = asHook(plugin.transform);
+    const handleHotUpdate = asHook(plugin.handleHotUpdate);
+    const stylesId = `${root}/src/lib/styles.ts`;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    const source = `import ct from "css-ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.base = { wrapper: { display: "grid", gap: "1rem" } };\n` +
+      `export default styles;\n`;
+
+    const stylesModule = { id: stylesId };
+    const globalCssModule = { id: VIRTUAL_ID };
+    const scopedCssModule = { id: scopedVirtualId(stylesId) };
+    const invalidated: string[] = [];
+
+    configResolved({ root, resolve: { alias: [] } });
+    configureServer({
+      moduleGraph: {
+        getModuleById: (id: string) => {
+          if (id === stylesId) return stylesModule;
+          if (id === VIRTUAL_ID) return globalCssModule;
+          if (id === scopedVirtualId(stylesId)) return scopedCssModule;
+          return null;
+        },
+        getModulesByFile: (file: string) =>
+          file === stylesId ? new Set([stylesModule]) : undefined,
+        invalidateModule: (module: { id: string }) => {
+          invalidated.push(module.id);
+        },
+      },
+    });
+
+    const transformed = transform(source, stylesId);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const affected = handleHotUpdate({ file: stylesId });
+    assert(Array.isArray(affected));
+
+    const affectedIds = (affected as Array<{ id: string }>).map((module) =>
+      module.id
+    );
+    assert(affectedIds.includes(stylesId));
+    assert(affectedIds.includes(VIRTUAL_ID));
+    assert(affectedIds.includes(scopedVirtualId(stylesId)));
+    assert(invalidated.includes(VIRTUAL_ID));
+    assert(invalidated.includes(scopedVirtualId(stylesId)));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("vite hot updates resolve owner modules through moduleGraph.getModulesByFile", () => {
   const root = Deno.makeTempDirSync();
   try {

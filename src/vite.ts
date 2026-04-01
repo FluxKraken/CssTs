@@ -3225,12 +3225,16 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     }
   }
 
-  function invalidateModuleById(id: string): void {
-    if (!server) return;
+  function invalidateModuleById(id: string): unknown[] {
+    if (!server) {
+      return [];
+    }
     const module = server.moduleGraph.getModuleById(id);
     if (module) {
       server.moduleGraph.invalidateModule(module);
+      return [module];
     }
+    return [];
   }
 
   function invalidateModulesByFile(file: string): unknown[] {
@@ -3256,11 +3260,17 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     return [fallback];
   }
 
-  function invalidateVirtualModules(moduleIds: Iterable<string> = []): void {
-    invalidateModuleById(RESOLVED_VIRTUAL_ID);
-    for (const moduleId of moduleIds) {
-      invalidateModuleById(resolvedModuleVirtualId(moduleId));
+  function invalidateVirtualModules(moduleIds: Iterable<string> = []): unknown[] {
+    const invalidated = new Set<unknown>();
+    for (const module of invalidateModuleById(RESOLVED_VIRTUAL_ID)) {
+      invalidated.add(module);
     }
+    for (const moduleId of moduleIds) {
+      for (const module of invalidateModuleById(resolvedModuleVirtualId(moduleId))) {
+        invalidated.add(module);
+      }
+    }
+    return Array.from(invalidated);
   }
 
   function invalidateManagedModules(moduleIds: Iterable<string>): unknown[] {
@@ -3275,7 +3285,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         invalidated.add(module);
       }
     }
-    invalidateVirtualModules(normalizedIds);
+    for (const module of invalidateVirtualModules(normalizedIds)) {
+      invalidated.add(module);
+    }
     return Array.from(invalidated);
   }
 
@@ -4369,7 +4381,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       if (clearManagedModuleState(normalizedId)) {
-        invalidateVirtualModules([normalizedId]);
+        for (const module of invalidateVirtualModules([normalizedId])) {
+          affectedModules.add(module);
+        }
         for (const module of invalidateModulesByFile(normalizedId)) {
           affectedModules.add(module);
         }
