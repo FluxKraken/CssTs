@@ -4143,6 +4143,59 @@ Deno.test("vite hot updates return virtual CSS modules for managed style files",
   }
 });
 
+Deno.test("vite hot updates invalidate managed modules with timestamped HMR invalidation", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const configureServer = asHook(plugin.configureServer);
+    const transform = asHook(plugin.transform);
+    const handleHotUpdate = asHook(plugin.handleHotUpdate);
+    const stylesId = `${root}/src/lib/styles.ts`;
+    const timestamp = 1234567890;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.writeTextFileSync(
+      stylesId,
+      `import ct from "css-ts";\n` +
+        `const styles = new ct();\n` +
+        `styles.base = { wrapper: { display: "grid", gap: "1rem" } };\n` +
+        `export default styles;\n`,
+    );
+
+    const invalidationCalls: unknown[][] = [];
+
+    configResolved({ root, resolve: { alias: [] } });
+    configureServer({
+      moduleGraph: {
+        getModuleById: (id: string) => ({ id }),
+        getModulesByFile: (file: string) =>
+          file === stylesId ? new Set([{ id: stylesId }]) : undefined,
+        invalidateModule: (...args: unknown[]) => {
+          invalidationCalls.push(args);
+        },
+      },
+    });
+
+    const transformed = transform(Deno.readTextFileSync(stylesId), stylesId);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const priorInvalidationCount = invalidationCalls.length;
+    handleHotUpdate({ file: stylesId, timestamp });
+
+    const hotInvalidations = invalidationCalls.slice(priorInvalidationCount);
+    assert(hotInvalidations.length > 0);
+    for (const [, , callTimestamp, isHmr] of hotInvalidations) {
+      assertEquals(callTimestamp, timestamp);
+      assertEquals(isHmr, true);
+    }
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("vite hot updates resolve owner modules through moduleGraph.getModulesByFile", () => {
   const root = Deno.makeTempDirSync();
   try {

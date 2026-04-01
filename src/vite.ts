@@ -109,7 +109,12 @@ type TsconfigPathResolver = {
 type ViteModuleGraphLike = {
   getModuleById: (id: string) => unknown;
   getModulesByFile?: (file: string) => Set<unknown> | undefined;
-  invalidateModule: (module: unknown) => void;
+  invalidateModule: (
+    module: unknown,
+    invalidatedModules?: Set<unknown>,
+    timestamp?: number,
+    isHmr?: boolean,
+  ) => void;
 };
 
 type ViteDevServerLike = {
@@ -3225,19 +3230,43 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     }
   }
 
-  function invalidateModuleById(id: string): unknown[] {
+  function invalidateGraphModule(
+    module: unknown,
+    timestamp?: number,
+    invalidatedModules?: Set<unknown>,
+  ): void {
+    if (!server) {
+      return;
+    }
+    server.moduleGraph.invalidateModule(
+      module,
+      invalidatedModules,
+      timestamp,
+      true,
+    );
+  }
+
+  function invalidateModuleById(
+    id: string,
+    timestamp?: number,
+    invalidatedModules?: Set<unknown>,
+  ): unknown[] {
     if (!server) {
       return [];
     }
     const module = server.moduleGraph.getModuleById(id);
     if (module) {
-      server.moduleGraph.invalidateModule(module);
+      invalidateGraphModule(module, timestamp, invalidatedModules);
       return [module];
     }
     return [];
   }
 
-  function invalidateModulesByFile(file: string): unknown[] {
+  function invalidateModulesByFile(
+    file: string,
+    timestamp?: number,
+    invalidatedModules?: Set<unknown>,
+  ): unknown[] {
     if (!server) {
       return [];
     }
@@ -3246,7 +3275,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     if (modules && modules.size > 0) {
       const invalidated = Array.from(modules);
       for (const module of invalidated) {
-        server.moduleGraph.invalidateModule(module);
+        invalidateGraphModule(module, timestamp, invalidatedModules);
       }
       return invalidated;
     }
@@ -3256,24 +3285,44 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       return [];
     }
 
-    server.moduleGraph.invalidateModule(fallback);
+    invalidateGraphModule(fallback, timestamp, invalidatedModules);
     return [fallback];
   }
 
-  function invalidateVirtualModules(moduleIds: Iterable<string> = []): unknown[] {
+  function invalidateVirtualModules(
+    moduleIds: Iterable<string> = [],
+    timestamp?: number,
+    invalidatedModules?: Set<unknown>,
+  ): unknown[] {
     const invalidated = new Set<unknown>();
-    for (const module of invalidateModuleById(RESOLVED_VIRTUAL_ID)) {
+    for (
+      const module of invalidateModuleById(
+        RESOLVED_VIRTUAL_ID,
+        timestamp,
+        invalidatedModules,
+      )
+    ) {
       invalidated.add(module);
     }
     for (const moduleId of moduleIds) {
-      for (const module of invalidateModuleById(resolvedModuleVirtualId(moduleId))) {
+      for (
+        const module of invalidateModuleById(
+          resolvedModuleVirtualId(moduleId),
+          timestamp,
+          invalidatedModules,
+        )
+      ) {
         invalidated.add(module);
       }
     }
     return Array.from(invalidated);
   }
 
-  function invalidateManagedModules(moduleIds: Iterable<string>): unknown[] {
+  function invalidateManagedModules(
+    moduleIds: Iterable<string>,
+    timestamp?: number,
+    invalidatedModules?: Set<unknown>,
+  ): unknown[] {
     const normalizedIds = new Set<string>();
     for (const moduleId of moduleIds) {
       normalizedIds.add(cleanId(moduleId));
@@ -3281,11 +3330,23 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
     const invalidated = new Set<unknown>();
     for (const moduleId of normalizedIds) {
-      for (const module of invalidateModulesByFile(moduleId)) {
+      for (
+        const module of invalidateModulesByFile(
+          moduleId,
+          timestamp,
+          invalidatedModules,
+        )
+      ) {
         invalidated.add(module);
       }
     }
-    for (const module of invalidateVirtualModules(normalizedIds)) {
+    for (
+      const module of invalidateVirtualModules(
+        normalizedIds,
+        timestamp,
+        invalidatedModules,
+      )
+    ) {
       invalidated.add(module);
     }
     return Array.from(invalidated);
@@ -4352,9 +4413,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       };
     },
 
-    handleHotUpdate(ctx: { file: string }) {
+    handleHotUpdate(ctx: { file: string; timestamp?: number }) {
       const normalizedId = cleanId(ctx.file);
       const affectedModules = new Set<unknown>();
+      const graphInvalidated = new Set<unknown>();
       const configChanged = (cssConfig.path &&
         normalizedId === cleanId(cssConfig.path)) ||
         cssConfig.dependencies.includes(normalizedId);
@@ -4365,7 +4427,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           viteAliases,
           tsconfigResolver,
         });
-        for (const module of invalidateManagedModules(managedModules)) {
+        for (
+          const module of invalidateManagedModules(
+            managedModules,
+            ctx.timestamp,
+            graphInvalidated,
+          )
+        ) {
           affectedModules.add(module);
         }
         return affectedModules.size > 0
@@ -4375,16 +4443,34 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
       const affectedOwners = dependencyOwners.get(normalizedId);
       if (affectedOwners && affectedOwners.size > 0) {
-        for (const module of invalidateManagedModules(affectedOwners)) {
+        for (
+          const module of invalidateManagedModules(
+            affectedOwners,
+            ctx.timestamp,
+            graphInvalidated,
+          )
+        ) {
           affectedModules.add(module);
         }
       }
 
       if (clearManagedModuleState(normalizedId)) {
-        for (const module of invalidateVirtualModules([normalizedId])) {
+        for (
+          const module of invalidateVirtualModules(
+            [normalizedId],
+            ctx.timestamp,
+            graphInvalidated,
+          )
+        ) {
           affectedModules.add(module);
         }
-        for (const module of invalidateModulesByFile(normalizedId)) {
+        for (
+          const module of invalidateModulesByFile(
+            normalizedId,
+            ctx.timestamp,
+            graphInvalidated,
+          )
+        ) {
           affectedModules.add(module);
         }
       }
