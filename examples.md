@@ -1,6 +1,7 @@
 # css.config.ts Examples
 
-This project now supports a root-level `css.config.ts` file for global CSS concerns.
+This project now supports a root-level `css.config.ts` file for global CSS
+concerns.
 
 ## Quick Start
 
@@ -38,11 +39,13 @@ export default {
 Two supported ways:
 
 1. Side-effect imports in `css.config.ts`
+
 ```ts
 import "./src/global.css";
 ```
 
 2. `imports` array on default export
+
 ```ts
 export default {
   imports: ["./src/theme.css"],
@@ -81,6 +84,7 @@ const styles = ct({
 ```
 
 `"@md"` expands to:
+
 ```css
 @media (width >= 48rem) { ... }
 ```
@@ -224,7 +228,8 @@ These are emitted globally in the virtual stylesheet.
 
 ## Feature: `@apply` merge list inside class declarations
 
-`@apply` merges declarations in order (left-to-right for arrays, top-to-bottom in object flow).
+`@apply` merges declarations in order (left-to-right for arrays, top-to-bottom
+in object flow).
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -268,7 +273,8 @@ const styles = ct({
 
 ## Feature: Property arrays
 
-Property arrays serialize to space-delimited or comma-delimited CSS values depending on the property.
+Property arrays serialize to space-delimited or comma-delimited CSS values
+depending on the property.
 
 ### Space-delimited (default)
 
@@ -284,13 +290,33 @@ const styles = ct({
 ```
 
 Output:
+
 ```css
 grid-template-rows: auto 1fr auto;
 ```
 
+## Feature: Imported image assets
+
+Imported image URLs can be passed directly to image-capable properties. The
+serializer automatically emits `url(...)`.
+
+```ts
+import ct from "@kt-tools/css-ts";
+import bgImage from "$lib/assets/bg.png";
+
+const styles = new ct();
+
+styles.global = {
+  body: {
+    background: bgImage,
+  },
+};
+```
+
 ### Comma-delimited (specific properties)
 
-Properties like `transition`, `boxShadow`, `fontFamily`, etc., use comma delimitation:
+Properties like `transition`, `boxShadow`, `fontFamily`, etc., use comma
+delimitation:
 
 ```ts
 const styles = ct({
@@ -305,7 +331,8 @@ const styles = ct({
 
 ## Feature: `.import()` method
 
-The `.import()` method on a `ct` instance allows importing external CSS files or global style objects, optionally into specific layers.
+The `.import()` method on a `ct` instance allows importing external CSS files or
+global style objects, optionally into specific layers.
 
 ```ts
 import ct from "@kt-tools/css-ts";
@@ -320,13 +347,15 @@ styles.import({ path: "./theme.css", layer: "theme" });
 styles.import({
   layer: "tools",
   rules: {
-    ".debug": { outline: "1px solid red" }
-  }
+    ".debug": { outline: "1px solid red" },
+  },
 });
 ```
 
 ## Notes
 
 - `css.config.ts` is loaded from project root.
-- Supported config filenames: `css.config.ts`, `.mts`, `.js`, `.mjs`, `.cts`, `.cjs`.
-- Current breakpoint shorthand is `@alias` (for example `@md`), mapped to `@media (width >= value)`.
+- Supported config filenames: `css.config.ts`, `.mts`, `.js`, `.mjs`, `.cts`,
+  `.cjs`.
+- Current breakpoint shorthand is `@alias` (for example `@md`), mapped to
+  `@media (width >= value)`.

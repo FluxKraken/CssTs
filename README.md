@@ -203,8 +203,8 @@ export default config;
 ### Theming
 
 `Theme` turns friendly token names into CSS custom properties, `tv` references
-those variables inside style objects, and `themes` expands themes into
-`:root` plus scoped `@scope` rules.
+those variables inside style objects, and `themes` expands themes into `:root`
+plus scoped `@scope` rules.
 
 ```ts
 import ct, { Theme, tv } from "@kt-tools/css-ts";
@@ -235,8 +235,8 @@ const styles = ct({
 
 Non-`default` keys in `themes` are treated as scoped selectors. A key like
 `dark` becomes `@scope (.dark) { ... }`, while quoted selectors like
-`".contrast"` are used as-is. You can also place the same `themes` object
-in `css.config.ts` to make themes available project-wide.
+`".contrast"` are used as-is. You can also place the same `themes` object in
+`css.config.ts` to make themes available project-wide.
 
 ### Inline style output (`style={...}`)
 
@@ -498,6 +498,26 @@ Commonly used comma-delimited properties like `transition`, `boxShadow`,
 `animation`, `fontFamily`, and `background` are automatically handled. For all
 other properties, arrays produce space-delimited values.
 
+### Imported image assets
+
+Imported image URLs can be assigned directly to image-capable properties such as
+`background`, `backgroundImage`, `mask`, and `maskImage`. `css-ts` will
+serialize them as `url(...)` while leaving gradients, `var(...)`, and existing
+`url(...)` values untouched.
+
+```ts
+import ct from "@kt-tools/css-ts";
+import bgImage from "$lib/assets/bg.png";
+
+const styles = new ct();
+
+styles.global = {
+  body: {
+    background: bgImage,
+  },
+};
+```
+
 ### Global stylesheet and rule imports with `.import()`
 
 Use `.import()` to register global styles, external CSS files, or layered
@@ -638,8 +658,7 @@ styles.addContainer({
 Create a config file at project root to define project-wide imports,
 breakpoints, containers, and utility classes. `css-ts` searches upward from the
 configured Vite root until it finds the nearest matching config file. Supported
-filenames:
-`css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`,
+filenames: `css.config.ts`, `css.config.mts`, `css.config.js`, `css.config.mjs`,
 `css.config.cts`, `css.config.cjs`.
 
 ```ts
@@ -918,8 +937,8 @@ time.
 ## How it works
 
 - In dev, the Vite plugin rewrites static `ct({ ... })` calls and `new ct()`
-  declarations (`global`, `root`, `base`, `variant`, and `defaults`) and
-  serves a virtual CSS module.
+  declarations (`global`, `root`, `base`, `variant`, and `defaults`) and serves
+  a virtual CSS module.
 - In build, that same virtual CSS is bundled as a normal stylesheet, preventing
   flash of unstyled content.
 - If a `ct` call is too dynamic to statically parse, runtime fallback still

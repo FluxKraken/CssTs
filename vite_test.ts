@@ -543,6 +543,21 @@ Deno.test("toCssRules serializes empty content strings in pseudo elements", () =
   );
 });
 
+Deno.test("toCssDeclaration wraps imported image paths in url() for image properties", () => {
+  assertEquals(
+    toCssDeclaration("background", "/src/lib/assets/bg.png"),
+    'background:url("/src/lib/assets/bg.png")',
+  );
+  assertEquals(
+    toCssDeclaration("backgroundImage", "./bg.webp?url"),
+    'background-image:url("./bg.webp?url")',
+  );
+  assertEquals(
+    toCssDeclaration("background", "linear-gradient(147deg, red, blue)"),
+    "background:linear-gradient(147deg, red, blue)",
+  );
+});
+
 Deno.test("toCssRules supports nested selectors and nested @media/@container blocks", () => {
   const rules = toCssRules("test", {
     fontSize: "1.25rem",
@@ -1562,6 +1577,45 @@ Deno.test("extracts @import from svelte ct() into virtual global stylesheet", ()
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/lib/styles/reset.css";'));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("extracts imported image assets used in new ct() global rules", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib/assets`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/src/lib/assets/bg.png`, "png");
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const source = `<script lang="ts">\n` +
+      `import ct from "css-ts";\n` +
+      `import bgImage from "$lib/assets/bg.png";\n` +
+      `const styles = new ct();\n` +
+      `styles.global = { body: { background: bgImage } };\n` +
+      `styles.base = { page: { minHeight: "100vh" } };\n` +
+      `</script>\n\n` +
+      `<main class={styles().page()}></main>`;
+
+    const transformed = transform(source, `${root}/src/routes/+page.svelte`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(!code.includes("styles.global ="));
+    assertMatch(
+      code,
+      /:global\(body\)\{background:url\("\/src\/lib\/assets\/bg\.png"\)\}/,
+    );
+    assertMatch(code, /:global\(\.ct_[a-z0-9]+\)\{min-height:100vh\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

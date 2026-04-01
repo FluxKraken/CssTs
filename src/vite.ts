@@ -34,6 +34,20 @@ const STATIC_STYLE_EXTENSIONS = [
   ".mts",
   ".cts",
 ];
+const IMAGE_ASSET_EXTENSIONS = new Set([
+  ".apng",
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".tif",
+  ".tiff",
+  ".webp",
+]);
 const CSS_CONFIG_FILENAMES = [
   "css.config.ts",
   "css.config.mts",
@@ -1264,6 +1278,70 @@ function toBrowserStylesheetPath(
   return formatResult(bareImportPathRaw);
 }
 
+function stripQueryAndHash(value: string): string {
+  const queryIndex = value.indexOf("?");
+  const hashIndex = value.indexOf("#");
+  const endIndex = queryIndex === -1
+    ? hashIndex
+    : hashIndex === -1
+    ? queryIndex
+    : Math.min(queryIndex, hashIndex);
+  return endIndex === -1 ? value : value.slice(0, endIndex);
+}
+
+function hasRawAssetQuery(value: string): boolean {
+  const queryIndex = value.indexOf("?");
+  if (queryIndex === -1) {
+    return false;
+  }
+
+  const hashIndex = value.indexOf("#", queryIndex);
+  const query = value.slice(
+    queryIndex + 1,
+    hashIndex === -1 ? undefined : hashIndex,
+  );
+  return query.split("&").some((part) => part === "raw");
+}
+
+function isDefaultLikeImport(binding: ImportBinding): boolean {
+  return binding.kind === "default" ||
+    (binding.kind === "named" && binding.imported === "default");
+}
+
+function isImageAssetImportPath(value: string): boolean {
+  if (hasRawAssetQuery(value)) {
+    return false;
+  }
+
+  const normalized = stripQueryAndHash(value).toLowerCase();
+  return IMAGE_ASSET_EXTENSIONS.has(getNodePath().extname(normalized));
+}
+
+function isImageAssetFilePath(value: string): boolean {
+  return IMAGE_ASSET_EXTENSIONS.has(getNodePath().extname(value).toLowerCase());
+}
+
+function resolveStaticImageImport(
+  binding: ImportBinding,
+  tail: readonly string[],
+  importerPath: string,
+  resolvedImportFile: string | null,
+  options: ImportResolverOptions,
+): string | null {
+  if (tail.length > 0 || !isDefaultLikeImport(binding)) {
+    return null;
+  }
+
+  if (
+    !isImageAssetImportPath(binding.source) &&
+    !(resolvedImportFile && isImageAssetFilePath(resolvedImportFile))
+  ) {
+    return null;
+  }
+
+  return toBrowserStylesheetPath(binding.source, importerPath, options);
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -1584,7 +1662,19 @@ function loadCssConfig(
                 tsconfigResolver: resolverOptions.tsconfigResolver,
               },
             );
-            if (resolvedImportFile) {
+            resolved = resolveStaticImageImport(
+              binding,
+              tail,
+              moduleId,
+              resolvedImportFile,
+              {
+                projectRoot: resolverOptions.projectRoot,
+                viteRoot: resolverOptions.viteRoot,
+                viteAliases: resolverOptions.viteAliases,
+                tsconfigResolver: resolverOptions.tsconfigResolver,
+              },
+            );
+            if (resolved === null && resolvedImportFile) {
               const importedModuleInfo = getModuleInfo(resolvedImportFile);
               if (importedModuleInfo) {
                 if (binding.kind === "namespace") {
@@ -3508,7 +3598,19 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                     tsconfigResolver,
                   },
                 );
-                if (resolvedImportFile) {
+                resolved = resolveStaticImageImport(
+                  binding,
+                  tail,
+                  moduleId,
+                  resolvedImportFile,
+                  {
+                    projectRoot,
+                    viteRoot,
+                    viteAliases,
+                    tsconfigResolver,
+                  },
+                );
+                if (resolved === null && resolvedImportFile) {
                   const importedModuleInfo = getModuleInfo(resolvedImportFile);
                   if (importedModuleInfo) {
                     if (binding.kind === "namespace") {

@@ -84,7 +84,8 @@ function isPrimitiveThemeValue(
 
 function isThemeStyleValue(value: unknown): value is StyleValue {
   return isPrimitiveThemeValue(value) ||
-    (Array.isArray(value) && value.every((entry) => isPrimitiveThemeValue(entry)));
+    (Array.isArray(value) &&
+      value.every((entry) => isPrimitiveThemeValue(entry)));
 }
 
 /** Convert a theme token name like `headerBG` to a CSS custom property name. */
@@ -174,7 +175,9 @@ export const tv = new Proxy({} as ThemeVarAccessor, {
   },
 }) as ThemeVarAccessor;
 
-function resolveImportedThemeVars(theme: ThemeInput): Record<string, StyleValue> {
+function resolveImportedThemeVars(
+  theme: ThemeInput,
+): Record<string, StyleValue> {
   return isTheme(theme) ? theme.vars : normalizeThemeTokens(theme);
 }
 
@@ -221,9 +224,10 @@ export function themesToConfig(
     }
 
     const scopeKey = `@scope (${selector})`;
-    const currentRule =
-      (global[scopeKey] as Record<string, StyleValue | StyleDeclaration> | undefined) ??
-        {};
+    const currentRule = (global[scopeKey] as
+      | Record<string, StyleValue | StyleDeclaration>
+      | undefined) ??
+      {};
     const currentScope =
       (currentRule[":scope"] as Record<string, StyleValue> | undefined) ?? {};
     currentRule[":scope"] = { ...currentScope, ...vars };
@@ -282,6 +286,70 @@ const COMMA_DELIMITED_PROPERTIES = new Set([
   "transition-property",
   "transition-timing-function",
 ]);
+
+const AUTO_URL_IMAGE_PROPERTIES = new Set([
+  "background",
+  "background-image",
+  "border-image",
+  "border-image-source",
+  "list-style",
+  "list-style-image",
+  "mask",
+  "mask-border",
+  "mask-border-source",
+  "mask-image",
+]);
+
+const IMAGE_ASSET_VALUE_PATTERN =
+  /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:[?#].*)?$/i;
+
+const RAW_CSS_IMAGE_PREFIXES = [
+  "conic-gradient(",
+  "cross-fade(",
+  "element(",
+  "image(",
+  "image-set(",
+  "linear-gradient(",
+  "paint(",
+  "radial-gradient(",
+  "repeating-conic-gradient(",
+  "repeating-linear-gradient(",
+  "repeating-radial-gradient(",
+  "url(",
+  "var(",
+];
+
+function shouldAutoWrapImageValue(property: string, value: string): boolean {
+  if (!AUTO_URL_IMAGE_PROPERTIES.has(property)) {
+    return false;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized === "none" ||
+    RAW_CSS_IMAGE_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  ) {
+    return false;
+  }
+
+  if (
+    normalized.startsWith("data:image/") ||
+    normalized.startsWith("blob:")
+  ) {
+    return true;
+  }
+
+  return IMAGE_ASSET_VALUE_PATTERN.test(trimmed);
+}
+
+function formatCssImageUrl(value: string): string {
+  return `url(${JSON.stringify(value.trim())})`;
+}
 
 /** Convert a camelCased property name to kebab-case. */
 export function camelToKebab(value: string): string {
@@ -774,6 +842,10 @@ function formatPrimitiveStyleValue(
 ): string {
   if (property === "content" && typeof value === "string") {
     return formatContentValue(value);
+  }
+
+  if (typeof value === "string" && shouldAutoWrapImageValue(property, value)) {
+    return formatCssImageUrl(value);
   }
 
   if (typeof value === "number" && !UNITLESS_PROPERTIES.has(property)) {
