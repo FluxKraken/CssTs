@@ -583,7 +583,31 @@ const styles = ct({
 
 - declaration objects
 - arrays of declaration objects
+- layered rule objects (for example `{ rules: utility, layer: "typography" }`)
 - utility names from `css.config.ts` (see below)
+
+Layered `@apply` rules are emitted under the given CSS layer while staying
+scoped to the current class selector:
+
+```ts
+const styles = ct({
+  base: {
+    contentWrapper: {
+      "@apply": {
+        rules: {
+          "h1, h2, h3, h4, h5, h6": {
+            margin: "revert",
+            fontSize: "revert",
+            fontWeight: "revert",
+          },
+          p: { margin: "revert" },
+        },
+        layer: "typography",
+      },
+    },
+  },
+});
+```
 
 Use stylesheet imports with an `@import` key (for example in `global`) to stay
 close to native CSS:

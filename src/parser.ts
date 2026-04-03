@@ -734,6 +734,19 @@ function normalizeApplyValue(
     return normalizeStyleDeclaration(utility, options);
   }
 
+  if (isPlainObject(value) && !isCssVarRef(value) && "rules" in value) {
+    const rules = normalizeApplyValue(value.rules, options);
+    if (!rules) {
+      return null;
+    }
+    if (typeof value.layer === "string" && value.layer.trim().length > 0) {
+      return {
+        [`@layer ${value.layer.trim()}`]: rules,
+      };
+    }
+    return rules;
+  }
+
   return normalizeStyleDeclaration(value, options);
 }
 

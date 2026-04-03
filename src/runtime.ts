@@ -1,7 +1,6 @@
 import {
   createClassName,
   CssSerializationOptions,
-  themesToConfig,
   ImportedThemesInput,
   isCssVarRef,
   RootVarInput,
@@ -9,6 +8,7 @@ import {
   StyleDeclaration,
   StyleSheet,
   StyleValue,
+  themesToConfig,
   toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
@@ -328,6 +328,29 @@ function normalizeApplyInput(
       return {};
     }
     return normalizeStyleDeclarationInput(utility, options);
+  }
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !isCssVarRef(value) &&
+    "rules" in value
+  ) {
+    const layeredApply = value as { rules: unknown; layer?: unknown };
+    const rules = normalizeApplyInput(layeredApply.rules, options);
+    if (Object.keys(rules).length === 0) {
+      return {};
+    }
+    if (
+      typeof layeredApply.layer === "string" &&
+      layeredApply.layer.trim().length > 0
+    ) {
+      return {
+        [`@layer ${layeredApply.layer.trim()}`]: rules,
+      };
+    }
+    return rules;
   }
 
   if (isStyleDeclarationObject(value) || Array.isArray(value)) {

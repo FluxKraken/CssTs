@@ -258,6 +258,7 @@ const styles = ct({
 
 - declaration objects
 - arrays of declaration objects
+- layered rule objects (for example `{ rules, layer }`)
 - utility names from `css.config.ts`:
 
 ```ts
@@ -266,6 +267,24 @@ const styles = ct({
     pageWrapper: {
       "@apply": ["cardBase"],
       display: "grid",
+    },
+  },
+});
+```
+
+Layered apply example:
+
+```ts
+const styles = ct({
+  base: {
+    contentWrapper: {
+      "@apply": {
+        rules: {
+          "h1, h2": { margin: "revert", fontWeight: "revert" },
+        },
+        layer: "typography",
+      },
+      color: "black",
     },
   },
 });

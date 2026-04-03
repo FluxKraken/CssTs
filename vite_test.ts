@@ -838,6 +838,39 @@ Deno.test("parser supports @apply merge lists with local declarations", () => {
   assertEquals(declaration.gridTemplateRows, ["auto", "1fr", "auto"]);
 });
 
+Deno.test("parser supports layered @apply rule objects in merge lists", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      contentWrapper: {
+        "@apply": [
+          { marginInline: "auto" },
+          {
+            rules: {
+              "h1, h2": {
+                margin: revert,
+                fontWeight: revert
+              }
+            },
+            layer: "typography"
+          }
+        ],
+        color: "black"
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  const declaration = parsed.base.contentWrapper as Record<string, unknown>;
+  assertEquals(declaration.marginInline, "auto");
+  assertEquals(declaration.color, "black");
+  assertEquals(declaration["@layer typography"], {
+    "h1, h2": {
+      margin: "revert",
+      fontWeight: "revert",
+    },
+  });
+});
+
 Deno.test("parser collects @import paths from stylesheet blocks", () => {
   const parsed = parseCtCallArguments(`{
     global: {
@@ -1129,6 +1162,73 @@ Deno.test("runtime injects root into :root and layered :root", () => {
     const text = styleTag?.textContent ?? "";
     assert(text.includes(":root{--background:#111}"));
     assert(text.includes("@layer theme{:root{--accent:deepskyblue}}"));
+  } finally {
+    globals.document = originalDocument;
+  }
+});
+
+Deno.test("runtime injects layered @apply rules for class selectors", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = ct({
+      base: {
+        contentWrapper: {
+          "@apply": {
+            rules: {
+              "h1, h2": {
+                margin: "revert",
+                fontWeight: "revert",
+              },
+            },
+            layer: "typography",
+          },
+          color: "black",
+        },
+      },
+    });
+
+    styles();
+    const styleTag = fakeDocument.getElementById("__css_ts_runtime_styles");
+    const text = styleTag?.textContent ?? "";
+    assertMatch(text, /\.ct_[a-z0-9]+\{color:black\}/);
+    assertMatch(
+      text,
+      /@layer typography\{\.ct_[a-z0-9]+ h1, \.ct_[a-z0-9]+ h2\{margin:revert;font-weight:revert\}\}/,
+    );
   } finally {
     globals.document = originalDocument;
   }
@@ -1461,6 +1561,45 @@ Deno.test("extracts @apply merge lists at build time", () => {
   assertMatch(
     css,
     /\.ct_[a-z0-9]+\{display:grid;background-color:#4f4f4f;color:#00aaff;grid-template-rows:auto 1fr auto\}/,
+  );
+});
+
+Deno.test("extracts layered @apply rule objects at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct from "css-ts";\n` +
+    `const prose = {\n` +
+    `  "h1, h2": {\n` +
+    `    margin: "revert",\n` +
+    `    fontWeight: "revert",\n` +
+    `  },\n` +
+    `};\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    contentWrapper: {\n` +
+    `      "@apply": [\n` +
+    `        { marginInline: "auto" },\n` +
+    `        { rules: prose, layer: "typography" },\n` +
+    `      ],\n` +
+    `      color: "black",\n` +
+    `    },\n` +
+    `  },\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/layered-apply.ts");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(
+    css,
+    /\.ct_[a-z0-9]+\{margin-inline:auto;color:black\}/,
+  );
+  assertMatch(
+    css,
+    /@layer typography\{\.ct_[a-z0-9]+ h1, \.ct_[a-z0-9]+ h2\{margin:revert;font-weight:revert\}\}/,
   );
 });
 
