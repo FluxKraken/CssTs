@@ -1234,6 +1234,77 @@ Deno.test("runtime injects layered @apply rules for class selectors", () => {
   }
 });
 
+Deno.test("runtime injects configured layer order before layered rules", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = ct(
+      {
+        base: {
+          contentWrapper: {
+            "@apply": {
+              rules: {
+                "h1, h2": {
+                  margin: "revert",
+                },
+              },
+              layer: "typography",
+            },
+          },
+        },
+      },
+      undefined,
+      {
+        layers: ["reset", "general", "typography"],
+      },
+    );
+
+    styles();
+    const styleTag = fakeDocument.getElementById("__css_ts_runtime_styles");
+    const text = styleTag?.textContent ?? "";
+    assert(text.startsWith("@layer reset, general, typography;"));
+    assertMatch(
+      text,
+      /@layer typography\{\.ct_[a-z0-9]+ h1, \.ct_[a-z0-9]+ h2\{margin:revert\}\}/,
+    );
+  } finally {
+    globals.document = originalDocument;
+  }
+});
+
 Deno.test("runtime injects themes root vars and scoped theme rules", () => {
   type FakeStyleTag = {
     id: string;
@@ -2394,6 +2465,52 @@ Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
       css,
       /\.ct_[a-z0-9]+\{margin-block:1rem;font-size:1rem;padding:2rem;line-height:1\.2\}/,
     );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts layers and emits configured layer order", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  layers: [" reset ", "general", "typography", "general"],\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  global: {\n` +
+      `    "@layer typography": {\n` +
+      `      "h1": { margin: "revert" }\n` +
+      `    }\n` +
+      `  },\n` +
+      `});`;
+
+    const transformed = transform(moduleCode, `${root}/src/app-layers.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+    assert(
+      (transformed.code as string).includes(
+        '"layers":["reset","general","typography"]',
+      ),
+    );
+
+    const css = load(VIRTUAL_ID) as string;
+    assert(css.startsWith("@layer reset, general, typography;"));
+    assertMatch(css, /@layer typography\{h1\{margin:revert\}\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

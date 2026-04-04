@@ -9,6 +9,7 @@ import {
   StyleSheet,
   StyleValue,
   themesToConfig,
+  toCssLayerOrderRule,
   toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
@@ -643,6 +644,12 @@ function compileConfig<
     for (const importPath of imports) {
       log("static", `@import ${importPath}`);
     }
+  }
+
+  const layerOrderRule = toCssLayerOrderRule(runtimeOptions.layers);
+  if (layerOrderRule) {
+    injectRule(layerOrderRule);
+    log("dynamic", `layer order injected: ${layerOrderRule}`);
   }
 
   if (Object.keys(globalStyles).length > 0 && !effectiveCompiled?.global) {

@@ -691,6 +691,7 @@ import "./src/global.css";
 export default {
   include: ["./packages/ui"],
   imports: ["./src/theme.css"],
+  layers: ["reset", "general", "layout", "utilities", "typography"],
   defaultUnit: "px", // optional; used for numeric style values
   resolution: "hybrid", // "static" | "dynamic" | "hybrid" (default for non-Astro files)
   debug: {
@@ -718,6 +719,10 @@ export default {
   },
 };
 ```
+
+Set `layers` to emit an explicit CSS layer order prelude like
+`@layer reset, general, layout, utilities, typography;` before extracted
+stylesheet rules.
 
 #### Resolution mode
 

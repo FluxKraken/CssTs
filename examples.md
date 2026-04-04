@@ -12,6 +12,7 @@ import "./src/global.css";
 
 export default {
   imports: ["./src/theme.css"],
+  layers: ["reset", "general", "layout", "utilities", "typography"],
   breakpoints: {
     sm: "40rem",
     md: "48rem",

@@ -73,6 +73,8 @@ export interface CssSerializationOptions {
   containers?: Record<string, { type?: string; rule: string }>;
   /** Default unit for numeric style values (for example `"px"` or `"rem"`). */
   defaultUnit?: string;
+  /** Explicit CSS layer order emitted as `@layer a, b, c;`. */
+  layers?: readonly string[];
 }
 
 function isPrimitiveThemeValue(
@@ -756,6 +758,28 @@ export function toCssGlobalRules(
     collectGlobalCssRules(selectorOrAtRule, declaration, [], rules, options);
   }
   return rules;
+}
+
+/** Convert configured layer names into a CSS layer order prelude. */
+export function toCssLayerOrderRule(
+  layers: readonly string[] | undefined,
+): string {
+  if (!layers || layers.length === 0) {
+    return "";
+  }
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const layer of layers) {
+    const trimmed = layer.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized.length > 0 ? `@layer ${normalized.join(", ")};` : "";
 }
 
 /** Convert `root`/`rootVars` inputs into global `:root` rules. */

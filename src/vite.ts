@@ -16,6 +16,7 @@ import {
   type StyleSheet,
   type StyleValue,
   Theme,
+  toCssLayerOrderRule,
   toCssGlobalRules,
   toCssRules,
   tv,
@@ -151,6 +152,7 @@ type LoadedCssConfig = {
   };
   breakpoints: Record<string, string>;
   containers: Record<string, { type?: string; rule: string }>;
+  layers: string[];
   defaultUnit?: string;
   include: string[];
   utilities: StyleSheet;
@@ -159,6 +161,7 @@ type LoadedCssConfig = {
   runtimeOptions: {
     breakpoints?: Record<string, string>;
     containers?: Record<string, { type?: string; rule: string }>;
+    layers?: string[];
     defaultUnit?: string;
     utilities?: StyleSheet;
     resolution?: "static" | "dynamic" | "hybrid";
@@ -1133,6 +1136,30 @@ function normalizeDefaultUnit(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeLayers(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    const trimmed = entry.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
 function normalizeContainers(
   value: unknown,
 ): Record<string, { type?: string; rule: string }> {
@@ -1498,6 +1525,7 @@ function loadCssConfig(
       },
       breakpoints: {},
       containers: {},
+      layers: [],
       defaultUnit: undefined,
       include: [],
       utilities: {},
@@ -1802,6 +1830,7 @@ function loadCssConfig(
   const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
   const containers = normalizeContainers(configObject.containers);
+  const layers = normalizeLayers(configObject.layers);
   const defaultUnit = normalizeDefaultUnit(configObject.defaultUnit);
 
   const parsedThemes = Object.prototype.hasOwnProperty.call(
@@ -1844,7 +1873,10 @@ function loadCssConfig(
       },
     )
     : [];
-  const configCss = themeRules.join("\n");
+  const layerOrderRule = toCssLayerOrderRule(layers);
+  const configCss = [layerOrderRule, ...themeRules].filter((part) =>
+    part.length > 0
+  ).join("\n");
   const utilitiesParsed = parsedUtilities?.base ?? {};
 
   const utilityRules = Object.entries(utilitiesParsed)
@@ -1864,6 +1896,9 @@ function loadCssConfig(
   if (Object.keys(containers).length > 0) {
     runtimeOptions.containers = containers;
   }
+  if (layers.length > 0) {
+    runtimeOptions.layers = layers;
+  }
   if (defaultUnit) {
     runtimeOptions.defaultUnit = defaultUnit;
   }
@@ -1881,6 +1916,7 @@ function loadCssConfig(
     debug,
     breakpoints,
     containers,
+    layers,
     defaultUnit,
     include,
     utilities: utilitiesParsed,
@@ -3096,6 +3132,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     },
     breakpoints: {},
     containers: {},
+    layers: [],
     defaultUnit: undefined,
     include: [],
     utilities: {},

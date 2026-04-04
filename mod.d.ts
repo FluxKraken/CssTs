@@ -45,6 +45,7 @@ type CtConfig<
 type CtRuntimeOptions = {
   breakpoints?: Record<string, string>;
   containers?: Record<string, { type?: string; rule: string }>;
+  layers?: readonly string[];
   defaultUnit?: string;
   utilities?: StyleSheetInput;
   resolution?: "static" | "dynamic" | "hybrid";
