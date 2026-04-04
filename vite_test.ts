@@ -2510,6 +2510,7 @@ Deno.test("loads css.config.ts layers and emits configured layer order", () => {
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.startsWith("@layer reset, general, typography;"));
+    assert(css.includes("@layer reset{}@layer general{}@layer typography{}"));
     assertMatch(css, /@layer typography\{h1\{margin:revert\}\}/);
   } finally {
     Deno.removeSync(root, { recursive: true });

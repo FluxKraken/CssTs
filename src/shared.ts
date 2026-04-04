@@ -779,7 +779,18 @@ export function toCssLayerOrderRule(
     normalized.push(trimmed);
   }
 
-  return normalized.length > 0 ? `@layer ${normalized.join(", ")};` : "";
+  if (normalized.length === 0) {
+    return "";
+  }
+
+  const statement = `@layer ${normalized.join(", ")};`;
+  // Keep empty layer blocks as a fallback because Vite/Svelte dev CSS inlining
+  // can drop bare layer-order statements during SSR style collection.
+  const fallbackBlocks = normalized.map((layer) => `@layer ${layer}{}`).join(
+    "",
+  );
+
+  return `${statement}${fallbackBlocks}`;
 }
 
 /** Convert `root`/`rootVars` inputs into global `:root` rules. */
