@@ -8,6 +8,8 @@ export { default } from "./src/index.ts";
 export { vite } from "./src/index.ts";
 /** Named export for creating CSS variable references. */
 export { cv } from "./src/index.ts";
+/** Named export for creating quoted `font-family` lists. */
+export { font } from "./src/index.ts";
 /** Named export for defining theme token maps. */
 export { Theme } from "./src/index.ts";
 /** Named export for referencing theme-backed CSS variables. */

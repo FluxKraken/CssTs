@@ -9,6 +9,7 @@ import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
 import {
   cv,
+  font,
   Theme,
   toCssDeclaration,
   toCssGlobalRules,
@@ -487,6 +488,30 @@ Deno.test("Theme and tv map friendly theme tokens to css custom properties", () 
   );
 });
 
+Deno.test("font() formats quoted font-family lists for declarations and themes", () => {
+  assertEquals(
+    font(["Inter Variable", "system-ui", "sans-serif"]),
+    `"Inter Variable", system-ui, sans-serif`,
+  );
+  assertEquals(
+    toCssDeclaration(
+      "fontFamily",
+      font(["Inter Variable", "system-ui", "sans-serif"]),
+    ),
+    `font-family:"Inter Variable", system-ui, sans-serif`,
+  );
+
+  const theme = new Theme({
+    fontDisplay: font(["Inter Variable", "system-ui", "sans-serif"]),
+  });
+  assertEquals(
+    toCssGlobalRules({
+      ":root": theme.vars,
+    }),
+    [`:root{--font-display:"Inter Variable", system-ui, sans-serif}`],
+  );
+});
+
 Deno.test("toCssDeclaration and toCssRules support configurable defaultUnit", () => {
   assertEquals(
     toCssDeclaration("fontSize", 1, { defaultUnit: "rem" }),
@@ -814,6 +839,31 @@ Deno.test("parser supports bare dashed identifier values in style declarations",
   assertEquals(declaration.width, "fit-content");
   assertEquals(declaration.fontFamily, ["ui-monospace", "monospace"]);
   assertEquals(declaration.animationTimingFunction, "ease-in-out");
+});
+
+Deno.test("parser supports font() helper values", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      pageWrapper: {
+        fontFamily: font(["Inter Variable", system-ui, sans-serif])
+      }
+    },
+    themes: {
+      default: new Theme({
+        fontDisplay: font(["Inter Variable", "system-ui", "sans-serif"])
+      })
+    }
+  }`);
+
+  assert(parsed !== null);
+  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  assertEquals(
+    declaration.fontFamily,
+    `"Inter Variable", system-ui, sans-serif`,
+  );
+  assertEquals(parsed.root, [{
+    "--font-display": `"Inter Variable", system-ui, sans-serif`,
+  }]);
 });
 
 Deno.test("parser supports @apply merge lists with local declarations", () => {
@@ -4281,6 +4331,55 @@ Deno.test("vite watches statically imported theme modules used by new ct()", () 
 
     assert(watched.includes(themesId));
     assert((transformed.code as string).includes("--bg:black"));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("vite extracts font() helper values from imported theme modules", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const plugin = cssTsPlugin();
+    const configResolved = asHook(plugin.configResolved);
+    const transform = asHook(plugin.transform);
+    const themesId = `${root}/src/lib/themes.ts`;
+    const pageId = `${root}/src/routes/+page.svelte`;
+
+    Deno.mkdirSync(`${root}/src/lib`, { recursive: true });
+    Deno.mkdirSync(`${root}/src/routes`, { recursive: true });
+    Deno.writeTextFileSync(
+      themesId,
+      `import { Theme, font } from "css-ts";\n` +
+        `const light = new Theme({\n` +
+        `  fontDisplay: font(["Inter Variable", "system-ui", "sans-serif"])\n` +
+        `});\n` +
+        `export default { light } as const;\n`,
+    );
+
+    const source = `<script lang="ts">\n` +
+      `import ct, { tv } from "css-ts";\n` +
+      `import Themes from "../lib/themes.ts";\n` +
+      `const styles = new ct();\n` +
+      `styles.themes = { default: Themes.light };\n` +
+      `styles.base = { header: { fontFamily: tv.fontDisplay } };\n` +
+      `</script>\n` +
+      `<header class={styles().header()}>hi</header>`;
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const transformed = transform(source, pageId);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    assertMatch(
+      transformed.code as string,
+      /--font-display:"Inter Variable", system-ui, sans-serif/,
+    );
+    assertMatch(
+      transformed.code as string,
+      /font-family:var\(--font-display\)/,
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

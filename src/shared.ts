@@ -1,6 +1,22 @@
 /** Primitive CSS value before unit formatting. */
 export type PrimitiveStyleValue = string | number;
 
+const GENERIC_FONT_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "emoji",
+  "math",
+  "fangsong",
+]);
+
 /** Reference to a CSS custom property created by {@link cv}. */
 export interface CssVarRef {
   /** Discriminator for {@link CssVarRef} values. */
@@ -351,6 +367,46 @@ function shouldAutoWrapImageValue(property: string, value: string): boolean {
 
 function formatCssImageUrl(value: string): string {
   return `url(${JSON.stringify(value.trim())})`;
+}
+
+function shouldQuoteFontFamily(value: string): boolean {
+  return !/^-?-?[_A-Za-z][-_A-Za-z0-9]*$/.test(value);
+}
+
+function formatFontFamily(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error("font() family names must not be empty.");
+  }
+
+  const normalized = trimmed.toLowerCase();
+  if (
+    isQuotedCssString(trimmed) ||
+    GENERIC_FONT_FAMILIES.has(normalized) ||
+    trimmed.startsWith("var(")
+  ) {
+    return trimmed;
+  }
+
+  return shouldQuoteFontFamily(trimmed) ? JSON.stringify(trimmed) : trimmed;
+}
+
+/** Create a CSS-safe `font-family` list from font names. */
+export function font(families: readonly string[]): string {
+  if (!Array.isArray(families)) {
+    throw new Error("font() expects an array of font family names.");
+  }
+
+  if (families.length === 0) {
+    throw new Error("font() expects at least one font family name.");
+  }
+
+  return families.map((family) => {
+    if (typeof family !== "string") {
+      throw new Error("font() family names must be strings.");
+    }
+    return formatFontFamily(family);
+  }).join(", ");
 }
 
 /** Convert a camelCased property name to kebab-case. */

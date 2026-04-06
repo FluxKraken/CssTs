@@ -1,5 +1,6 @@
 import {
   CssVarRef,
+  font,
   ImportedThemesInput,
   PrimitiveStyleValue,
   StyleDeclaration,
@@ -136,6 +137,8 @@ export interface Ct {
   vite: (options?: CssTsPluginOptions) => any;
   /** Create a CSS variable reference. */
   cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
+  /** Create a quoted `font-family` list. */
+  font: typeof font;
   /** Alias for {@link Ct.cv}. */
   var: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
   /** Theme constructor. */
@@ -151,6 +154,8 @@ export default ct;
 export const vite: (options?: CssTsPluginOptions) => any;
 /** Named export for creating CSS variable references. */
 export const cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
+/** Named export for creating quoted `font-family` lists. */
+export { font };
 /** Named export for defining theme token maps. */
 export { Theme };
 /** Named export for referencing theme-backed CSS variables. */

@@ -1,6 +1,7 @@
 import {
   cv,
   evalThemeTemplate,
+  font,
   isCssVarRef,
   isTheme,
   type StyleDeclaration,
@@ -66,6 +67,11 @@ type ThemeConstructorReference = {
   tokens: ParsedObject;
 };
 
+type FontCallReference = {
+  kind: "font-call";
+  families: ParsedArray;
+};
+
 interface ParsedObject {
   [key: string]: ParsedValue;
 }
@@ -81,6 +87,7 @@ type ParsedValue =
   | IdentifierReference
   | TemplateLiteralReference
   | ThemeConstructorReference
+  | FontCallReference
   | ParsedObject
   | ParsedArray;
 
@@ -322,6 +329,34 @@ function parseThemeConstructor(
   }, cursor];
 }
 
+function parseFontCall(
+  input: string,
+  index: number,
+): [FontCallReference, number] {
+  let cursor = skipWhitespace(input, index);
+  if (input[cursor] !== "(") {
+    throw new Error("Expected '(' after font");
+  }
+
+  cursor = skipWhitespace(input, cursor + 1);
+  const [argumentValue, argumentEnd] = parseValue(input, cursor);
+  if (!Array.isArray(argumentValue)) {
+    throw new Error("font() expects an array of font family names");
+  }
+
+  cursor = parseCallTerminator(
+    input,
+    argumentEnd,
+    "font() accepts a single array argument",
+    "Expected ')' after font() call",
+  );
+
+  return [{
+    kind: "font-call",
+    families: argumentValue,
+  }, cursor];
+}
+
 function parseCallTerminator(
   input: string,
   index: number,
@@ -501,6 +536,10 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
       return [cv(variableName, fallback), cursor];
     }
 
+    if (identifier === "font") {
+      return parseFontCall(input, identifierEnd);
+    }
+
     return parseIdentifierReference(input, identifier, identifierEnd);
   }
 
@@ -602,6 +641,14 @@ function isThemeConstructorReference(
     isPlainObject(value) &&
     value.kind === "theme-constructor" &&
     isPlainObject(value.tokens)
+  );
+}
+
+function isFontCallReference(value: unknown): value is FontCallReference {
+  return (
+    isPlainObject(value) &&
+    value.kind === "font-call" &&
+    Array.isArray(value.families)
   );
 }
 
@@ -1377,6 +1424,25 @@ function resolveParsedValue(
     }
     try {
       return new Theme(resolvedTokens as Record<string, StyleValue>);
+    } catch {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+  }
+
+  if (isFontCallReference(value)) {
+    const resolvedFamilies = resolveParsedValue(
+      value.families,
+      resolveIdentifier,
+      keepUnresolvedIdentifiers,
+    );
+    if (resolvedFamilies === UNRESOLVED || !Array.isArray(resolvedFamilies)) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    if (!resolvedFamilies.every((entry) => typeof entry === "string")) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    try {
+      return font(resolvedFamilies);
     } catch {
       return keepUnresolvedIdentifiers ? value : UNRESOLVED;
     }

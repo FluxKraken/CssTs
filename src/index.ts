@@ -5,12 +5,13 @@
 import runtimeCt from "./runtime.js";
 import type { CtBuilder } from "./runtime.js";
 import { cssTsPlugin } from "./vite.js";
-import { cv, Theme, tv } from "./shared.js";
+import { cv, font, Theme, tv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
   new(): CtBuilder;
   vite: typeof cssTsPlugin;
   cv: typeof cv;
+  font: typeof font;
   var: typeof cv;
   Theme: typeof Theme;
   tv: typeof tv;
@@ -24,6 +25,7 @@ type Ct = typeof runtimeCt & {
 const ct = Object.assign(runtimeCt, {
   vite: cssTsPlugin,
   cv,
+  font,
   var: cv,
   Theme,
   tv,
@@ -35,6 +37,8 @@ export default ct;
 export { cssTsPlugin as vite };
 /** Named export for creating CSS variable references. */
 export { cv };
+/** Named export for creating quoted `font-family` lists. */
+export { font };
 /** Named export for defining theme token maps. */
 export { Theme };
 /** Named export for referencing theme-backed CSS variables. */
