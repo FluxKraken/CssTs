@@ -13,6 +13,7 @@ import {
   createClassName,
   cv,
   font,
+  isCssVarRef,
   mergeTailwindClassNames,
   rootVarsToGlobalRules,
   type StyleDeclaration,
@@ -1474,7 +1475,25 @@ function stripUnusedStaticHelperConsts(code: string): string {
 }
 
 function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
-  return Object.keys(declaration).length > 0;
+  for (const value of Object.values(declaration)) {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      Array.isArray(value) ||
+      isCssVarRef(value)
+    ) {
+      return true;
+    }
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      hasStyleDeclarations(value as StyleDeclaration)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function hasTailwindClassNames(style: ResolvedStyleDefinition): boolean {

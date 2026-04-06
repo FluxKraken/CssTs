@@ -694,6 +694,56 @@ function toPseudoSelectorIfShorthand(key: string): string | null {
   return null;
 }
 
+function toTailwindVariantFromPseudoSelector(selector: string): string | null {
+  const normalized = selector.trim().startsWith("&")
+    ? selector.trim().slice(1)
+    : selector.trim();
+
+  if (normalized.startsWith("::")) {
+    const variant = normalized.slice(2).trim();
+    return /^[A-Za-z-]+$/.test(variant) ? camelToKebab(variant) : null;
+  }
+
+  if (normalized.startsWith(":")) {
+    const variant = normalized.slice(1).trim();
+    return /^[A-Za-z-]+$/.test(variant) ? camelToKebab(variant) : null;
+  }
+
+  return null;
+}
+
+/** Map a nested selector key like `hover` or `&:focus-visible` to a Tailwind variant prefix. */
+export function toTailwindVariantForNestedKey(key: string): string | null {
+  const trimmed = key.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed.startsWith("@") ||
+    trimmed.startsWith("$")
+  ) {
+    return null;
+  }
+
+  const pseudoSelector = toPseudoSelectorIfShorthand(trimmed);
+  if (pseudoSelector) {
+    return toTailwindVariantFromPseudoSelector(pseudoSelector);
+  }
+
+  return toTailwindVariantFromPseudoSelector(trimmed);
+}
+
+/** Prefix Tailwind class tokens with a variant like `hover:` or `before:`. */
+export function prefixTailwindVariantClasses(
+  classNames: readonly string[],
+  variant: string,
+): string[] {
+  return classNames
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) =>
+      entry.split(/\s+/).map((token) => `${variant}:${token}`).join(" ")
+    );
+}
+
 function toCssRule(
   selector: string,
   declaration: PseudoStyleDeclaration,

@@ -5,6 +5,7 @@ import {
   isCssVarRef,
   isTailwindClassValue,
   mergeTailwindClassNames,
+  prefixTailwindVariantClasses,
   RootVarInput,
   rootVarsToGlobalRules,
   StyleDeclaration,
@@ -12,6 +13,7 @@ import {
   StyleValue,
   TailwindClassValue,
   themesToConfig,
+  toTailwindVariantForNestedKey,
   toCssLayerOrderRule,
   toCssDeclaration,
   toCssGlobalRules,
@@ -267,7 +269,33 @@ function mergeResolvedStyleDefinitions(
 }
 
 function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
-  return Object.keys(declaration).length > 0;
+  for (const value of Object.values(declaration)) {
+    if (isStyleLeafArray(value) || isPrimitiveStyleLeaf(value)) {
+      return true;
+    }
+    if (isStyleDeclarationObject(value) && hasStyleDeclarations(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function prefixNestedTailwindClassNames(
+  key: string,
+  classNames: readonly string[] | undefined,
+): string[] | undefined {
+  if (!classNames || classNames.length === 0) {
+    return undefined;
+  }
+
+  const variant = toTailwindVariantForNestedKey(key);
+  if (!variant) {
+    throw new Error(
+      `tw() inside nested selector "${key}" is not supported. Use explicit Tailwind variant classes instead.`,
+    );
+  }
+
+  return prefixTailwindVariantClasses(classNames, variant);
 }
 
 function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
@@ -415,17 +443,25 @@ function normalizeStyleDeclarationInput(
       Array.isArray(value) ||
       isStyleDeclarationObject(value) ||
       isResolvedStyleDefinition(value) ||
-      isTailwindClassValue(value)
+      isTailwindClassValue(value) ||
+      (typeof value === "object" &&
+        value !== null &&
+        !isCssVarRef(value))
     ) {
       const nested = normalizeStyleDeclarationInput(
         value as StyleDeclarationInput,
         {
           ...options,
-          allowTailwind: false,
+          allowTailwind,
         },
       );
       (normalizedDeclaration as Record<string, unknown>)[key] =
         nested.declaration;
+      tailwindClassNames = [
+        ...(tailwindClassNames ?? []),
+        ...(prefixNestedTailwindClassNames(key, nested.tailwindClassNames) ??
+          []),
+      ];
       continue;
     }
 

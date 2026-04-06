@@ -975,6 +975,26 @@ Deno.test("parser supports tw() in @apply and direct style entries", () => {
   ]);
 });
 
+Deno.test("parser prefixes nested hover @apply tw() classes", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      navLink: {
+        hover: {
+          "@apply": tw("underline underline-offset-2 underline-offset-6")
+        }
+      }
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(styleDeclarationOf(parsed.base.navLink), {
+    hover: {},
+  });
+  assertEquals(parsed.base.navLink.tailwindClassNames, [
+    "hover:underline hover:underline-offset-2 hover:underline-offset-6",
+  ]);
+});
+
 Deno.test("parser collects @import paths from stylesheet blocks", () => {
   const parsed = parseCtCallArguments(`{
     global: {
@@ -1822,6 +1842,38 @@ Deno.test("extracts tw() class markers at build time", () => {
   assert(!css.includes("text-lg"));
 });
 
+Deno.test("extracts nested hover @apply tw() class markers at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct, { tw } from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    navLink: {\n` +
+    `      hover: {\n` +
+    `        "@apply": tw("underline underline-offset-2 underline-offset-6"),\n` +
+    `      },\n` +
+    `    },\n` +
+    `  },\n` +
+    `});`;
+  const transformed = transform(
+    moduleCode,
+    "/app/src/lib/tailwind-nested-hover.ts",
+  );
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(code.includes("hover:underline"));
+  assert(code.includes("hover:underline-offset-6"));
+  assert(!code.includes("tw("));
+
+  const css = load(VIRTUAL_ID) as string;
+  assert(!css.includes("underline-offset"));
+});
+
 Deno.test("extracts @import stylesheet imports with relative paths", () => {
   const plugin = cssTsPlugin();
   const transform = asHook(plugin.transform);
@@ -2612,6 +2664,60 @@ Deno.test("loads css.config.ts defaultUnit for numeric style values", () => {
     assertMatch(
       css,
       /\.ct_[a-z0-9]+\{margin-block:1rem;font-size:1rem;padding:2rem;line-height:1\.2\}/,
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts defaultUnit for numeric values mixed with tw() in new ct()", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `export default {\n` +
+        `  defaultUnit: "rem",\n` +
+        `  resolution: "static",\n` +
+        `} as const;\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({ root, resolve: { alias: [] } });
+
+    const moduleCode = `import ct, { tw } from "css-ts";\n` +
+      `const componentStyles = new ct();\n` +
+      `componentStyles.base = {\n` +
+      `  header: {\n` +
+      `    "@apply": tw("grid grid-cols-[auto_1fr] gap-4 m-4 border-4 rounded-lg"),\n` +
+      `    alignItems: "center",\n` +
+      `    margin: 1,\n` +
+      `    padding: [0.25, 1],\n` +
+      `  },\n` +
+      `};`;
+
+    const transformed = transform(
+      moduleCode,
+      `${root}/src/app-default-unit-tailwind.ts`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+    assert((transformed.code as string).includes('"defaultUnit":"rem"'));
+    assertMatch(
+      transformed.code as string,
+      /"header":"ct_[a-z0-9]+ grid grid-cols-\[auto_1fr\] gap-4 m-4 border-4 rounded-lg"/,
+    );
+
+    const css = load(VIRTUAL_ID) as string;
+    assertMatch(
+      css,
+      /\.ct_[a-z0-9]+\{align-items:center;margin:1rem;padding:0\.25rem 1rem\}/,
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -3852,6 +3958,27 @@ Deno.test("runtime style() respects defaultUnit", () => {
   );
 });
 
+Deno.test("new ct() runtime style() respects defaultUnit when mixed with tw()", () => {
+  const styles = new (ct as any)(undefined, undefined, { defaultUnit: "rem" });
+  styles.base = {
+    header: {
+      "@apply": tw("grid grid-cols-[auto_1fr] gap-4 m-4 border-4 rounded-lg"),
+      alignItems: "center",
+      margin: 1,
+      padding: [0.25, 1],
+    },
+  };
+
+  const headerClass = styles().header();
+  assert(headerClass.includes("grid"));
+  assert(headerClass.includes("m-4"));
+  assertMatch(headerClass, /ct_[a-z0-9]+/);
+  assertEquals(
+    styles().header.style(),
+    "align-items:center;margin:1rem;padding:0.25rem 1rem",
+  );
+});
+
 Deno.test("runtime works without a document global", () => {
   const globals = globalThis as Record<string, unknown>;
   const originalDocument = globals.document;
@@ -4038,6 +4165,23 @@ Deno.test("runtime accessors support tw() for mixed and direct Tailwind styles",
   const largeNavClass = styles().nav({ size: "lg" });
   assert(largeNavClass.includes("text-lg"));
   assert(!largeNavClass.includes("text-sm"));
+});
+
+Deno.test("runtime accessors support nested hover @apply tw() styles", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    navLink: {
+      hover: {
+        "@apply": tw("underline underline-offset-2 underline-offset-6"),
+      },
+    },
+  };
+
+  assertEquals(
+    styles().navLink(),
+    "hover:underline hover:underline-offset-6",
+  );
+  assertEquals(styles().navLink.style(), "");
 });
 
 Deno.test("new ct() runtime with variants and defaults", () => {

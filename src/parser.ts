@@ -5,11 +5,13 @@ import {
   isCssVarRef,
   isTailwindClassValue,
   isTheme,
+  prefixTailwindVariantClasses,
   type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
   type TailwindClassValue,
   Theme,
+  toTailwindVariantForNestedKey,
   tw,
   toThemeVarName,
 } from "./shared.js";
@@ -770,7 +772,31 @@ function mergeResolvedStyleDefinitions(
 }
 
 function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
-  return Object.keys(declaration).length > 0;
+  for (const value of Object.values(declaration)) {
+    if (isStyleLeaf(value)) {
+      return true;
+    }
+    if (isStyleDeclarationObject(value) && hasStyleDeclarations(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function prefixNestedTailwindClassNames(
+  key: string,
+  classNames: readonly string[] | undefined,
+): string[] | null | undefined {
+  if (!classNames || classNames.length === 0) {
+    return undefined;
+  }
+
+  const variant = toTailwindVariantForNestedKey(key);
+  if (!variant) {
+    return null;
+  }
+
+  return prefixTailwindVariantClasses(classNames, variant);
 }
 
 function identifierReferenceToCssLiteral(value: unknown): string | null {
@@ -1099,11 +1125,26 @@ function normalizeStyleDeclaration(
       continue;
     }
 
-    const nested = normalizeStyleDeclaration(declarationValue, options, false);
+    const nested = normalizeStyleDeclaration(
+      declarationValue,
+      options,
+      allowTailwind,
+    );
     if (!nested) {
       return null;
     }
     mergedDeclaration[key] = nested.declaration;
+    const prefixedTailwind = prefixNestedTailwindClassNames(
+      key,
+      nested.tailwindClassNames,
+    );
+    if (prefixedTailwind === null) {
+      return null;
+    }
+    tailwindClassNames = [
+      ...(tailwindClassNames ?? []),
+      ...(prefixedTailwind ?? []),
+    ];
   }
 
   return createResolvedStyleDefinition(mergedDeclaration, tailwindClassNames);
