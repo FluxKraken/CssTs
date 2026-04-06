@@ -1879,7 +1879,8 @@ Deno.test("injects tailwind merge helper for transformed tw() variants in svelte
 
   const helper = load(TAILWIND_RUNTIME_VIRTUAL_ID);
   assertEquals(typeof helper, "string");
-  assert((helper as string).includes("tailwind-merge-runtime.ts"));
+  assert((helper as string).includes('from "tailwind-merge";'));
+  assert((helper as string).includes("setTailwindMerge(twMerge);"));
 });
 
 Deno.test("extracts nested hover @apply tw() class markers at build time", () => {

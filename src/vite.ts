@@ -371,10 +371,10 @@ function getNodePath(): NodePath {
   throw new Error("css-ts vite plugin requires Node.js built-ins (node:path).");
 }
 
-function resolveTailwindRuntimeHelperUrl(): string {
+function resolveTailwindSharedModuleUrl(): string {
   const candidates = [
-    new URL("./tailwind-merge-runtime.ts", import.meta.url),
-    new URL("./tailwind-merge-runtime.js", import.meta.url),
+    new URL("./shared.js", import.meta.url),
+    new URL("./shared.ts", import.meta.url),
   ];
 
   for (const candidate of candidates) {
@@ -393,6 +393,18 @@ function resolveTailwindRuntimeHelperUrl(): string {
   }
 
   return candidates[0].href;
+}
+
+// Keep this helper inline so JSR's npm wrapper does not rewrite the
+// `tailwind-merge` import into a missing local file path.
+function loadTailwindRuntimeModule(): string {
+  return `import { twMerge } from "tailwind-merge";
+import { setTailwindMerge } from ${
+    JSON.stringify(resolveTailwindSharedModuleUrl())
+  };
+setTailwindMerge(twMerge);
+export {};
+`;
 }
 
 const STATIC_EVAL_GLOBALS: Record<string, unknown> = {
@@ -3509,9 +3521,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return combinedCss();
       }
       if (cleanId(id) === RESOLVED_TAILWIND_RUNTIME_ID) {
-        return `import ${
-          JSON.stringify(resolveTailwindRuntimeHelperUrl())
-        };\nexport {};`;
+        return loadTailwindRuntimeModule();
       }
       return null;
     },
