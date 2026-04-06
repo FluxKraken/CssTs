@@ -22,6 +22,7 @@ import {
 (globalThis as Record<string, unknown>).__css_ts_tailwind_merge__ = twMerge;
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+const TAILWIND_RUNTIME_VIRTUAL_ID = "\0virtual:css-ts/tailwind-merge";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
 
 function scopedVirtualId(moduleId: string): string {
@@ -1840,6 +1841,45 @@ Deno.test("extracts tw() class markers at build time", () => {
   assertMatch(css, /\.ct_[a-z0-9]+\{color:white\}/);
   assert(!css.includes("underline-offset"));
   assert(!css.includes("text-lg"));
+});
+
+Deno.test("injects tailwind merge helper for transformed tw() variants in svelte", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const source = `<script lang="ts">\nimport ct, { tw } from "css-ts";\n` +
+    `const componentStyles = new ct();\n` +
+    `componentStyles.base = {\n` +
+    `  content: {\n` +
+    `    width: "min(100%, var(--page-width))",\n` +
+    `    marginInline: "auto",\n` +
+    `    "@apply": tw("lg:rounded-lg p-4 xs:text-justify"),\n` +
+    `  },\n` +
+    `};\n` +
+    `componentStyles.variant = {\n` +
+    `  prose: {\n` +
+    `    true: {\n` +
+    `      content: tw("prose"),\n` +
+    `    },\n` +
+    `  },\n` +
+    `};\n` +
+    `let { prose } = $props();\n` +
+    `const { content } = componentStyles();\n` +
+    `</script>\n\n<main class={content({ prose })}></main>`;
+  const transformed = transform(source, "/app/src/lib/Content.svelte");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(code.includes('import "virtual:css-ts/styles.css";'));
+  assert(code.includes('import "virtual:css-ts/tailwind-merge";'));
+  assert(code.includes('"content":"prose"'));
+
+  const helper = load(TAILWIND_RUNTIME_VIRTUAL_ID);
+  assertEquals(typeof helper, "string");
+  assert((helper as string).includes("tailwind-merge-runtime.ts"));
 });
 
 Deno.test("extracts nested hover @apply tw() class markers at build time", () => {

@@ -12,6 +12,17 @@ let nodeRequire: NodeRequire | null | undefined;
 let tailwindMergeFn: ((...classLists: string[]) => string) | null | undefined;
 const TAILWIND_MERGE_GLOBAL_KEY = "__css_ts_tailwind_merge__";
 
+function setTailwindMergeGlobal(
+  mergeFn: ((...classLists: string[]) => string) | undefined,
+): void {
+  const target = globalThis as Record<string, unknown>;
+  if (mergeFn) {
+    target[TAILWIND_MERGE_GLOBAL_KEY] = mergeFn;
+  } else {
+    delete target[TAILWIND_MERGE_GLOBAL_KEY];
+  }
+}
+
 const GENERIC_FONT_FAMILIES = new Set([
   "serif",
   "sans-serif",
@@ -513,6 +524,14 @@ export function isTailwindClassValue(value: unknown): value is TailwindClassValu
       typeof entry === "string"
     )
   );
+}
+
+/** Set the Tailwind merge implementation used by `tw(...)` class composition. */
+export function setTailwindMerge(
+  mergeFn: ((...classLists: string[]) => string) | undefined,
+): void {
+  tailwindMergeFn = mergeFn;
+  setTailwindMergeGlobal(mergeFn);
 }
 
 function resolveTailwindMerge(): (...classLists: string[]) => string {

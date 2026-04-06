@@ -29,6 +29,8 @@ import {
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
 const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
+const PUBLIC_TAILWIND_RUNTIME_ID = "virtual:css-ts/tailwind-merge";
+const RESOLVED_TAILWIND_RUNTIME_ID = "\0virtual:css-ts/tailwind-merge";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
 const STATIC_STYLE_EXTENSIONS = [
   ".ts",
@@ -367,6 +369,30 @@ function getNodePath(): NodePath {
   }
 
   throw new Error("css-ts vite plugin requires Node.js built-ins (node:path).");
+}
+
+function resolveTailwindRuntimeHelperUrl(): string {
+  const candidates = [
+    new URL("./tailwind-merge-runtime.ts", import.meta.url),
+    new URL("./tailwind-merge-runtime.js", import.meta.url),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.protocol !== "file:") {
+      return candidate.href;
+    }
+
+    let pathName = decodeURIComponent(candidate.pathname);
+    if (/^\/[A-Za-z]:\//.test(pathName)) {
+      pathName = pathName.slice(1);
+    }
+
+    if (getNodeFs().existsSync(pathName)) {
+      return candidate.href;
+    }
+  }
+
+  return candidates[0].href;
 }
 
 const STATIC_EVAL_GLOBALS: Record<string, unknown> = {
@@ -3468,6 +3494,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const suffix = id.slice(PUBLIC_VIRTUAL_ID.length);
         return `${RESOLVED_VIRTUAL_ID}${suffix}`;
       }
+      if (cleanId(id) === PUBLIC_TAILWIND_RUNTIME_ID) {
+        return RESOLVED_TAILWIND_RUNTIME_ID;
+      }
       return null;
     },
 
@@ -3478,6 +3507,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           return moduleScopedCss(moduleId);
         }
         return combinedCss();
+      }
+      if (cleanId(id) === RESOLVED_TAILWIND_RUNTIME_ID) {
+        return `import ${
+          JSON.stringify(resolveTailwindRuntimeHelperUrl())
+        };\nexport {};`;
       }
       return null;
     },
@@ -4477,6 +4511,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       nextCode = stripUnusedStaticHelperConsts(nextCode);
+      const needsTailwindRuntimeImport = nextCode.includes('"tailwindClassNames"') ||
+        /\btw\s*\(/.test(nextCode);
       managedModules.add(normalizedId);
       updateModuleStaticDependencies(normalizedId, staticDependencies);
       addWatchFiles(this, staticDependencies);
@@ -4486,6 +4522,12 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
 
       if (isSvelte) {
         nextCode = addVirtualImportToSvelte(nextCode);
+        if (needsTailwindRuntimeImport) {
+          nextCode = addVirtualImportToSvelte(
+            nextCode,
+            PUBLIC_TAILWIND_RUNTIME_ID,
+          );
+        }
         nextCode = addSvelteStyleBlock(nextCode, rules);
         const nextImports = Array.from(importRules);
         const prevImports = moduleImports.get(normalizedId) ?? [];
@@ -4506,6 +4548,11 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         nextCode = isAstro
           ? addVirtualImportToAstro(nextCode)
           : addVirtualImport(nextCode);
+        if (needsTailwindRuntimeImport) {
+          nextCode = isAstro
+            ? addVirtualImportToAstro(nextCode, PUBLIC_TAILWIND_RUNTIME_ID)
+            : addVirtualImport(nextCode, PUBLIC_TAILWIND_RUNTIME_ID);
+        }
         const nextImports = Array.from(importRules);
         const prevImports = moduleImports.get(normalizedId) ?? [];
         const importsChanged = nextImports.length !== prevImports.length ||

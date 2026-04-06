@@ -255,6 +255,10 @@ before the final class string is returned. That means:
 - `text-sm text-base` becomes `text-base`
 - nested pseudo blocks like `hover` automatically prefix Tailwind variants
 
+When you use the Vite plugin, css-ts also injects the Tailwind merge runtime
+for transformed `tw(...)` modules so client-side variant selection works in the
+browser as well as it does at build time.
+
 ```ts
 import ct, { tw } from "@kt-tools/css-ts";
 
