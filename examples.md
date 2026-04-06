@@ -1,18 +1,25 @@
-# css.config.ts Examples
+# css-ts recipes
 
-This project now supports a root-level `css.config.ts` file for global CSS
-concerns.
+This file complements the main [README](./README.md).
 
-## Quick Start
+The README is builder-first and covers the core API. These recipes focus on the
+setup and patterns that are useful once the basics are already in place.
 
-Create `/css.config.ts`:
+## `css.config.ts` starter
+
+Use a root config file when you want project-wide imports, layers, breakpoints,
+containers, and utilities.
 
 ```ts
+// css.config.ts
 import "./src/global.css";
 
 export default {
   imports: ["./src/theme.css"],
-  layers: ["reset", "general", "layout", "utilities", "typography"],
+  include: ["./packages/ui"],
+  layers: ["reset", "theme", "components", "utilities"],
+  defaultUnit: "rem",
+  resolution: "hybrid",
   breakpoints: {
     sm: "40rem",
     md: "48rem",
@@ -21,361 +28,206 @@ export default {
   containers: {
     card: {
       type: "inline-size",
-      rule: "width < 20rem",
+      rule: "width < 30rem",
     },
   },
   utilities: {
     cardBase: {
-      borderRadius: "0.75rem",
+      borderRadius: "1rem",
       padding: "1rem",
-      backgroundColor: "#4f4f4f",
-      color: "black",
-    },
-  },
-};
-```
-
-## Feature: Global stylesheet imports
-
-Two supported ways:
-
-1. Side-effect imports in `css.config.ts`
-
-```ts
-import "./src/global.css";
-```
-
-2. `imports` array on default export
-
-```ts
-export default {
-  imports: ["./src/theme.css"],
-};
-```
-
-Both are emitted into the virtual CSS bundle as `@import` rules.
-
-## Feature: Breakpoint aliases
-
-Define aliases in `breakpoints`:
-
-```ts
-export default {
-  breakpoints: {
-    md: "48rem",
-  },
-};
-```
-
-Use alias in style objects with `@<name>`:
-
-```ts
-import ct from "@kt-tools/css-ts";
-
-const styles = ct({
-  base: {
-    pageWrapper: {
-      display: "grid",
-      "@md": {
-        gridTemplateColumns: "1fr 1fr",
-      },
-    },
-  },
-});
-```
-
-`"@md"` expands to:
-
-```css
-@media (width >= 48rem) { ... }
-```
-
-If an alias is not found, it remains a normal at-rule key.
-
-### Breakpoint ranges
-
-You can target a range with `@(from,to)`:
-
-```ts
-const styles = ct({
-  base: {
-    pageWrapper: {
-      "@(xs,xl)": {
-        gridTemplateColumns: "1fr 1fr",
-      },
-    },
-  },
-});
-```
-
-With:
-
-```ts
-breakpoints: {
-  xs: "30rem",
-  xl: "80rem",
-}
-```
-
-This resolves to:
-
-```css
-@media (30rem < width < 80rem) { ... }
-```
-
-## Feature: Container presets + `@set`
-
-Define named containers in `css.config.ts`:
-
-```ts
-export default {
-  containers: {
-    card: {
-      type: "inline-size",
-      rule: "width < 20rem",
-    },
-  },
-};
-```
-
-Apply the container to a class with `@set`:
-
-```ts
-const styles = ct({
-  base: {
-    mainContainer: {
-      "@set": "card",
-    },
-  },
-});
-```
-
-This injects:
-
-```css
-container-name: card;
-container-type: inline-size;
-```
-
-Use container query shorthand with `@<name>`:
-
-```ts
-const styles = ct({
-  base: {
-    card: {
-      "@card": {
-        backgroundColor: "blue",
-      },
-    },
-  },
-});
-```
-
-This resolves to:
-
-```css
-@container card (width < 20rem) { ... }
-```
-
-Container range shorthand is also supported:
-
-```ts
-// with containers cardMin/cardMax defined in config
-"@(cardMin,cardMax)": { ... }
-```
-
-Resolves to:
-
-```css
-@container (cardMinRule) and (cardMaxRule) { ... }
-```
-
-You can also register containers on a builder at runtime:
-
-```ts
-const styles = new ct();
-styles.addContainer({
-  name: "card",
-  type: "inline-size",
-  rule: "width < 20rem",
-});
-```
-
-## Feature: Global utility classes
-
-Define shared declarations in `utilities`:
-
-```ts
-export default {
-  utilities: {
-    cardBase: {
-      borderRadius: "0.75rem",
-      padding: "1rem",
+      boxShadow: "0 12px 40px rgb(0 0 0 / 0.12)",
     },
     mutedText: {
-      color: "#666",
+      color: "#6b7280",
       fontSize: "0.875rem",
     },
   },
 };
 ```
 
-Generated classes:
+## Breakpoints, containers, and utilities together
 
-- `cardBase` -> `.u-card-base`
-- `mutedText` -> `.u-muted-text`
-
-These are emitted globally in the virtual stylesheet.
-
-## Feature: `@apply` merge list inside class declarations
-
-`@apply` merges declarations in order (left-to-right for arrays, top-to-bottom
-in object flow).
+This is the smallest example that shows how the config aliases are consumed by
+the builder API.
 
 ```ts
 import ct from "@kt-tools/css-ts";
-
-const baseColors = {
-  backgroundColor: "#4f4f4f",
-  color: "black",
-};
-
-const singleColumn = {
-  gridTemplateRows: ["auto", "1fr", "auto"],
-};
-
-const styles = ct({
-  base: {
-    pageWrapper: {
-      display: "grid",
-      "@apply": [baseColors, singleColumn],
-      color: "#00aaff", // overrides baseColors.color
-    },
-  },
-});
-```
-
-`@apply` accepts:
-
-- declaration objects
-- arrays of declaration objects
-- layered rule objects (for example `{ rules, layer }`)
-- utility names from `css.config.ts`:
-
-```ts
-const styles = ct({
-  base: {
-    pageWrapper: {
-      "@apply": ["cardBase"],
-      display: "grid",
-    },
-  },
-});
-```
-
-Layered apply example:
-
-```ts
-const styles = ct({
-  base: {
-    contentWrapper: {
-      "@apply": {
-        rules: {
-          "h1, h2": { margin: "revert", fontWeight: "revert" },
-        },
-        layer: "typography",
-      },
-      color: "black",
-    },
-  },
-});
-```
-
-## Feature: Property arrays
-
-Property arrays serialize to space-delimited or comma-delimited CSS values
-depending on the property.
-
-### Space-delimited (default)
-
-```ts
-const styles = ct({
-  base: {
-    pageWrapper: {
-      display: "grid",
-      gridTemplateRows: ["auto", "1fr", "auto"],
-    },
-  },
-});
-```
-
-Output:
-
-```css
-grid-template-rows: auto 1fr auto;
-```
-
-## Feature: Imported image assets
-
-Imported image URLs can be passed directly to image-capable properties. The
-serializer automatically emits `url(...)`.
-
-```ts
-import ct from "@kt-tools/css-ts";
-import bgImage from "$lib/assets/bg.png";
 
 const styles = new ct();
 
-styles.global = {
-  body: {
-    background: bgImage,
+styles.base = {
+  card: {
+    "@apply": ["cardBase"],
+    "@set": "card",
+    display: "grid",
+    gap: 1,
+    "@md": {
+      gridTemplateColumns: ["1fr", "1fr"],
+    },
+    "@card": {
+      gap: 0.75,
+    },
+  },
+  note: {
+    "@apply": ["mutedText"],
   },
 };
 ```
 
-### Comma-delimited (specific properties)
+What this does:
 
-Properties like `transition`, `boxShadow`, `fontFamily`, etc., use comma
-delimitation:
+- `@apply: ["cardBase"]` reuses the utility declared in `css.config.ts`
+- `@set: "card"` assigns `container-name` and `container-type`
+- `@md` expands to a media query
+- `@card` expands to a container query
+- numeric values use `rem` because `defaultUnit` is set to `"rem"`
 
-```ts
-const styles = ct({
-  base: {
-    card: {
-      transition: ["opacity 0.2s", "transform 0.3s"],
-      fontFamily: ["Inter", "sans-serif"],
-    },
-  },
-});
-```
+## Variant-scoped global theme switching
 
-## Feature: `.import()` method
-
-The `.import()` method on a `ct` instance allows importing external CSS files or
-global style objects, optionally into specific layers.
+Quoted selectors inside `variant` are applied only when that variant is active.
+This is a clean way to switch `html` or `body` globals together with local
+component styles.
 
 ```ts
 import ct from "@kt-tools/css-ts";
 
-const styles = ct();
+const styles = new ct();
 
-// Import paths
-styles.import("./reset.css");
-styles.import({ path: "./theme.css", layer: "theme" });
+styles.base = {
+  appShell: {
+    minHeight: "100dvh",
+  },
+};
 
-// Import global rule objects
-styles.import({
-  layer: "tools",
-  rules: {
-    ".debug": { outline: "1px solid red" },
+styles.variant = {
+  theme: {
+    light: {
+      appShell: {
+        backgroundColor: "#ffffff",
+        color: "#111827",
+      },
+      ":global(html)": {
+        colorScheme: "light",
+      },
+    },
+    dark: {
+      appShell: {
+        backgroundColor: "#111827",
+        color: "#f9fafb",
+      },
+      ":global(html)": {
+        colorScheme: "dark",
+      },
+    },
+  },
+};
+
+styles.defaults = {
+  theme: "dark",
+};
+```
+
+```ts
+styles.appShell(); // dark by default
+styles.appShell({ theme: "light" });
+```
+
+## Imported images and multi-value properties
+
+Imported image assets can be assigned directly to image-capable CSS properties.
+Array values become either space-delimited or comma-delimited CSS depending on
+the property.
+
+```ts
+import ct, { font } from "@kt-tools/css-ts";
+import heroImage from "./hero.png";
+
+const styles = new ct();
+
+styles.base = {
+  hero: {
+    backgroundImage: heroImage,
+    backgroundSize: "cover",
+    fontFamily: font(["IBM Plex Sans", "system-ui", "sans-serif"]),
+    gridTemplateColumns: ["auto", "1fr"],
+    transition: ["opacity 150ms ease", "transform 150ms ease"],
+    boxShadow: ["0 8px 20px rgb(0 0 0 / 0.16)", "inset 0 1px 0 rgb(255 255 255 / 0.08)"],
+  },
+};
+```
+
+## Astro setup
+
+Astro does not usually have its own `vite.config.ts`, so register the plugin
+through Astro's `vite` option.
+
+```js
+// astro.config.mjs
+import { defineConfig } from "astro/config";
+import ctVite from "@kt-tools/css-ts/vite";
+
+export default defineConfig({
+  vite: {
+    plugins: [ctVite()],
   },
 });
 ```
 
-## Notes
+## Deno + Vite without `package.json`
 
-- `css.config.ts` is loaded from project root.
-- Supported config filenames: `css.config.ts`, `.mts`, `.js`, `.mjs`, `.cts`,
-  `.cjs`.
-- Current breakpoint shorthand is `@alias` (for example `@md`), mapped to
-  `@media (width >= value)`.
+When you install from JSR and do not have a `package.json`, Vite still needs a
+Node-compatible import target. Map the package to its npm shim and add a Vite
+alias.
+
+```json
+// deno.json
+{
+  "imports": {
+    "@kt-tools/css-ts": "npm:@jsr/kt-tools__css-ts"
+  }
+}
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import ctVite from "@kt-tools/css-ts/vite";
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@kt-tools/css-ts": "@jsr/kt-tools__css-ts",
+    },
+  },
+  plugins: [ctVite()],
+});
+```
+
+## Svelte usage
+
+The runtime API is the same in Svelte. The only difference is how you pass the
+class string into markup.
+
+```svelte
+<script lang="ts">
+  import ct from "@kt-tools/css-ts";
+
+  const styles = new ct();
+
+  styles.base = {
+    card: {
+      display: "grid",
+      gap: "1rem",
+      padding: "1rem",
+    },
+    title: {
+      fontSize: "1.25rem",
+      fontWeight: 700,
+    },
+  };
+</script>
+
+<article class={styles.card()}>
+  <h2 class={styles.title()}>Hello</h2>
+</article>
+```
