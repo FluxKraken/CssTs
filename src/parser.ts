@@ -3,11 +3,14 @@ import {
   evalThemeTemplate,
   font,
   isCssVarRef,
+  isTailwindClassValue,
   isTheme,
   type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
+  type TailwindClassValue,
   Theme,
+  tw,
   toThemeVarName,
 } from "./shared.js";
 
@@ -16,7 +19,13 @@ interface ParseResult {
   end: number;
 }
 
-type VariantSheet = Record<string, Record<string, StyleSheet>>;
+type ResolvedStyleDefinition = {
+  kind: "css-ts-style";
+  declaration: StyleDeclaration;
+  tailwindClassNames?: readonly string[];
+};
+type NormalizedStyleSheet = Record<string, ResolvedStyleDefinition>;
+type VariantSheet = Record<string, Record<string, NormalizedStyleSheet>>;
 type VariantGlobalSheet = Record<string, Record<string, StyleSheet>>;
 type VariantSelection = Record<string, string>;
 type CtConfig = {
@@ -34,7 +43,7 @@ type CtConfig = {
       layer?: string;
     }
   >;
-  base: StyleSheet;
+  base: NormalizedStyleSheet;
   variant?: VariantSheet;
   variantGlobal?: VariantGlobalSheet;
   defaults?: VariantSelection;
@@ -48,7 +57,7 @@ type RootVarEntry =
   };
 type ParseCtOptions = {
   imports?: Set<string>;
-  utilities?: StyleSheet;
+  utilities?: NormalizedStyleSheet;
   containers?: Record<string, { type?: string; rule: string }>;
 };
 
@@ -72,11 +81,17 @@ type FontCallReference = {
   families: ParsedArray;
 };
 
+type TailwindCallReference = {
+  kind: "tailwind-call";
+  classes: ParsedValue;
+};
+
 interface ParsedObject {
   [key: string]: ParsedValue;
 }
 
 const QUOTED_KEYS = Symbol("ct-parser-quoted-keys");
+const RESOLVED_STYLE_KIND = "css-ts-style";
 
 interface ParsedArray extends Array<ParsedValue> {}
 
@@ -88,6 +103,7 @@ type ParsedValue =
   | TemplateLiteralReference
   | ThemeConstructorReference
   | FontCallReference
+  | TailwindCallReference
   | ParsedObject
   | ParsedArray;
 
@@ -357,6 +373,38 @@ function parseFontCall(
   }, cursor];
 }
 
+function parseTailwindCall(
+  input: string,
+  index: number,
+): [TailwindCallReference, number] {
+  let cursor = skipWhitespace(input, index);
+  if (input[cursor] !== "(") {
+    throw new Error("Expected '(' after tw");
+  }
+
+  cursor = skipWhitespace(input, cursor + 1);
+  const [argumentValue, argumentEnd] = parseValue(input, cursor);
+  if (
+    typeof argumentValue !== "string" &&
+    !(Array.isArray(argumentValue) &&
+      argumentValue.every((entry) => typeof entry === "string"))
+  ) {
+    throw new Error("tw() expects a string or an array of strings");
+  }
+
+  cursor = parseCallTerminator(
+    input,
+    argumentEnd,
+    "tw() accepts a single string or array argument",
+    "Expected ')' after tw() call",
+  );
+
+  return [{
+    kind: "tailwind-call",
+    classes: argumentValue,
+  }, cursor];
+}
+
 function parseCallTerminator(
   input: string,
   index: number,
@@ -540,6 +588,10 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
       return parseFontCall(input, identifierEnd);
     }
 
+    if (identifier === "tw") {
+      return parseTailwindCall(input, identifierEnd);
+    }
+
     return parseIdentifierReference(input, identifier, identifierEnd);
   }
 
@@ -652,6 +704,75 @@ function isFontCallReference(value: unknown): value is FontCallReference {
   );
 }
 
+function isTailwindCallReference(value: unknown): value is TailwindCallReference {
+  return (
+    isPlainObject(value) &&
+    value.kind === "tailwind-call" &&
+    "classes" in value
+  );
+}
+
+function normalizeTailwindClassNames(
+  classNames: readonly string[] | undefined,
+): string[] | undefined {
+  if (!classNames || classNames.length === 0) {
+    return undefined;
+  }
+
+  const normalized = classNames
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function createResolvedStyleDefinition(
+  declaration: StyleDeclaration = {},
+  tailwindClassNames?: readonly string[],
+): ResolvedStyleDefinition {
+  const normalizedTailwind = normalizeTailwindClassNames(tailwindClassNames);
+  return normalizedTailwind
+    ? {
+      kind: RESOLVED_STYLE_KIND,
+      declaration,
+      tailwindClassNames: normalizedTailwind,
+    }
+    : {
+      kind: RESOLVED_STYLE_KIND,
+      declaration,
+    };
+}
+
+function isResolvedStyleDefinition(
+  value: unknown,
+): value is ResolvedStyleDefinition {
+  return (
+    isPlainObject(value) &&
+    value.kind === RESOLVED_STYLE_KIND &&
+    "declaration" in value &&
+    isStyleDeclarationObject(value.declaration) &&
+    (!("tailwindClassNames" in value) ||
+      Array.isArray(value.tailwindClassNames))
+  );
+}
+
+function mergeResolvedStyleDefinitions(
+  base: ResolvedStyleDefinition,
+  next: ResolvedStyleDefinition,
+): ResolvedStyleDefinition {
+  return createResolvedStyleDefinition(
+    mergeStyleDeclarations(base.declaration, next.declaration),
+    [
+      ...(base.tailwindClassNames ?? []),
+      ...(next.tailwindClassNames ?? []),
+    ],
+  );
+}
+
+function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
+  return Object.keys(declaration).length > 0;
+}
+
 function identifierReferenceToCssLiteral(value: unknown): string | null {
   if (!isIdentifierReference(value) || value.path.length !== 1) {
     return null;
@@ -742,7 +863,12 @@ function isStyleLeaf(value: unknown): boolean {
 }
 
 function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
-  if (!isPlainObject(value) || isCssVarRef(value)) {
+  if (
+    !isPlainObject(value) ||
+    isCssVarRef(value) ||
+    isTailwindClassValue(value) ||
+    isResolvedStyleDefinition(value)
+  ) {
     return false;
   }
 
@@ -760,41 +886,66 @@ function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
 function normalizeApplyValue(
   value: unknown,
   options: ParseCtOptions,
-): StyleDeclaration | null {
+  allowTailwind = true,
+): ResolvedStyleDefinition | null {
   if (Array.isArray(value)) {
-    let merged: StyleDeclaration = {};
+    let merged = createResolvedStyleDefinition();
     for (const item of value) {
-      const declaration = normalizeApplyValue(item, options);
+      const declaration = normalizeApplyValue(item, options, allowTailwind);
       if (!declaration) {
         return null;
       }
-      merged = mergeStyleDeclarations(merged, declaration);
+      merged = mergeResolvedStyleDefinitions(merged, declaration);
     }
     return merged;
+  }
+
+  if (isResolvedStyleDefinition(value)) {
+    if (!allowTailwind && (value.tailwindClassNames?.length ?? 0) > 0) {
+      return null;
+    }
+    return createResolvedStyleDefinition(
+      value.declaration,
+      value.tailwindClassNames,
+    );
+  }
+
+  if (isTailwindClassValue(value)) {
+    return allowTailwind
+      ? createResolvedStyleDefinition({}, value.classNames)
+      : null;
   }
 
   if (typeof value === "string") {
     const utility = options.utilities?.[value];
     if (!utility) {
-      return null;
+      return createResolvedStyleDefinition();
     }
-    return normalizeStyleDeclaration(utility, options);
+    return createResolvedStyleDefinition(
+      utility.declaration,
+      utility.tailwindClassNames,
+    );
   }
 
   if (isPlainObject(value) && !isCssVarRef(value) && "rules" in value) {
-    const rules = normalizeApplyValue(value.rules, options);
+    const rules = normalizeApplyValue(value.rules, options, allowTailwind);
     if (!rules) {
       return null;
     }
-    if (typeof value.layer === "string" && value.layer.trim().length > 0) {
-      return {
-        [`@layer ${value.layer.trim()}`]: rules,
-      };
-    }
-    return rules;
+    const declaration = hasStyleDeclarations(rules.declaration) &&
+        typeof value.layer === "string" &&
+        value.layer.trim().length > 0
+      ? {
+        [`@layer ${value.layer.trim()}`]: rules.declaration,
+      }
+      : rules.declaration;
+    return createResolvedStyleDefinition(
+      declaration,
+      rules.tailwindClassNames,
+    );
   }
 
-  return normalizeStyleDeclaration(value, options);
+  return normalizeStyleDeclaration(value, options, allowTailwind);
 }
 
 function normalizeSetValue(
@@ -868,15 +1019,32 @@ function mergeStyleDeclarations(
 function normalizeStyleDeclaration(
   value: unknown,
   options: ParseCtOptions,
-): StyleDeclaration | null {
+  allowTailwind = true,
+): ResolvedStyleDefinition | null {
+  if (isResolvedStyleDefinition(value)) {
+    if (!allowTailwind && (value.tailwindClassNames?.length ?? 0) > 0) {
+      return null;
+    }
+    return createResolvedStyleDefinition(
+      value.declaration,
+      value.tailwindClassNames,
+    );
+  }
+
+  if (isTailwindClassValue(value)) {
+    return allowTailwind
+      ? createResolvedStyleDefinition({}, value.classNames)
+      : null;
+  }
+
   if (Array.isArray(value)) {
-    let merged: StyleDeclaration = {};
+    let merged = createResolvedStyleDefinition();
     for (const item of value) {
-      const declaration = normalizeStyleDeclaration(item, options);
+      const declaration = normalizeStyleDeclaration(item, options, allowTailwind);
       if (!declaration) {
         return null;
       }
-      merged = mergeStyleDeclarations(merged, declaration);
+      merged = mergeResolvedStyleDefinitions(merged, declaration);
     }
     return merged;
   }
@@ -889,15 +1057,27 @@ function normalizeStyleDeclaration(
     return null;
   }
 
-  let merged: StyleDeclaration = {};
+  let mergedDeclaration: StyleDeclaration = {};
+  let tailwindClassNames: string[] | undefined;
 
   for (const [key, declarationValue] of Object.entries(value)) {
     if (key === "@apply") {
-      const declaration = normalizeApplyValue(declarationValue, options);
+      const declaration = normalizeApplyValue(
+        declarationValue,
+        options,
+        allowTailwind,
+      );
       if (!declaration) {
         return null;
       }
-      merged = mergeStyleDeclarations(merged, declaration);
+      mergedDeclaration = mergeStyleDeclarations(
+        mergedDeclaration,
+        declaration.declaration,
+      );
+      tailwindClassNames = [
+        ...(tailwindClassNames ?? []),
+        ...(declaration.tailwindClassNames ?? []),
+      ];
       continue;
     }
 
@@ -906,7 +1086,7 @@ function normalizeStyleDeclaration(
       if (!declaration) {
         return null;
       }
-      merged = mergeStyleDeclarations(merged, declaration);
+      mergedDeclaration = mergeStyleDeclarations(mergedDeclaration, declaration);
       continue;
     }
 
@@ -915,24 +1095,25 @@ function normalizeStyleDeclaration(
       if (normalizedLeaf === null) {
         return null;
       }
-      (merged as Record<string, StyleValue>)[key] = normalizedLeaf;
+      (mergedDeclaration as Record<string, StyleValue>)[key] = normalizedLeaf;
       continue;
     }
 
-    const nested = normalizeStyleDeclaration(declarationValue, options);
+    const nested = normalizeStyleDeclaration(declarationValue, options, false);
     if (!nested) {
       return null;
     }
-    merged[key] = nested;
+    mergedDeclaration[key] = nested.declaration;
   }
 
-  return merged;
+  return createResolvedStyleDefinition(mergedDeclaration, tailwindClassNames);
 }
 
 function normalizeStyleSheet(
   value: unknown,
   options: ParseCtOptions,
-): StyleSheet | null {
+  allowTailwind = true,
+): NormalizedStyleSheet | null {
   if (isIdentifierReference(value)) {
     return null;
   }
@@ -941,7 +1122,7 @@ function normalizeStyleSheet(
     return null;
   }
 
-  const sheet: StyleSheet = {};
+  const sheet: NormalizedStyleSheet = {};
 
   function addImportPaths(importValue: unknown): boolean {
     const entries =
@@ -993,13 +1174,21 @@ function normalizeStyleSheet(
     }
 
     if (key === "@apply") {
-      const normalizedApply = normalizeApplyValue(declaration, options);
+      const normalizedApply = normalizeApplyValue(
+        declaration,
+        options,
+        allowTailwind,
+      );
       if (!normalizedApply) {
         return null;
       }
       continue;
     }
-    const normalized = normalizeStyleDeclaration(declaration, options);
+    const normalized = normalizeStyleDeclaration(
+      declaration,
+      options,
+      allowTailwind,
+    );
     if (!normalized) {
       return null;
     }
@@ -1007,6 +1196,14 @@ function normalizeStyleSheet(
   }
 
   return sheet;
+}
+
+function toDeclarationStyleSheet(styles: NormalizedStyleSheet): StyleSheet {
+  const declarations: StyleSheet = {};
+  for (const [key, style] of Object.entries(styles)) {
+    declarations[key] = style.declaration;
+  }
+  return declarations;
 }
 
 function normalizeRootVars(
@@ -1033,8 +1230,13 @@ function normalizeRootVars(
       if (!varsDeclaration) {
         return null;
       }
+      if ((varsDeclaration.tailwindClassNames?.length ?? 0) > 0) {
+        return null;
+      }
       const vars: Record<string, StyleValue> = {};
-      for (const [name, declarationValue] of Object.entries(varsDeclaration)) {
+      for (
+        const [name, declarationValue] of Object.entries(varsDeclaration.declaration)
+      ) {
         if (!isStyleLeaf(declarationValue)) {
           return null;
         }
@@ -1050,8 +1252,11 @@ function normalizeRootVars(
     if (!declaration) {
       return null;
     }
+    if ((declaration.tailwindClassNames?.length ?? 0) > 0) {
+      return null;
+    }
     const vars: Record<string, StyleValue> = {};
-    for (const [name, declarationValue] of Object.entries(declaration)) {
+    for (const [name, declarationValue] of Object.entries(declaration.declaration)) {
       if (!isStyleLeaf(declarationValue)) {
         return null;
       }
@@ -1153,7 +1358,7 @@ function normalizeImportedThemes(
 
 function normalizeVariantSheet(
   value: unknown,
-  base: StyleSheet,
+  base: NormalizedStyleSheet,
   options: ParseCtOptions,
 ): { variant?: VariantSheet; variantGlobal?: VariantGlobalSheet } | null {
   if (isIdentifierReference(value)) {
@@ -1172,7 +1377,7 @@ function normalizeVariantSheet(
       return null;
     }
 
-    const normalizedGroup: Record<string, StyleSheet> = {};
+    const normalizedGroup: Record<string, NormalizedStyleSheet> = {};
     const normalizedGlobalGroup: Record<string, StyleSheet> = {};
 
     for (const [variantName, variant] of Object.entries(group)) {
@@ -1180,7 +1385,7 @@ function normalizeVariantSheet(
         return null;
       }
 
-      const normalizedVariant: StyleSheet = {};
+      const normalizedVariant: NormalizedStyleSheet = {};
       const normalizedGlobalVariant: StyleSheet = {};
       const quotedKeys = getQuotedKeys(variant);
 
@@ -1188,13 +1393,17 @@ function normalizeVariantSheet(
         const normalizedDeclaration = normalizeStyleDeclaration(
           declaration,
           options,
+          true,
         );
         if (!normalizedDeclaration) {
           return null;
         }
 
         if (quotedKeys.has(key)) {
-          normalizedGlobalVariant[key] = normalizedDeclaration;
+          if ((normalizedDeclaration.tailwindClassNames?.length ?? 0) > 0) {
+            return null;
+          }
+          normalizedGlobalVariant[key] = normalizedDeclaration.declaration;
           continue;
         }
 
@@ -1290,7 +1499,7 @@ export function parseCtConfig(
 
   let global: StyleSheet | undefined;
   let root: RootVarEntry[] | undefined;
-  let base: StyleSheet = {};
+  let base: NormalizedStyleSheet = {};
   let variant: VariantSheet | undefined;
   let variantGlobal: VariantGlobalSheet | undefined;
   let defaults: VariantSelection | undefined;
@@ -1311,11 +1520,14 @@ export function parseCtConfig(
   }
 
   if ("global" in value) {
-    const normalized = normalizeStyleSheet(value.global, parseOptions);
+    const normalized = normalizeStyleSheet(value.global, parseOptions, false);
     if (!normalized) {
       return null;
     }
-    global = { ...(global ?? {}), ...normalized };
+    global = {
+      ...(global ?? {}),
+      ...toDeclarationStyleSheet(normalized),
+    };
   }
 
   if ("root" in value) {
@@ -1339,7 +1551,7 @@ export function parseCtConfig(
   }
 
   if ("base" in value) {
-    const normalized = normalizeStyleSheet(value.base, parseOptions);
+    const normalized = normalizeStyleSheet(value.base, parseOptions, true);
     if (!normalized) {
       return null;
     }
@@ -1443,6 +1655,27 @@ function resolveParsedValue(
     }
     try {
       return font(resolvedFamilies);
+    } catch {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+  }
+
+  if (isTailwindCallReference(value)) {
+    const resolvedClasses = resolveParsedValue(
+      value.classes,
+      resolveIdentifier,
+      keepUnresolvedIdentifiers,
+    );
+    if (
+      resolvedClasses === UNRESOLVED ||
+      (typeof resolvedClasses !== "string" &&
+        !(Array.isArray(resolvedClasses) &&
+          resolvedClasses.every((entry) => typeof entry === "string")))
+    ) {
+      return keepUnresolvedIdentifiers ? value : UNRESOLVED;
+    }
+    try {
+      return tw(resolvedClasses);
     } catch {
       return keepUnresolvedIdentifiers ? value : UNRESOLVED;
     }

@@ -5,7 +5,7 @@
 import runtimeCt from "./runtime.js";
 import type { CtBuilder } from "./runtime.js";
 import { cssTsPlugin } from "./vite.js";
-import { cv, font, Theme, tv } from "./shared.js";
+import { cv, font, Theme, tw, tv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
   new(): CtBuilder;
@@ -14,6 +14,7 @@ type Ct = typeof runtimeCt & {
   font: typeof font;
   var: typeof cv;
   Theme: typeof Theme;
+  tw: typeof tw;
   tv: typeof tv;
 };
 
@@ -28,6 +29,7 @@ const ct = Object.assign(runtimeCt, {
   font,
   var: cv,
   Theme,
+  tw,
   tv,
 }) as Ct;
 
@@ -41,6 +43,8 @@ export { cv };
 export { font };
 /** Named export for defining theme token maps. */
 export { Theme };
+/** Named export for Tailwind-aware class markers. */
+export { tw };
 /** Named export for referencing theme-backed CSS variables. */
 export { tv };
 /** Re-exported Vite plugin options. */
@@ -55,6 +59,10 @@ export type { StyleSheet } from "./shared.js";
 export type { StyleValue } from "./shared.js";
 /** Valid input for importing external styles or global style objects. */
 export type { ImportInput } from "./shared.js";
+/** Tailwind class marker returned by `tw(...)`. */
+export type { TailwindClassValue } from "./shared.js";
+/** Input accepted by `tw(...)`. */
+export type { TailwindClassInput } from "./shared.js";
 /** Theme token map accepted by `new Theme(...)`. */
 export type { ThemeTokenInput } from "./shared.js";
 /** Theme map accepted by `themes`. */

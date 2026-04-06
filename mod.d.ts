@@ -6,13 +6,17 @@ import {
   StyleDeclaration,
   StyleSheet,
   StyleValue,
+  TailwindClassInput,
+  TailwindClassValue,
   Theme,
   ThemeTokenInput,
+  tw,
 } from "./dist/shared.d.ts";
 import type { CssTsPluginOptions } from "./dist/vite.d.ts";
 
 type StyleDeclarationInput =
   | StyleDeclaration
+  | TailwindClassValue
   | readonly StyleDeclarationInput[];
 type StyleSheetInput = Record<string, StyleDeclarationInput>;
 type RootVarInput =
@@ -112,6 +116,10 @@ export type { StyleDeclaration };
 export type { StyleSheet };
 /** Re-exported style value type. */
 export type { StyleValue };
+/** Tailwind class marker returned by `tw(...)`. */
+export type { TailwindClassValue };
+/** Input accepted by `tw(...)`. */
+export type { TailwindClassInput };
 /** Re-exported theme token input type. */
 export type { ThemeTokenInput };
 /** Re-exported imported theme map type. */
@@ -143,6 +151,8 @@ export interface Ct {
   var: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
   /** Theme constructor. */
   Theme: typeof Theme;
+  /** Tailwind class helper. */
+  tw: typeof tw;
   /** Theme variable proxy. */
   tv: Record<string, CssVarRef>;
 }
@@ -158,5 +168,7 @@ export const cv: (name: string, fallback?: PrimitiveStyleValue) => CssVarRef;
 export { font };
 /** Named export for defining theme token maps. */
 export { Theme };
+/** Named export for Tailwind-aware class markers. */
+export { tw };
 /** Named export for referencing theme-backed CSS variables. */
 export const tv: Record<string, CssVarRef>;

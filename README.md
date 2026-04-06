@@ -17,6 +17,17 @@ npx jsr add @kt-tools/css-ts
 pnpm dlx jsr add @kt-tools/css-ts
 ```
 
+If you use Tailwind class support via `tw(...)`, install the optional
+`tailwind-merge` dependency as well:
+
+```bash
+npm install tailwind-merge
+```
+
+```bash
+deno add npm:tailwind-merge
+```
+
 ## Vite setup
 
 ```ts
@@ -585,6 +596,30 @@ const styles = ct({
 - arrays of declaration objects
 - layered rule objects (for example `{ rules: utility, layer: "typography" }`)
 - utility names from `css.config.ts` (see below)
+- `tw("...")` or `tw([...])` Tailwind class markers
+
+Use `tw(...)` when a style entry should resolve to Tailwind classes instead of
+generated CSS, or when `@apply` should append Tailwind classes alongside normal
+css-ts declarations:
+
+```ts
+import ct, { tw } from "@kt-tools/css-ts";
+
+const styles = ct({
+  base: {
+    nav: {
+      "@apply": tw("w-fit justify-self-end font-mono font-semibold text-xl"),
+      backgroundColor: "#00AAFF",
+      color: "white",
+    },
+    navList: {
+      "@apply": tw(["flex", "flex-wrap", "gap-2"]),
+    },
+    navItem: tw("flex-1 basis-[content] border-x-4 px-4 text-center"),
+    navLink: tw(["hover:underline", "underline-offset-6"]),
+  },
+});
+```
 
 Layered `@apply` rules are emitted under the given CSS layer while staying
 scoped to the current class selector:

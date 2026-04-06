@@ -4,6 +4,7 @@ import {
   assertMatch,
   assertThrows,
 } from "jsr:@std/assert";
+import { twMerge } from "npm:tailwind-merge";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
@@ -14,8 +15,11 @@ import {
   toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
+  tw,
   tv,
 } from "./src/shared.ts";
+
+(globalThis as Record<string, unknown>).__css_ts_tailwind_merge__ = twMerge;
 
 const VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
@@ -36,6 +40,19 @@ function asHook(
     return (hook as { handler: (...args: any[]) => unknown }).handler;
   }
   throw new Error("Expected plugin hook");
+}
+
+function styleDeclarationOf(style: unknown): Record<string, unknown> {
+  if (
+    style &&
+    typeof style === "object" &&
+    "declaration" in (style as Record<string, unknown>)
+  ) {
+    return ((style as { declaration?: unknown }).declaration ??
+      {}) as Record<string, unknown>;
+  }
+
+  return (style as Record<string, unknown> | undefined) ?? {};
 }
 
 Deno.test("injects component CSS for direct ct usage in svelte", () => {
@@ -764,7 +781,7 @@ Deno.test("parser accepts quoted nested selectors and nested @media/@container",
 
   assert(parsed !== null);
   assertEquals(
-    (parsed.base.mainNavigation as Record<string, unknown>).fontSize,
+    styleDeclarationOf(parsed.base.mainNavigation).fontSize,
     "1.25rem",
   );
 });
@@ -780,10 +797,11 @@ Deno.test("parser merges style declaration arrays in ct config", () => {
   }`);
 
   assert(parsed !== null);
-  assertEquals(parsed.base.myButton.fontSize, "1.25rem");
-  assertEquals(parsed.base.myButton.background, "black");
-  assertEquals(parsed.base.myButton.color, "white");
-  assertEquals(parsed.base.myButton.padding, "0.5rem");
+  const declaration = styleDeclarationOf(parsed.base.myButton);
+  assertEquals(declaration.fontSize, "1.25rem");
+  assertEquals(declaration.background, "black");
+  assertEquals(declaration.color, "white");
+  assertEquals(declaration.padding, "0.5rem");
 });
 
 Deno.test("parser supports space-delimited property arrays", () => {
@@ -797,8 +815,7 @@ Deno.test("parser supports space-delimited property arrays", () => {
   }`);
 
   assert(parsed !== null);
-  const rows =
-    (parsed.base.pageWrapper as Record<string, unknown>).gridTemplateRows;
+  const rows = styleDeclarationOf(parsed.base.pageWrapper).gridTemplateRows;
   assert(Array.isArray(rows));
   assertEquals(rows, ["auto", "1fr", "auto"]);
 });
@@ -816,7 +833,7 @@ Deno.test("parser supports bare identifier values in style declarations", () => 
   }`);
 
   assert(parsed !== null);
-  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  const declaration = styleDeclarationOf(parsed.base.pageWrapper);
   assertEquals(declaration.fontSize, "revert");
   assertEquals(declaration.borderStyle, "solid");
   assertEquals(declaration.color, "currentColor");
@@ -835,7 +852,7 @@ Deno.test("parser supports bare dashed identifier values in style declarations",
   }`);
 
   assert(parsed !== null);
-  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  const declaration = styleDeclarationOf(parsed.base.pageWrapper);
   assertEquals(declaration.width, "fit-content");
   assertEquals(declaration.fontFamily, ["ui-monospace", "monospace"]);
   assertEquals(declaration.animationTimingFunction, "ease-in-out");
@@ -856,7 +873,7 @@ Deno.test("parser supports font() helper values", () => {
   }`);
 
   assert(parsed !== null);
-  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  const declaration = styleDeclarationOf(parsed.base.pageWrapper);
   assertEquals(
     declaration.fontFamily,
     `"Inter Variable", system-ui, sans-serif`,
@@ -881,7 +898,7 @@ Deno.test("parser supports @apply merge lists with local declarations", () => {
   }`);
 
   assert(parsed !== null);
-  const declaration = parsed.base.pageWrapper as Record<string, unknown>;
+  const declaration = styleDeclarationOf(parsed.base.pageWrapper);
   assertEquals(declaration.display, "grid");
   assertEquals(declaration.backgroundColor, "#4f4f4f");
   assertEquals(declaration.color, "#00aaff");
@@ -910,7 +927,7 @@ Deno.test("parser supports layered @apply rule objects in merge lists", () => {
   }`);
 
   assert(parsed !== null);
-  const declaration = parsed.base.contentWrapper as Record<string, unknown>;
+  const declaration = styleDeclarationOf(parsed.base.contentWrapper);
   assertEquals(declaration.marginInline, "auto");
   assertEquals(declaration.color, "black");
   assertEquals(declaration["@layer typography"], {
@@ -919,6 +936,43 @@ Deno.test("parser supports layered @apply rule objects in merge lists", () => {
       fontWeight: "revert",
     },
   });
+});
+
+Deno.test("parser supports tw() in @apply and direct style entries", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      nav: {
+        "@apply": tw("w-fit justify-self-end font-mono font-semibold text-xl"),
+        backgroundColor: "#00AAFF",
+        color: "white"
+      },
+      navList: {
+        "@apply": tw(["flex", "flex-wrap", "gap-2"])
+      },
+      navItem: tw("flex-1 basis-[content] border-x-4 px-4 text-center"),
+      navLink: tw(["hover:underline", "underline-offset-6"])
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(styleDeclarationOf(parsed.base.nav).backgroundColor, "#00AAFF");
+  assertEquals(styleDeclarationOf(parsed.base.nav).color, "white");
+  assertEquals(parsed.base.nav.tailwindClassNames, [
+    "w-fit justify-self-end font-mono font-semibold text-xl",
+  ]);
+  assertEquals(parsed.base.navList.tailwindClassNames, [
+    "flex",
+    "flex-wrap",
+    "gap-2",
+  ]);
+  assertEquals(parsed.base.navItem.declaration, {});
+  assertEquals(parsed.base.navItem.tailwindClassNames, [
+    "flex-1 basis-[content] border-x-4 px-4 text-center",
+  ]);
+  assertEquals(parsed.base.navLink.tailwindClassNames, [
+    "hover:underline",
+    "underline-offset-6",
+  ]);
 });
 
 Deno.test("parser collects @import paths from stylesheet blocks", () => {
@@ -940,7 +994,7 @@ Deno.test("parser collects @import paths from stylesheet blocks", () => {
   ]);
   assertEquals(parsed.global, {});
   assertEquals(
-    (parsed.base.pageWrapper as Record<string, unknown>).display,
+    styleDeclarationOf(parsed.base.pageWrapper).display,
     "grid",
   );
 });
@@ -968,11 +1022,11 @@ Deno.test("parser supports @set with configured containers", () => {
 
   assert(parsed !== null);
   assertEquals(
-    (parsed.base.mainContainer as Record<string, unknown>).containerName,
+    styleDeclarationOf(parsed.base.mainContainer).containerName,
     "card",
   );
   assertEquals(
-    (parsed.base.mainContainer as Record<string, unknown>).containerType,
+    styleDeclarationOf(parsed.base.mainContainer).containerType,
     "inline-size",
   );
 });
@@ -1076,7 +1130,10 @@ Deno.test("parser expands themes and resolves tv references", () => {
     darkScope?.[":scope"]?.["--header-bg"],
     "white",
   );
-  assertEquals(parsed.base.header.backgroundColor, cv("--header-bg"));
+  assertEquals(
+    styleDeclarationOf(parsed.base.header).backgroundColor,
+    cv("--header-bg"),
+  );
 });
 
 Deno.test("parser resolves tv.eval() theme templates", () => {
@@ -1090,7 +1147,7 @@ Deno.test("parser resolves tv.eval() theme templates", () => {
 
   assert(parsed !== null);
   assertEquals(
-    parsed.base.hero.backgroundImage,
+    styleDeclarationOf(parsed.base.hero).backgroundImage,
     "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
   );
 });
@@ -1108,7 +1165,7 @@ Deno.test("parser resolves multiline tv.eval() theme templates", () => {
 
   assert(parsed !== null);
   assertEquals(
-    parsed.base.hero.backgroundImage,
+    styleDeclarationOf(parsed.base.hero).backgroundImage,
     "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
   );
 });
@@ -1126,7 +1183,7 @@ Deno.test("parser accepts trailing comma in tv.eval() calls", () => {
 
   assert(parsed !== null);
   assertEquals(
-    parsed.base.hero.backgroundImage,
+    styleDeclarationOf(parsed.base.hero).backgroundImage,
     "linear-gradient(147deg, var(--bg-gradient1), var(--bg-gradient2))",
   );
 });
@@ -1152,8 +1209,8 @@ Deno.test("parser accepts trailing commas in Theme() and cv() calls", () => {
       "--bg": "#123456",
     },
   ]);
-  assertEquals(parsed.base.hero.backgroundColor, cv("--bg"));
-  assertEquals(parsed.base.hero.padding, cv("--space", 8));
+  assertEquals(styleDeclarationOf(parsed.base.hero).backgroundColor, cv("--bg"));
+  assertEquals(styleDeclarationOf(parsed.base.hero).padding, cv("--space", 8));
 });
 
 Deno.test("runtime injects root into :root and layered :root", () => {
@@ -1448,7 +1505,10 @@ Deno.test("parser accepts variant keys declared as empty base rules", () => {
   }`);
 
   assert(parsed !== null);
-  assertEquals(parsed.variant?.size?.sm?.label.fontSize, "0.8rem");
+  assertEquals(
+    styleDeclarationOf(parsed.variant?.size?.sm?.label).fontSize,
+    "0.8rem",
+  );
 });
 
 Deno.test("parser routes quoted variant keys into variantGlobal", () => {
@@ -1722,6 +1782,44 @@ Deno.test("extracts layered @apply rule objects at build time", () => {
     css,
     /@layer typography\{\.ct_[a-z0-9]+ h1, \.ct_[a-z0-9]+ h2\{margin:revert;font-weight:revert\}\}/,
   );
+});
+
+Deno.test("extracts tw() class markers at build time", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct, { tw } from "css-ts";\n` +
+    `export const styles = ct({\n` +
+    `  base: {\n` +
+    `    nav: {\n` +
+    `      "@apply": tw(["px-2", "px-4", "font-mono"]),\n` +
+    `      color: "white",\n` +
+    `    },\n` +
+    `    navLink: tw(["underline-offset-2", "underline-offset-6", "hover:underline"]),\n` +
+    `  },\n` +
+    `  variant: {\n` +
+    `    size: {\n` +
+    `      lg: {\n` +
+    `        nav: tw(["text-sm", "text-lg"]),\n` +
+    `      },\n` +
+    `    },\n` +
+    `  },\n` +
+    `});`;
+  const transformed = transform(moduleCode, "/app/src/lib/tailwind-apply.ts");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(!code.includes("tw("));
+  assert(code.includes("underline-offset-6"));
+  assert(code.includes("text-lg"));
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{color:white\}/);
+  assert(!css.includes("underline-offset"));
+  assert(!css.includes("text-lg"));
 });
 
 Deno.test("extracts @import stylesheet imports with relative paths", () => {
@@ -3911,6 +4009,37 @@ Deno.test("runtime accessors expose class() and style()", () => {
   assertEquals(accessor.style(), "background-color:black;color:white");
 });
 
+Deno.test("runtime accessors support tw() for mixed and direct Tailwind styles", () => {
+  const styles = new (ct as any)();
+  styles.base = {
+    nav: {
+      "@apply": tw(["px-2", "px-4", "font-mono"]),
+      color: "white",
+    },
+    navLink: tw(["underline-offset-2", "underline-offset-6", "hover:underline"]),
+  };
+  styles.variant = {
+    size: {
+      lg: {
+        nav: tw(["text-sm", "text-lg"]),
+      },
+    },
+  };
+
+  const navClass = styles().nav();
+  assert(navClass.includes("px-4"));
+  assert(!navClass.includes("px-2"));
+  assert(navClass.includes("font-mono"));
+  assertMatch(navClass, /ct_[a-z0-9]+/);
+  assertEquals(styles().nav.style(), "color:white");
+  assertEquals(styles().navLink.style(), "");
+  assertEquals(styles().navLink(), "underline-offset-6 hover:underline");
+
+  const largeNavClass = styles().nav({ size: "lg" });
+  assert(largeNavClass.includes("text-lg"));
+  assert(!largeNavClass.includes("text-sm"));
+});
+
 Deno.test("new ct() runtime with variants and defaults", () => {
   const styles = new (ct as any)();
   styles.base = {
@@ -4646,7 +4775,7 @@ Deno.test("parser preserves $ prefixed keys", () => {
   }`);
 
   assert(parsed !== null);
-  const card = parsed.base.card as Record<string, unknown>;
+  const card = styleDeclarationOf(parsed.base.card);
   assertEquals(card.display, "grid");
   assertEquals(
     (card["$dark"] as Record<string, unknown>).backgroundColor,

@@ -3,11 +3,14 @@ import {
   CssSerializationOptions,
   ImportedThemesInput,
   isCssVarRef,
+  isTailwindClassValue,
+  mergeTailwindClassNames,
   RootVarInput,
   rootVarsToGlobalRules,
   StyleDeclaration,
   StyleSheet,
   StyleValue,
+  TailwindClassValue,
   themesToConfig,
   toCssLayerOrderRule,
   toCssDeclaration,
@@ -18,9 +21,19 @@ import {
 /** A style declaration or recursive array of declarations (merged left-to-right). */
 type StyleDeclarationInput =
   | StyleDeclaration
+  | TailwindClassValue
+  | ResolvedStyleDefinition
   | readonly StyleDeclarationInput[];
 /** Map of class keys to style declaration inputs. */
 type StyleSheetInput = Record<string, StyleDeclarationInput>;
+/** Normalized style entry split into CSS declarations and Tailwind class segments. */
+type ResolvedStyleDefinition = {
+  kind: "css-ts-style";
+  declaration: StyleDeclaration;
+  tailwindClassNames?: readonly string[];
+};
+/** Normalized stylesheet map keyed by style name. */
+type NormalizedStyleSheet = Record<string, ResolvedStyleDefinition>;
 /** Precompiled class name map keyed by style key. */
 type CompiledMap<T extends StyleSheetInput> = Partial<Record<keyof T, string>>;
 /** Variant group map: `{ groupName: { variantName: Partial<StyleSheet> } }`. */
@@ -121,6 +134,7 @@ type StyleAccessor<V extends VariantSheet<any> | undefined> =
 
 const RUNTIME_STYLE_TAG_ID = "__css_ts_runtime_styles";
 const RUNTIME_IMPORT_TAG_ID = "__css_ts_runtime_imports";
+const RESOLVED_STYLE_KIND = "css-ts-style";
 let runtimeManagedTagCounter = 0;
 const injectedRules = new Set<string>();
 const injectedImportRules = new Set<string>();
@@ -191,12 +205,79 @@ function setManagedRules(tagId: string, rules: readonly string[]): void {
   tag.textContent = rules.join("");
 }
 
+function normalizeTailwindClassNames(
+  classNames: readonly string[] | undefined,
+): string[] | undefined {
+  if (!classNames || classNames.length === 0) {
+    return undefined;
+  }
+
+  const normalized = classNames
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function createResolvedStyleDefinition(
+  declaration: StyleDeclaration = {},
+  tailwindClassNames?: readonly string[],
+): ResolvedStyleDefinition {
+  const normalizedTailwind = normalizeTailwindClassNames(tailwindClassNames);
+  return normalizedTailwind
+    ? {
+      kind: RESOLVED_STYLE_KIND,
+      declaration,
+      tailwindClassNames: normalizedTailwind,
+    }
+    : {
+      kind: RESOLVED_STYLE_KIND,
+      declaration,
+    };
+}
+
+function isResolvedStyleDefinition(
+  value: unknown,
+): value is ResolvedStyleDefinition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !isCssVarRef(value) &&
+    "kind" in value &&
+    (value as { kind?: unknown }).kind === RESOLVED_STYLE_KIND &&
+    "declaration" in value &&
+    isStyleDeclarationObject((value as { declaration?: unknown }).declaration) &&
+    (!("tailwindClassNames" in value) ||
+      Array.isArray((value as { tailwindClassNames?: unknown }).tailwindClassNames))
+  );
+}
+
+function mergeResolvedStyleDefinitions(
+  base: ResolvedStyleDefinition,
+  next: ResolvedStyleDefinition,
+): ResolvedStyleDefinition {
+  return createResolvedStyleDefinition(
+    mergeStyleDeclarations(base.declaration, next.declaration),
+    [
+      ...(base.tailwindClassNames ?? []),
+      ...(next.tailwindClassNames ?? []),
+    ],
+  );
+}
+
+function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
+  return Object.keys(declaration).length > 0;
+}
+
 function isStyleDeclarationObject(value: unknown): value is StyleDeclaration {
   if (
     typeof value !== "object" ||
     value === null ||
     Array.isArray(value) ||
-    isCssVarRef(value)
+    isCssVarRef(value) ||
+    isTailwindClassValue(value) ||
+    isResolvedStyleDefinition(value)
   ) {
     return false;
   }
@@ -253,14 +334,17 @@ function normalizeStyleDeclarationInput(
   input: StyleDeclarationInput,
   options: {
     imports?: Set<string>;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
+    allowTailwind?: boolean;
   } = {},
-): StyleDeclaration {
+): ResolvedStyleDefinition {
+  const allowTailwind = options.allowTailwind !== false;
+
   if (Array.isArray(input)) {
-    let merged: StyleDeclaration = {};
+    let merged = createResolvedStyleDefinition();
     for (const entry of input) {
-      merged = mergeStyleDeclarations(
+      merged = mergeResolvedStyleDefinitions(
         merged,
         normalizeStyleDeclarationInput(entry, options),
       );
@@ -268,54 +352,107 @@ function normalizeStyleDeclarationInput(
     return merged;
   }
 
+  if (isResolvedStyleDefinition(input)) {
+    if (!allowTailwind && (input.tailwindClassNames?.length ?? 0) > 0) {
+      throw new Error(
+        'tw() can only be used as a full style value or on a top-level "@apply" directive.',
+      );
+    }
+
+    return createResolvedStyleDefinition(
+      input.declaration,
+      input.tailwindClassNames,
+    );
+  }
+
+  if (isTailwindClassValue(input)) {
+    if (!allowTailwind) {
+      throw new Error(
+        'tw() can only be used as a full style value or on a top-level "@apply" directive.',
+      );
+    }
+
+    return createResolvedStyleDefinition({}, input.classNames);
+  }
+
   const declaration = input as StyleDeclaration;
-  let normalized: StyleDeclaration = {};
+  let normalizedDeclaration: StyleDeclaration = {};
+  let tailwindClassNames: string[] | undefined;
 
   for (const [key, value] of Object.entries(declaration)) {
     if (key === "@apply") {
-      const applyValue = normalizeApplyInput(value, options);
-      normalized = mergeStyleDeclarations(normalized, applyValue);
+      const applyValue = normalizeApplyInput(value, {
+        ...options,
+        allowTailwind,
+      });
+      normalizedDeclaration = mergeStyleDeclarations(
+        normalizedDeclaration,
+        applyValue.declaration,
+      );
+      tailwindClassNames = [
+        ...(tailwindClassNames ?? []),
+        ...(applyValue.tailwindClassNames ?? []),
+      ];
       continue;
     }
 
     if (key === "@set") {
       const setValue = normalizeSetInput(value, options);
-      normalized = mergeStyleDeclarations(normalized, setValue);
+      normalizedDeclaration = mergeStyleDeclarations(
+        normalizedDeclaration,
+        setValue,
+      );
       continue;
     }
 
     if (isStyleLeafArray(value) || isPrimitiveStyleLeaf(value)) {
-      (normalized as Record<string, StyleValue>)[key] = value as StyleValue;
+      (normalizedDeclaration as Record<string, StyleValue>)[key] =
+        value as StyleValue;
       continue;
     }
 
-    if (Array.isArray(value) || isStyleDeclarationObject(value)) {
-      (normalized as Record<string, unknown>)[key] =
-        normalizeStyleDeclarationInput(
-          value as StyleDeclarationInput,
-          options,
-        );
+    if (
+      Array.isArray(value) ||
+      isStyleDeclarationObject(value) ||
+      isResolvedStyleDefinition(value) ||
+      isTailwindClassValue(value)
+    ) {
+      const nested = normalizeStyleDeclarationInput(
+        value as StyleDeclarationInput,
+        {
+          ...options,
+          allowTailwind: false,
+        },
+      );
+      (normalizedDeclaration as Record<string, unknown>)[key] =
+        nested.declaration;
       continue;
     }
 
-    (normalized as Record<string, unknown>)[key] = value;
+    (normalizedDeclaration as Record<string, unknown>)[key] = value;
   }
 
-  return normalized;
+  return createResolvedStyleDefinition(
+    normalizedDeclaration,
+    tailwindClassNames,
+  );
 }
 
 function normalizeApplyInput(
   value: unknown,
   options: {
     imports?: Set<string>;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
+    allowTailwind?: boolean;
   },
-): StyleDeclaration {
+): ResolvedStyleDefinition {
+  const allowTailwind = options.allowTailwind !== false;
+
   if (Array.isArray(value)) {
-    let merged: StyleDeclaration = {};
+    let merged = createResolvedStyleDefinition();
     for (const entry of value) {
-      merged = mergeStyleDeclarations(
+      merged = mergeResolvedStyleDefinitions(
         merged,
         normalizeApplyInput(entry, options),
       );
@@ -323,12 +460,38 @@ function normalizeApplyInput(
     return merged;
   }
 
+  if (isResolvedStyleDefinition(value)) {
+    if (!allowTailwind && (value.tailwindClassNames?.length ?? 0) > 0) {
+      throw new Error(
+        'tw() can only be used as a full style value or on a top-level "@apply" directive.',
+      );
+    }
+
+    return createResolvedStyleDefinition(
+      value.declaration,
+      value.tailwindClassNames,
+    );
+  }
+
+  if (isTailwindClassValue(value)) {
+    if (!allowTailwind) {
+      throw new Error(
+        'tw() can only be used as a full style value or on a top-level "@apply" directive.',
+      );
+    }
+
+    return createResolvedStyleDefinition({}, value.classNames);
+  }
+
   if (typeof value === "string") {
     const utility = options.utilities?.[value];
     if (!utility) {
-      return {};
+      return createResolvedStyleDefinition();
     }
-    return normalizeStyleDeclarationInput(utility, options);
+    return createResolvedStyleDefinition(
+      utility.declaration,
+      utility.tailwindClassNames,
+    );
   }
 
   if (
@@ -340,28 +503,33 @@ function normalizeApplyInput(
   ) {
     const layeredApply = value as { rules: unknown; layer?: unknown };
     const rules = normalizeApplyInput(layeredApply.rules, options);
-    if (Object.keys(rules).length === 0) {
-      return {};
-    }
-    if (
-      typeof layeredApply.layer === "string" &&
-      layeredApply.layer.trim().length > 0
-    ) {
-      return {
-        [`@layer ${layeredApply.layer.trim()}`]: rules,
-      };
-    }
-    return rules;
+    const layeredDeclaration = hasStyleDeclarations(rules.declaration) &&
+        typeof layeredApply.layer === "string" &&
+        layeredApply.layer.trim().length > 0
+      ? {
+        [`@layer ${layeredApply.layer.trim()}`]: rules.declaration,
+      }
+      : rules.declaration;
+
+    return createResolvedStyleDefinition(
+      layeredDeclaration,
+      rules.tailwindClassNames,
+    );
   }
 
-  if (isStyleDeclarationObject(value) || Array.isArray(value)) {
+  if (
+    isStyleDeclarationObject(value) ||
+    Array.isArray(value) ||
+    isResolvedStyleDefinition(value) ||
+    isTailwindClassValue(value)
+  ) {
     return normalizeStyleDeclarationInput(
       value as StyleDeclarationInput,
       options,
     );
   }
 
-  return {};
+  return createResolvedStyleDefinition();
 }
 
 function normalizeSetInput(
@@ -408,11 +576,12 @@ function normalizeStyleSheetInput(
   styles: StyleSheetInput | undefined,
   options: {
     imports?: Set<string>;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
+    allowTailwind?: boolean;
   } = {},
-): StyleSheet {
-  const normalized: StyleSheet = {};
+): NormalizedStyleSheet {
+  const normalized: NormalizedStyleSheet = {};
 
   function addImportPaths(value: unknown): void {
     const entries = typeof value === "string" ||
@@ -470,6 +639,32 @@ function normalizeStyleSheetInput(
   return normalized;
 }
 
+function toDeclarationStyleSheet(styles: NormalizedStyleSheet): StyleSheet {
+  const declarations: StyleSheet = {};
+  for (const [key, style] of Object.entries(styles)) {
+    declarations[key] = style.declaration;
+  }
+  return declarations;
+}
+
+function hasTailwindClassNames(style: ResolvedStyleDefinition): boolean {
+  return (style.tailwindClassNames?.length ?? 0) > 0;
+}
+
+function resolveStyleClassValue(
+  generatedClassName: string | undefined,
+  style: ResolvedStyleDefinition,
+): string {
+  if (hasTailwindClassNames(style)) {
+    return mergeTailwindClassNames([
+      ...(generatedClassName ? [generatedClassName] : []),
+      ...(style.tailwindClassNames ?? []),
+    ]);
+  }
+
+  return generatedClassName ?? "";
+}
+
 function isInlineStyleValue(value: unknown): value is StyleValue {
   return typeof value === "string" || typeof value === "number" ||
     isCssVarRef(value) || isStyleLeafArray(value);
@@ -506,26 +701,30 @@ function normalizeVariantSheetInput<T extends StyleSheetInput>(
   variants: VariantSheet<T> | undefined,
   options: {
     imports?: Set<string>;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
+    allowTailwind?: boolean;
   } = {},
-): Record<string, Record<string, Partial<StyleSheet>>> | undefined {
+): Record<string, Record<string, Partial<NormalizedStyleSheet>>> | undefined {
   if (!variants) {
     return undefined;
   }
 
-  const normalized: Record<string, Record<string, Partial<StyleSheet>>> = {};
+  const normalized: Record<string, Record<string, Partial<NormalizedStyleSheet>>> = {};
   for (const [group, groupVariants] of Object.entries(variants)) {
-    const normalizedGroup: Record<string, Partial<StyleSheet>> = {};
+    const normalizedGroup: Record<string, Partial<NormalizedStyleSheet>> = {};
     for (const [variantName, declarations] of Object.entries(groupVariants)) {
-      const normalizedVariant: Partial<StyleSheet> = {};
+      const normalizedVariant: Partial<NormalizedStyleSheet> = {};
       for (const [key, declaration] of Object.entries(declarations)) {
         if (!declaration) {
           continue;
         }
         normalizedVariant[key] = normalizeStyleDeclarationInput(
           declaration as StyleDeclarationInput,
-          options,
+          {
+            ...options,
+            allowTailwind: true,
+          },
         );
       }
       normalizedGroup[variantName] = normalizedVariant;
@@ -540,8 +739,9 @@ function normalizeVariantGlobalSheetInput(
   variants: VariantGlobalSheet | undefined,
   options: {
     imports?: Set<string>;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     containers?: Record<string, { type?: string; rule: string }>;
+    allowTailwind?: boolean;
   } = {},
 ): Record<string, Record<string, StyleSheet>> | undefined {
   if (!variants) {
@@ -552,8 +752,11 @@ function normalizeVariantGlobalSheetInput(
   for (const [group, groupVariants] of Object.entries(variants)) {
     const normalizedGroup: Record<string, StyleSheet> = {};
     for (const [variantName, declarations] of Object.entries(groupVariants)) {
-      const normalizedVariant = normalizeStyleSheetInput(declarations, options);
-      normalizedGroup[variantName] = normalizedVariant;
+      const normalizedVariant = normalizeStyleSheetInput(declarations, {
+        ...options,
+        allowTailwind: false,
+      });
+      normalizedGroup[variantName] = toDeclarationStyleSheet(normalizedVariant);
     }
     normalized[group] = normalizedGroup;
   }
@@ -592,6 +795,7 @@ function compileConfig<
     ? normalizeStyleSheetInput(runtimeOptions.utilities, {
       imports,
       containers: runtimeOptions.containers,
+      allowTailwind: true,
     })
     : undefined;
   const normalizeOptions = {
@@ -615,18 +819,29 @@ function compileConfig<
     ...rootVarStyles,
     ...(config.global ?? {}),
   };
-  const globalStyles = normalizeStyleSheetInput(
-    mergedGlobalStyles,
-    normalizeOptions,
+  const globalStyles = toDeclarationStyleSheet(
+    normalizeStyleSheetInput(mergedGlobalStyles, {
+      ...normalizeOptions,
+      allowTailwind: false,
+    }),
   );
-  const styles = normalizeStyleSheetInput(config.base, normalizeOptions);
+  const styles = normalizeStyleSheetInput(config.base, {
+    ...normalizeOptions,
+    allowTailwind: true,
+  });
   const variants = normalizeVariantSheetInput(
     config.variant as VariantSheet<T> | undefined,
-    normalizeOptions,
+    {
+      ...normalizeOptions,
+      allowTailwind: true,
+    },
   );
   const variantGlobalStyles = normalizeVariantGlobalSheetInput(
     config.variantGlobal,
-    normalizeOptions,
+    {
+      ...normalizeOptions,
+      allowTailwind: false,
+    },
   );
   const defaultSelection = (config.defaults ?? {}) as VariantSelection<V>;
 
@@ -715,9 +930,9 @@ function compileConfig<
   const compiledBase = effectiveCompiled?.base;
 
   for (
-    const [key, declaration] of Object.entries(styles) as [
+    const [key, style] of Object.entries(styles) as [
       keyof T,
-      StyleDeclaration,
+      ResolvedStyleDefinition,
     ][]
   ) {
     const compiledClassName = compiledBase?.[key];
@@ -728,16 +943,20 @@ function compileConfig<
         }.`,
       );
     }
-    const className = compiledClassName ??
-      createClassName(String(key), declaration, "runtime");
+    const generatedClassName = hasStyleDeclarations(style.declaration) ||
+        !hasTailwindClassNames(style)
+      ? createClassName(String(key), style.declaration, "runtime")
+      : undefined;
+    const classValue = compiledClassName ??
+      resolveStyleClassValue(generatedClassName, style);
 
-    if (!compiledClassName) {
-      for (const rule of toCssRules(className, declaration, cssOptions)) {
+    if (!compiledClassName && generatedClassName) {
+      for (const rule of toCssRules(generatedClassName, style.declaration, cssOptions)) {
         injectRule(rule);
       }
-      log("dynamic", `base.${String(key)} -> .${className}`);
+      log("dynamic", `base.${String(key)} -> ${classValue}`);
     } else {
-      log("static", `base.${String(key)} -> .${className}`);
+      log("static", `base.${String(key)} -> ${classValue}`);
     }
 
     const resolveSelection = (selection?: VariantSelection<V>) =>
@@ -770,7 +989,7 @@ function compileConfig<
         const variantDeclaration = variants[group]?.[String(variantName)]
           ?.[String(key)];
         if (variantDeclaration) {
-          declarations.push(variantDeclaration as StyleDeclaration);
+          declarations.push(variantDeclaration.declaration);
         }
       }
 
@@ -781,12 +1000,8 @@ function compileConfig<
       const resolvedSelection = selection
         ? ({ ...defaultSelection, ...selection } as VariantSelection<V>)
         : defaultSelection;
-
-      if (!resolvedSelection) {
-        return className;
-      }
-
-      const classNames = [className];
+      const classNames = classValue ? [classValue] : [];
+      let requiresTailwindMerge = false;
 
       for (
         const [group, variantName] of Object.entries(
@@ -800,6 +1015,12 @@ function compileConfig<
           continue;
         }
 
+        const variantStyle = variants?.[group]?.[String(variantName)]
+          ?.[String(key)];
+        if (variantStyle && hasTailwindClassNames(variantStyle)) {
+          requiresTailwindMerge = true;
+        }
+
         const variantClass = variantClassMap[group]?.[String(variantName)]
           ?.[key];
         if (variantClass) {
@@ -807,14 +1028,24 @@ function compileConfig<
         }
       }
 
-      return classNames.join(" ");
+      if (classNames.length === 0) {
+        return "";
+      }
+
+      if (classNames.length === 1) {
+        return classNames[0];
+      }
+
+      return requiresTailwindMerge
+        ? mergeTailwindClassNames(classNames)
+        : classNames.join(" ");
     };
 
     const accessor = classAccessor as StyleAccessor<V>;
     accessor.class = classAccessor;
     accessor.style = (selection?: VariantSelection<V>) =>
       toInlineStyleString([
-        declaration,
+        style.declaration,
         ...resolveVariantDeclarations(selection),
       ], cssOptions);
 
@@ -833,9 +1064,9 @@ function compileConfig<
         const compiledVariant = compiledGroup?.[variantName];
 
         for (
-          const [key, declaration] of Object.entries(declarations) as [
+          const [key, style] of Object.entries(declarations) as [
             keyof T,
-            StyleDeclaration,
+            ResolvedStyleDefinition,
           ][]
         ) {
           const compiledClassName = compiledVariant?.[key];
@@ -846,29 +1077,33 @@ function compileConfig<
               }.`,
             );
           }
-          const className = compiledClassName ??
-            createClassName(
+          const generatedClassName = hasStyleDeclarations(style.declaration) ||
+              !hasTailwindClassNames(style)
+            ? createClassName(
               `${group}:${variantName}:${String(key)}`,
-              declaration,
+              style.declaration,
               "runtime",
-            );
+            )
+            : undefined;
+          const classValue = compiledClassName ??
+            resolveStyleClassValue(generatedClassName, style);
 
-          if (!compiledClassName) {
-            for (const rule of toCssRules(className, declaration, cssOptions)) {
+          if (!compiledClassName && generatedClassName) {
+            for (const rule of toCssRules(generatedClassName, style.declaration, cssOptions)) {
               injectRule(rule);
             }
             log(
               "dynamic",
-              `variant.${group}.${variantName}.${String(key)} -> .${className}`,
+              `variant.${group}.${variantName}.${String(key)} -> ${classValue}`,
             );
           } else {
             log(
               "static",
-              `variant.${group}.${variantName}.${String(key)} -> .${className}`,
+              `variant.${group}.${variantName}.${String(key)} -> ${classValue}`,
             );
           }
 
-          variantMap[key] = className;
+          variantMap[key] = classValue;
         }
 
         groupMap[variantName] = variantMap;

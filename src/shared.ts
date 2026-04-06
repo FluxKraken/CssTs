@@ -1,6 +1,17 @@
 /** Primitive CSS value before unit formatting. */
 export type PrimitiveStyleValue = string | number;
 
+type NodeRequire = ((id: string) => unknown) & {
+  resolve?: (id: string) => string;
+};
+type NodeModule = {
+  createRequire: (url: string) => NodeRequire;
+};
+
+let nodeRequire: NodeRequire | null | undefined;
+let tailwindMergeFn: ((...classLists: string[]) => string) | null | undefined;
+const TAILWIND_MERGE_GLOBAL_KEY = "__css_ts_tailwind_merge__";
+
 const GENERIC_FONT_FAMILIES = new Set([
   "serif",
   "sans-serif",
@@ -31,6 +42,15 @@ export type StyleValue =
   | PrimitiveStyleValue
   | CssVarRef
   | readonly (PrimitiveStyleValue | CssVarRef)[];
+/** Input accepted by {@link tw}. */
+export type TailwindClassInput = string | readonly string[];
+/** Tailwind class marker used by `@apply` and direct style entries. */
+export interface TailwindClassValue {
+  /** Discriminator for {@link TailwindClassValue}. */
+  kind: "css-ts-tailwind";
+  /** Raw class list segments passed to `tailwind-merge`. */
+  classNames: readonly string[];
+}
 /** CSS custom properties emitted on `:root` (optionally within a layer). */
 export type RootVarInput =
   | Record<string, StyleValue>
@@ -407,6 +427,152 @@ export function font(families: readonly string[]): string {
     }
     return formatFontFamily(family);
   }).join(", ");
+}
+
+function getBuiltinModule(id: string): unknown | null {
+  const processValue = (globalThis as { process?: unknown }).process;
+  if (!processValue || typeof processValue !== "object") {
+    return null;
+  }
+
+  const getBuiltinModule =
+    (processValue as { getBuiltinModule?: unknown }).getBuiltinModule;
+  if (typeof getBuiltinModule !== "function") {
+    return null;
+  }
+
+  try {
+    return (getBuiltinModule as (name: string) => unknown)(id);
+  } catch {
+    return null;
+  }
+}
+
+function getFallbackRequire(): NodeRequire | null {
+  try {
+    const req = new Function(
+      'return typeof require === "function" ? require : null;',
+    )();
+    return typeof req === "function" ? (req as NodeRequire) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getNodeRequire(): NodeRequire | null {
+  if (nodeRequire !== undefined) {
+    return nodeRequire;
+  }
+
+  const moduleBuiltin = getBuiltinModule("node:module") as NodeModule | null;
+  if (moduleBuiltin && typeof moduleBuiltin.createRequire === "function") {
+    nodeRequire = moduleBuiltin.createRequire(import.meta.url);
+    return nodeRequire;
+  }
+
+  nodeRequire = getFallbackRequire();
+  return nodeRequire;
+}
+
+function normalizeTailwindClassInput(input: TailwindClassInput): string[] {
+  const entries = typeof input === "string" ? [input] : [...input];
+  const normalized: string[] = [];
+
+  for (const entry of entries) {
+    if (typeof entry !== "string") {
+      throw new Error("tw() expects a string or an array of strings.");
+    }
+
+    const trimmed = entry.trim();
+    if (trimmed.length > 0) {
+      normalized.push(trimmed);
+    }
+  }
+
+  return normalized;
+}
+
+/** Create a Tailwind class marker for `@apply` or direct style entries. */
+export function tw(input: TailwindClassInput): TailwindClassValue {
+  return {
+    kind: "css-ts-tailwind",
+    classNames: normalizeTailwindClassInput(input),
+  };
+}
+
+/** Type guard for {@link TailwindClassValue}. */
+export function isTailwindClassValue(value: unknown): value is TailwindClassValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    (value as TailwindClassValue).kind === "css-ts-tailwind" &&
+    "classNames" in value &&
+    Array.isArray((value as TailwindClassValue).classNames) &&
+    (value as TailwindClassValue).classNames.every((entry) =>
+      typeof entry === "string"
+    )
+  );
+}
+
+function resolveTailwindMerge(): (...classLists: string[]) => string {
+  if (tailwindMergeFn) {
+    return tailwindMergeFn;
+  }
+
+  if (tailwindMergeFn === null) {
+    throw new Error(
+      'tw() requires the optional dependency "tailwind-merge". Install it to use Tailwind class support.',
+    );
+  }
+
+  const injectedMerge = (
+    globalThis as Record<string, unknown>
+  )[TAILWIND_MERGE_GLOBAL_KEY];
+  if (typeof injectedMerge === "function") {
+    tailwindMergeFn = injectedMerge as (...classLists: string[]) => string;
+    return tailwindMergeFn;
+  }
+
+  const requireFn = getNodeRequire();
+  if (requireFn) {
+    try {
+      const loaded = requireFn("tailwind-merge") as
+        | { twMerge?: unknown; default?: { twMerge?: unknown } }
+        | null;
+      const mergeFn = typeof loaded?.twMerge === "function"
+        ? loaded.twMerge
+        : typeof loaded?.default?.twMerge === "function"
+        ? loaded.default.twMerge
+        : null;
+      if (mergeFn) {
+        tailwindMergeFn = mergeFn as (...classLists: string[]) => string;
+        return tailwindMergeFn;
+      }
+    } catch {
+      // Defer the user-facing error until after all sync loading strategies fail.
+    }
+  }
+
+  tailwindMergeFn = null;
+  throw new Error(
+    'tw() requires the optional dependency "tailwind-merge". Install it to use Tailwind class support.',
+  );
+}
+
+/** Merge Tailwind class lists using the optional `tailwind-merge` dependency. */
+export function mergeTailwindClassNames(
+  classLists: readonly string[],
+): string {
+  const normalized = classLists
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (normalized.length === 0) {
+    return "";
+  }
+
+  return resolveTailwindMerge()(...normalized);
 }
 
 /** Convert a camelCased property name to kebab-case. */

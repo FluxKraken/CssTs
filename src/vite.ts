@@ -12,10 +12,14 @@ import {
   camelToKebab,
   createClassName,
   cv,
+  font,
+  mergeTailwindClassNames,
   rootVarsToGlobalRules,
+  type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
   Theme,
+  tw,
   toCssLayerOrderRule,
   toCssGlobalRules,
   toCssRules,
@@ -155,7 +159,7 @@ type LoadedCssConfig = {
   layers: string[];
   defaultUnit?: string;
   include: string[];
-  utilities: StyleSheet;
+  utilities: NormalizedStyleSheet;
   configCss: string;
   utilityCss: string;
   runtimeOptions: {
@@ -163,7 +167,7 @@ type LoadedCssConfig = {
     containers?: Record<string, { type?: string; rule: string }>;
     layers?: string[];
     defaultUnit?: string;
-    utilities?: StyleSheet;
+    utilities?: NormalizedStyleSheet;
     resolution?: "static" | "dynamic" | "hybrid";
     debug?: {
       enabled?: boolean;
@@ -172,6 +176,13 @@ type LoadedCssConfig = {
     };
   };
 };
+
+type ResolvedStyleDefinition = {
+  kind: "css-ts-style";
+  declaration: StyleDeclaration;
+  tailwindClassNames?: readonly string[];
+};
+type NormalizedStyleSheet = Record<string, ResolvedStyleDefinition>;
 
 type NodeFs = typeof import("node:fs");
 type NodePath = typeof import("node:path");
@@ -412,8 +423,10 @@ function getStaticCssTsDefaultExport(): Record<string, unknown> {
     {
       vite: cssTsPlugin,
       cv,
+      font,
       var: cv,
       Theme,
+      tw,
       tv,
     },
   );
@@ -425,8 +438,10 @@ function getStaticCssTsNamespace(): Record<string, unknown> {
     default: getStaticCssTsDefaultExport(),
     vite: cssTsPlugin,
     cv,
+    font,
     var: cv,
     Theme,
+    tw,
     tv,
   };
 }
@@ -1458,6 +1473,28 @@ function stripUnusedStaticHelperConsts(code: string): string {
   return nextCode;
 }
 
+function hasStyleDeclarations(declaration: StyleDeclaration): boolean {
+  return Object.keys(declaration).length > 0;
+}
+
+function hasTailwindClassNames(style: ResolvedStyleDefinition): boolean {
+  return (style.tailwindClassNames?.length ?? 0) > 0;
+}
+
+function resolveStyleClassValue(
+  generatedClassName: string | undefined,
+  style: ResolvedStyleDefinition,
+): string {
+  if (hasTailwindClassNames(style)) {
+    return mergeTailwindClassNames([
+      ...(generatedClassName ? [generatedClassName] : []),
+      ...(style.tailwindClassNames ?? []),
+    ]);
+  }
+
+  return generatedClassName ?? "";
+}
+
 function toRuntimeCtConfigLiteral(parsed: {
   global?: StyleSheet;
   root?: Array<
@@ -1472,8 +1509,8 @@ function toRuntimeCtConfigLiteral(parsed: {
       layer?: string;
     }
   >;
-  base: StyleSheet;
-  variant?: Record<string, Record<string, StyleSheet>>;
+  base: NormalizedStyleSheet;
+  variant?: Record<string, Record<string, NormalizedStyleSheet>>;
   variantGlobal?: Record<string, Record<string, StyleSheet>>;
   defaults?: Record<string, string>;
 }): string {
@@ -1880,13 +1917,17 @@ function loadCssConfig(
   const utilitiesParsed = parsedUtilities?.base ?? {};
 
   const utilityRules = Object.entries(utilitiesParsed)
-    .flatMap(([name, declaration]) =>
-      toCssRules(`u-${camelToKebab(name)}`, declaration, {
+    .flatMap(([name, style]) => {
+      if (!hasStyleDeclarations(style.declaration)) {
+        return [];
+      }
+
+      return toCssRules(`u-${camelToKebab(name)}`, style.declaration, {
         breakpoints,
         containers,
         defaultUnit,
-      })
-    );
+      });
+    });
   const utilityCss = resolution === "dynamic" ? "" : utilityRules.join("\n");
 
   const runtimeOptions: LoadedCssConfig["runtimeOptions"] = {};
@@ -3886,11 +3927,18 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           }
         }
 
-        for (const [key, declaration] of Object.entries(parsed.base)) {
-          const className = createClassName(key, declaration, normalizedId);
-          classMap[key] = className;
+        for (const [key, style] of Object.entries(parsed.base)) {
+          const generatedClassName = hasStyleDeclarations(style.declaration) ||
+              !hasTailwindClassNames(style)
+            ? createClassName(key, style.declaration, normalizedId)
+            : undefined;
+          const classValue = resolveStyleClassValue(generatedClassName, style);
+          classMap[key] = classValue;
+          if (!generatedClassName) {
+            continue;
+          }
           for (
-            const rule of toCssRules(className, declaration, {
+            const rule of toCssRules(generatedClassName, style.declaration, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
               defaultUnit: cssConfig.defaultUnit,
@@ -3901,7 +3949,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
         compiledConfig.base = classMap;
         for (const [key, className] of Object.entries(classMap)) {
-          logStatic(`base.${key} -> .${className}`);
+          logStatic(`base.${key} -> ${className}`);
         }
 
         if (parsed.variant) {
@@ -3912,24 +3960,37 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               const [variantName, declarations] of Object.entries(variants)
             ) {
               const variantMap: Partial<Record<string, string>> = {};
-              for (const [key, declaration] of Object.entries(declarations)) {
-                const className = createClassName(
-                  `${group}:${variantName}:${key}`,
-                  declaration,
-                  normalizedId,
+              for (const [key, style] of Object.entries(declarations)) {
+                const generatedClassName = hasStyleDeclarations(style.declaration) ||
+                    !hasTailwindClassNames(style)
+                  ? createClassName(
+                    `${group}:${variantName}:${key}`,
+                    style.declaration,
+                    normalizedId,
+                  )
+                  : undefined;
+                const classValue = resolveStyleClassValue(
+                  generatedClassName,
+                  style,
                 );
-                variantMap[key] = className;
-                for (
-                  const rule of toCssRules(className, declaration, {
-                    breakpoints: cssConfig.breakpoints,
-                    containers: cssConfig.containers,
-                    defaultUnit: cssConfig.defaultUnit,
-                  })
-                ) {
-                  rules.add(rule);
+                variantMap[key] = classValue;
+                if (generatedClassName) {
+                  for (
+                    const rule of toCssRules(
+                      generatedClassName,
+                      style.declaration,
+                      {
+                        breakpoints: cssConfig.breakpoints,
+                        containers: cssConfig.containers,
+                        defaultUnit: cssConfig.defaultUnit,
+                      },
+                    )
+                  ) {
+                    rules.add(rule);
+                  }
                 }
                 logStatic(
-                  `variant.${group}.${variantName}.${key} -> .${className}`,
+                  `variant.${group}.${variantName}.${key} -> ${classValue}`,
                 );
               }
               groupMap[variantName] = variantMap;
@@ -4271,11 +4332,18 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           }
         }
 
-        for (const [key, declaration] of Object.entries(parsed.base)) {
-          const className = createClassName(key, declaration, normalizedId);
-          classMap[key] = className;
+        for (const [key, style] of Object.entries(parsed.base)) {
+          const generatedClassName = hasStyleDeclarations(style.declaration) ||
+              !hasTailwindClassNames(style)
+            ? createClassName(key, style.declaration, normalizedId)
+            : undefined;
+          const classValue = resolveStyleClassValue(generatedClassName, style);
+          classMap[key] = classValue;
+          if (!generatedClassName) {
+            continue;
+          }
           for (
-            const rule of toCssRules(className, declaration, {
+            const rule of toCssRules(generatedClassName, style.declaration, {
               breakpoints: cssConfig.breakpoints,
               containers: cssConfig.containers,
               defaultUnit: cssConfig.defaultUnit,
@@ -4286,7 +4354,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         }
         compiledConfig.base = classMap;
         for (const [key, className] of Object.entries(classMap)) {
-          logStatic(`base.${key} -> .${className}`);
+          logStatic(`base.${key} -> ${className}`);
         }
 
         if (parsed.variant) {
@@ -4297,24 +4365,37 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               const [variantName, declarations] of Object.entries(variants)
             ) {
               const variantMap: Partial<Record<string, string>> = {};
-              for (const [key, declaration] of Object.entries(declarations)) {
-                const className = createClassName(
-                  `${group}:${variantName}:${key}`,
-                  declaration,
-                  normalizedId,
+              for (const [key, style] of Object.entries(declarations)) {
+                const generatedClassName = hasStyleDeclarations(style.declaration) ||
+                    !hasTailwindClassNames(style)
+                  ? createClassName(
+                    `${group}:${variantName}:${key}`,
+                    style.declaration,
+                    normalizedId,
+                  )
+                  : undefined;
+                const classValue = resolveStyleClassValue(
+                  generatedClassName,
+                  style,
                 );
-                variantMap[key] = className;
-                for (
-                  const rule of toCssRules(className, declaration, {
-                    breakpoints: cssConfig.breakpoints,
-                    containers: cssConfig.containers,
-                    defaultUnit: cssConfig.defaultUnit,
-                  })
-                ) {
-                  rules.add(rule);
+                variantMap[key] = classValue;
+                if (generatedClassName) {
+                  for (
+                    const rule of toCssRules(
+                      generatedClassName,
+                      style.declaration,
+                      {
+                        breakpoints: cssConfig.breakpoints,
+                        containers: cssConfig.containers,
+                        defaultUnit: cssConfig.defaultUnit,
+                      },
+                    )
+                  ) {
+                    rules.add(rule);
+                  }
                 }
                 logStatic(
-                  `variant.${group}.${variantName}.${key} -> .${className}`,
+                  `variant.${group}.${variantName}.${key} -> ${classValue}`,
                 );
               }
               groupMap[variantName] = variantMap;
