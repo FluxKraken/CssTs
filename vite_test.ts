@@ -2152,6 +2152,65 @@ Deno.test("extracts layered imported rules that use tv.eval from css-ts package 
   }
 });
 
+Deno.test("new ct() resolves default-export barrel rules through directory aliases", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+  const configResolved = asHook(plugin.configResolved);
+  const root = Deno.makeTempDirSync();
+
+  try {
+    Deno.mkdirSync(`${root}/src/lib/styles`, { recursive: true });
+    Deno.writeTextFileSync(
+      `${root}/src/lib/styles/settings.ts`,
+      `export default {\n` +
+        `  body: {\n` +
+        `    backgroundColor: "white",\n` +
+        `    color: "black",\n` +
+        `  },\n` +
+        `} as const;\n`,
+    );
+    Deno.writeTextFileSync(
+      `${root}/src/lib/styles/index.ts`,
+      `import Settings from "@styles/settings";\n` +
+        `export default {\n` +
+        `  Settings,\n` +
+        `} as const;\n`,
+    );
+
+    configResolved({
+      root,
+      resolve: {
+        alias: [
+          {
+            find: "@styles",
+            replacement: `${root}/src/lib/styles`,
+          },
+        ],
+      },
+    });
+
+    const moduleCode = `import ct from "css-ts";\n` +
+      `import Styles from "@styles";\n` +
+      `const styles = new ct();\n` +
+      `styles.import([{ rules: Styles.Settings }]);\n`;
+
+    const transformed = transform(
+      moduleCode,
+      `${root}/src/routes/+layout.svelte`,
+    );
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(!code.includes('@import "use strict";'));
+    assertMatch(code, /:global\(body\)\{background-color:white;color:black\}/);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("resolution=static throws when ct() cannot be statically resolved", () => {
   const root = Deno.makeTempDirSync();
 
@@ -3019,6 +3078,76 @@ Deno.test("loads css.config.ts imports and breakpoints through Vite resolve.alia
 
     const css = load(VIRTUAL_ID) as string;
     assert(css.includes('@import "/src/theme/global.css";'));
+    assertMatch(
+      css,
+      /@media \(width >= 72rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/,
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("loads css.config.ts barrel imports through resolve.alias", () => {
+  const root = Deno.makeTempDirSync();
+
+  try {
+    const themeDir = `${root}/src/theme`;
+    Deno.mkdirSync(themeDir, { recursive: true });
+    Deno.writeTextFileSync(
+      `${themeDir}/layout.ts`,
+      `export default {\n` +
+        `  pageWidth: "72rem",\n` +
+        `} as const;\n`,
+    );
+    Deno.writeTextFileSync(
+      `${themeDir}/index.ts`,
+      `import Layout from "@theme/layout";\n` +
+        `export default {\n` +
+        `  Layout,\n` +
+        `} as const;\n`,
+    );
+    Deno.writeTextFileSync(
+      `${root}/css.config.ts`,
+      `import Theme from "@theme";\n` +
+        `export default {\n` +
+        `  breakpoints: { sm: Theme.Layout.pageWidth },\n` +
+        `};\n`,
+    );
+
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const load = asHook(plugin.load);
+    const configResolved = asHook(plugin.configResolved);
+
+    configResolved({
+      root,
+      resolve: {
+        alias: [
+          {
+            find: "@theme",
+            replacement: `${root}/src/theme`,
+          },
+        ],
+      },
+    });
+
+    const moduleCode = `import ct from "css-ts";\n` +
+      `export const styles = ct({\n` +
+      `  base: {\n` +
+      `    pageWrapper: {\n` +
+      `      textAlign: "left",\n` +
+      `      "@sm": {\n` +
+      `        textAlign: "justify",\n` +
+      `      },\n` +
+      `    },\n` +
+      `  },\n` +
+      `});`;
+    const transformed = transform(moduleCode, `${root}/src/routes/+page.ts`);
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const css = load(VIRTUAL_ID) as string;
     assertMatch(
       css,
       /@media \(width >= 72rem\)\{\.ct_[a-z0-9]+\{text-align:justify\}\}/,

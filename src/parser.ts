@@ -618,6 +618,21 @@ function parseObject(input: string, index: number): ParseResult {
     index = skipWhitespace(input, keyEnd);
 
     if (input[index] !== ":") {
+      if (!quoted && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)) {
+        value[key] = {
+          kind: "identifier-ref",
+          path: [key],
+        };
+
+        if (input[index] === ",") {
+          index += 1;
+          continue;
+        }
+
+        if (input[index] === "}") {
+          return { value, end: index + 1 };
+        }
+      }
       throw new Error(`Expected ':' after key '${key}'`);
     }
 

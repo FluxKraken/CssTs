@@ -2482,6 +2482,7 @@ function transpileTsSnippet(source: string): string {
 
   let output = transpile(source)
     .replace(/^\/\/# sourceMappingURL=.*$/gm, "")
+    .replace(/^(?:(?:"use strict"|'use strict');\s*)+/, "")
     .trim();
   while (output.endsWith(";")) {
     output = output.slice(0, -1).trimEnd();
