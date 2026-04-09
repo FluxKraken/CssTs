@@ -3185,9 +3185,12 @@ function isInDefaultTransformScope(
     return true;
   }
 
-  const srcPath = getNodePath().resolve(projectRoot, "src");
-  if (isPathWithinScope(modulePath, srcPath)) {
-    return true;
+  const defaultSourceDirs = ["src", "app"];
+  for (const sourceDir of defaultSourceDirs) {
+    const sourcePath = getNodePath().resolve(projectRoot, sourceDir);
+    if (isPathWithinScope(modulePath, sourcePath)) {
+      return true;
+    }
   }
 
   for (const includePath of includePaths) {
@@ -3201,7 +3204,7 @@ function isInDefaultTransformScope(
 
 /** Options for {@link cssTsPlugin}. */
 export interface CssTsPluginOptions {
-  /** Override the default scope (`<root>/src/**`) with a custom id matcher. */
+  /** Override the default scope (`<root>/{src,app}/**`) with a custom id matcher. */
   include?: RegExp;
 }
 

@@ -173,6 +173,23 @@ export default defineConfig({
 });
 ```
 
+## TanStack Start setup
+
+TanStack Start routes commonly live under `app/**`, which is included by
+default. Register the plugin in `app.config.ts`.
+
+```ts
+// app.config.ts
+import { defineConfig } from "@tanstack/react-start/config";
+import ctVite from "@kt-tools/css-ts/vite";
+
+export default defineConfig({
+  vite: {
+    plugins: [ctVite()],
+  },
+});
+```
+
 ## Deno + Vite without `package.json`
 
 When you install from JSR and do not have a `package.json`, Vite still needs a

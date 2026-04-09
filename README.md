@@ -49,14 +49,29 @@ export default defineConfig({
 });
 ```
 
-By default the plugin transforms files inside `<project-root>/src/**`. You can
-extend that with `include` in `css.config.ts`.
+By default the plugin transforms files inside `<project-root>/src/**` and
+`<project-root>/app/**` (for frameworks like TanStack Start). You can extend
+that with `include` in `css.config.ts`.
 
 Astro uses the same plugin through `astro.config.mjs`:
 
 ```js
 // astro.config.mjs
 import { defineConfig } from "astro/config";
+import ctVite from "@kt-tools/css-ts/vite";
+
+export default defineConfig({
+  vite: {
+    plugins: [ctVite()],
+  },
+});
+```
+
+TanStack Start can register the same plugin in `app.config.ts`:
+
+```ts
+// app.config.ts
+import { defineConfig } from "@tanstack/react-start/config";
 import ctVite from "@kt-tools/css-ts/vite";
 
 export default defineConfig({

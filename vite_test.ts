@@ -340,11 +340,12 @@ Deno.test("module-scoped virtual CSS survives early shared virtual load ordering
   assertMatch(scopedCss as string, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
 });
 
-Deno.test("limits transforms to src by default", () => {
+Deno.test("limits transforms to src/app by default", () => {
   const root = Deno.makeTempDirSync();
 
   try {
     Deno.mkdirSync(`${root}/src`, { recursive: true });
+    Deno.mkdirSync(`${root}/app`, { recursive: true });
     Deno.mkdirSync(`${root}/node_modules/pkg`, { recursive: true });
 
     const plugin = cssTsPlugin();
@@ -364,6 +365,12 @@ Deno.test("limits transforms to src by default", () => {
     assert(
       transformedSrc && typeof transformedSrc === "object" &&
         "code" in transformedSrc,
+    );
+
+    const transformedApp = transform(moduleCode, `${root}/app/routes.tsx`);
+    assert(
+      transformedApp && typeof transformedApp === "object" &&
+        "code" in transformedApp,
     );
 
     const transformedNodeModules = transform(
