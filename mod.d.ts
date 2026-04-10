@@ -34,6 +34,12 @@ type VariantClassMap<T extends StyleSheetInput> = Record<
   string,
   Record<string, Partial<Record<keyof T, string>>>
 >;
+type BooleanVariantKey = "true" | "false";
+type VariantSelectionValue<K> = K extends string
+  ? string extends K ? string | boolean
+  : K extends BooleanVariantKey ? boolean
+  : K
+  : K;
 type CtConfig<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
@@ -67,8 +73,8 @@ type CompiledConfig<T extends StyleSheetInput> = {
   variant?: VariantClassMap<T>;
 };
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
-  VariantSheet<any> ? { [G in keyof V]?: keyof V[G] }
-  : Record<string, string>;
+  VariantSheet<any> ? { [G in keyof V]?: VariantSelectionValue<keyof V[G]> }
+  : Record<string, string | boolean>;
 type Accessor<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,

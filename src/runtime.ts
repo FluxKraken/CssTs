@@ -13,11 +13,11 @@ import {
   StyleValue,
   TailwindClassValue,
   themesToConfig,
-  toTailwindVariantForNestedKey,
-  toCssLayerOrderRule,
   toCssDeclaration,
   toCssGlobalRules,
+  toCssLayerOrderRule,
   toCssRules,
+  toTailwindVariantForNestedKey,
 } from "./shared.js";
 
 /** A style declaration or recursive array of declarations (merged left-to-right). */
@@ -52,10 +52,16 @@ type VariantClassMap<T extends StyleSheetInput> = Record<
 >;
 /** Precompiled variant-scoped global CSS rules. */
 type VariantGlobalRuleMap = Record<string, Record<string, string[]>>;
+type BooleanVariantKey = "true" | "false";
+type VariantSelectionValue<K> = K extends string
+  ? string extends K ? string | boolean
+  : K extends BooleanVariantKey ? boolean
+  : K
+  : K;
 /** Selected variant values: `{ groupName: variantName }`. */
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
-  VariantSheet<any> ? { [G in keyof V]?: keyof V[G] }
-  : Record<string, string>;
+  VariantSheet<any> ? { [G in keyof V]?: VariantSelectionValue<keyof V[G]> }
+  : Record<string, string | boolean>;
 
 /** Configuration object accepted by `ct()`. */
 type CtConfig<
@@ -154,6 +160,12 @@ type DocumentLike = {
   head: { appendChild(node: unknown): void };
 };
 
+function hasVariantSelectionValue(
+  value: unknown,
+): value is string | number | symbol | boolean {
+  return value !== undefined && value !== null;
+}
+
 function injectRule(rule: string): void {
   const doc = (globalThis as unknown as { document?: DocumentLike }).document;
   if (!doc || injectedRules.has(rule)) {
@@ -249,9 +261,13 @@ function isResolvedStyleDefinition(
     "kind" in value &&
     (value as { kind?: unknown }).kind === RESOLVED_STYLE_KIND &&
     "declaration" in value &&
-    isStyleDeclarationObject((value as { declaration?: unknown }).declaration) &&
+    isStyleDeclarationObject(
+      (value as { declaration?: unknown }).declaration,
+    ) &&
     (!("tailwindClassNames" in value) ||
-      Array.isArray((value as { tailwindClassNames?: unknown }).tailwindClassNames))
+      Array.isArray(
+        (value as { tailwindClassNames?: unknown }).tailwindClassNames,
+      ))
   );
 }
 
@@ -746,7 +762,10 @@ function normalizeVariantSheetInput<T extends StyleSheetInput>(
     return undefined;
   }
 
-  const normalized: Record<string, Record<string, Partial<NormalizedStyleSheet>>> = {};
+  const normalized: Record<
+    string,
+    Record<string, Partial<NormalizedStyleSheet>>
+  > = {};
   for (const [group, groupVariants] of Object.entries(variants)) {
     const normalizedGroup: Record<string, Partial<NormalizedStyleSheet>> = {};
     for (const [variantName, declarations] of Object.entries(groupVariants)) {
@@ -923,10 +942,10 @@ function compileConfig<
   const compiledVariantGlobal = effectiveCompiled?.variantGlobal;
   const resolvedDefaults = defaultSelection as Record<
     string,
-    string | number | symbol | undefined
+    string | number | symbol | boolean | undefined
   >;
   for (const [group, variantName] of Object.entries(resolvedDefaults)) {
-    if (!variantName) {
+    if (!hasVariantSelectionValue(variantName)) {
       continue;
     }
 
@@ -987,7 +1006,13 @@ function compileConfig<
       resolveStyleClassValue(generatedClassName, style);
 
     if (!compiledClassName && generatedClassName) {
-      for (const rule of toCssRules(generatedClassName, style.declaration, cssOptions)) {
+      for (
+        const rule of toCssRules(
+          generatedClassName,
+          style.declaration,
+          cssOptions,
+        )
+      ) {
         injectRule(rule);
       }
       log("dynamic", `base.${String(key)} -> ${classValue}`);
@@ -1014,11 +1039,11 @@ function compileConfig<
         const [group, variantName] of Object.entries(
           resolvedSelection as Record<
             string,
-            string | number | symbol | undefined
+            string | number | symbol | boolean | undefined
           >,
         )
       ) {
-        if (!variantName) {
+        if (!hasVariantSelectionValue(variantName)) {
           continue;
         }
 
@@ -1043,11 +1068,11 @@ function compileConfig<
         const [group, variantName] of Object.entries(
           resolvedSelection as Record<
             string,
-            string | number | symbol | undefined
+            string | number | symbol | boolean | undefined
           >,
         )
       ) {
-        if (!variantName) {
+        if (!hasVariantSelectionValue(variantName)) {
           continue;
         }
 
@@ -1125,7 +1150,13 @@ function compileConfig<
             resolveStyleClassValue(generatedClassName, style);
 
           if (!compiledClassName && generatedClassName) {
-            for (const rule of toCssRules(generatedClassName, style.declaration, cssOptions)) {
+            for (
+              const rule of toCssRules(
+                generatedClassName,
+                style.declaration,
+                cssOptions,
+              )
+            ) {
               injectRule(rule);
             }
             log(

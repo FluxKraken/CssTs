@@ -4,6 +4,7 @@ import {
   assertMatch,
   assertThrows,
 } from "jsr:@std/assert";
+import { dirname, join, toFileUrl } from "jsr:@std/path";
 import { twMerge } from "npm:tailwind-merge";
 import { cssTsPlugin } from "./src/vite.ts";
 import ct from "./src/runtime.ts";
@@ -54,6 +55,43 @@ function styleDeclarationOf(style: unknown): Record<string, unknown> {
   }
 
   return (style as Record<string, unknown> | undefined) ?? {};
+}
+
+function assertTypeCheckSucceeds(files: Record<string, string>): void {
+  const tempDir = Deno.makeTempDirSync();
+  const repoRoot = Deno.cwd();
+
+  try {
+    const filePaths: string[] = [];
+    for (const [relativePath, source] of Object.entries(files)) {
+      const filePath = join(tempDir, relativePath);
+      Deno.mkdirSync(dirname(filePath), { recursive: true });
+      Deno.writeTextFileSync(filePath, source);
+      filePaths.push(filePath);
+    }
+
+    const output = new Deno.Command(Deno.execPath(), {
+      args: [
+        "check",
+        "--config",
+        join(repoRoot, "deno.json"),
+        "--node-modules-dir=auto",
+        ...filePaths,
+      ],
+      cwd: tempDir,
+      stdout: "piped",
+      stderr: "piped",
+    }).outputSync();
+
+    assert(
+      output.success,
+      `Expected type check to succeed.\nstdout:\n${
+        new TextDecoder().decode(output.stdout)
+      }\nstderr:\n${new TextDecoder().decode(output.stderr)}`,
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
 }
 
 Deno.test("injects component CSS for direct ct usage in svelte", () => {
@@ -1077,6 +1115,59 @@ Deno.test("parser accepts defaults variant selections", () => {
 
   assert(parsed !== null);
   assertEquals(parsed.defaults, { size: "md" });
+});
+
+Deno.test("parser accepts boolean defaults variant selections", () => {
+  const parsed = parseCtCallArguments(`{
+    base: {
+      content: {}
+    },
+    variant: {
+      prose: {
+        true: { content: { fontWeight: 700 } },
+        false: { content: { fontWeight: 400 } }
+      }
+    },
+    defaults: {
+      prose: false
+    }
+  }`);
+
+  assert(parsed !== null);
+  assertEquals(parsed.defaults, { prose: false });
+});
+
+Deno.test("type checking accepts boolean variant selections in route-like modules", () => {
+  const runtimeSpecifier = toFileUrl(join(Deno.cwd(), "src", "index.ts"))
+    .href;
+  const source = `import ct from ${JSON.stringify(runtimeSpecifier)};\n` +
+    `const builderStyles = new ct();\n` +
+    `builderStyles.base = { content: { color: "black", fontWeight: 400 } };\n` +
+    `builderStyles.variant = {\n` +
+    `  prose: {\n` +
+    `    true: { content: { color: "black", fontWeight: 700 } },\n` +
+    `    false: { content: { color: "black", fontWeight: 400 } },\n` +
+    `  },\n` +
+    `};\n` +
+    `builderStyles.content({ prose: true });\n` +
+    `builderStyles.content({ prose: false });\n` +
+    `const inlineStyles = ct({\n` +
+    `  base: { content: { color: "black", fontWeight: 400 } },\n` +
+    `  variant: {\n` +
+    `    prose: {\n` +
+    `      true: { content: { color: "black", fontWeight: 700 } },\n` +
+    `      false: { content: { color: "black", fontWeight: 400 } },\n` +
+    `    },\n` +
+    `  },\n` +
+    `});\n` +
+    `inlineStyles().content({ prose: true });\n` +
+    `inlineStyles().content({ prose: false });\n`;
+
+  assertTypeCheckSucceeds({
+    "component.tsx": source,
+    "src/routes/+page.ts": source,
+    "src/pages/index.ts": source,
+  });
 });
 
 Deno.test("parser accepts root entries", () => {
@@ -4039,6 +4130,33 @@ Deno.test("runtime applies variant overrides for empty base declarations", () =>
   assertMatch(styles().label({ size: "sm" }), /^ct_[a-z0-9]+ ct_[a-z0-9]+$/);
 });
 
+Deno.test("runtime resolves boolean variant selections and false defaults", () => {
+  const styles = ct({
+    base: {
+      content: { color: "black" },
+    },
+    variant: {
+      prose: {
+        true: { content: { fontWeight: 700 } },
+        false: { content: { fontWeight: 400 } },
+      },
+    },
+    defaults: {
+      prose: false,
+    },
+  } as any);
+
+  assertEquals(styles().content.style(), "color:black;font-weight:400");
+  assertEquals(
+    styles().content.style({ prose: true }),
+    "color:black;font-weight:700",
+  );
+  assertEquals(
+    styles().content.style({ prose: false }),
+    "color:black;font-weight:400",
+  );
+});
+
 Deno.test("runtime swaps selected variantGlobal rules in static mode", () => {
   type FakeStyleTag = {
     id: string;
@@ -4108,6 +4226,84 @@ Deno.test("runtime swaps selected variantGlobal rules in static mode", () => {
     styles.defaults = { theme: "light" };
     styles().app();
     assertEquals(variantTag.textContent, "html{color-scheme:light}");
+  } finally {
+    if (originalDocument !== undefined) {
+      globals.document = originalDocument;
+    } else {
+      delete globals.document;
+    }
+  }
+});
+
+Deno.test("runtime applies boolean defaults to variantGlobal rules", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+  const tags = new Map<string, FakeStyleTag>();
+  const fakeDocument = {
+    getElementById(id: string) {
+      return tags.get(id) ?? null;
+    },
+    createElement(_tag: "style"): FakeStyleTag {
+      return {
+        id: "",
+        textContent: "",
+        appendChild(node: unknown) {
+          this.textContent += String(node);
+        },
+      };
+    },
+    createTextNode(text: string) {
+      return text;
+    },
+    head: {
+      appendChild(node: unknown) {
+        const tag = node as FakeStyleTag;
+        tags.set(tag.id, tag);
+      },
+    },
+  };
+
+  globals.document = fakeDocument;
+
+  try {
+    const styles = new (ct as any)(
+      undefined,
+      {
+        base: { app: "ct_app" },
+        variantGlobal: {
+          prose: {
+            true: ["html{color-scheme:dark}"],
+            false: ["html{color-scheme:light}"],
+          },
+        },
+      },
+      { resolution: "static" },
+    );
+    styles.base = { app: {} };
+    styles.variantGlobal = {
+      prose: {
+        true: { ":global(html)": { colorScheme: "dark" } },
+        false: { ":global(html)": { colorScheme: "light" } },
+      },
+    };
+    styles.defaults = { prose: false };
+
+    styles().app();
+    const variantTag = Array.from(tags.values()).find((tag) =>
+      tag.id.includes("variant_global")
+    );
+    assert(variantTag);
+    assertEquals(variantTag.textContent, "html{color-scheme:light}");
+
+    styles.defaults = { prose: true };
+    styles().app();
+    assertEquals(variantTag.textContent, "html{color-scheme:dark}");
   } finally {
     if (originalDocument !== undefined) {
       globals.document = originalDocument;

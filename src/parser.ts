@@ -12,8 +12,8 @@ import {
   type TailwindClassValue,
   Theme,
   toTailwindVariantForNestedKey,
-  tw,
   toThemeVarName,
+  tw,
 } from "./shared.js";
 
 interface ParseResult {
@@ -29,7 +29,7 @@ type ResolvedStyleDefinition = {
 type NormalizedStyleSheet = Record<string, ResolvedStyleDefinition>;
 type VariantSheet = Record<string, Record<string, NormalizedStyleSheet>>;
 type VariantGlobalSheet = Record<string, Record<string, StyleSheet>>;
-type VariantSelection = Record<string, string>;
+type VariantSelection = Record<string, string | boolean>;
 type CtConfig = {
   imports?: string[];
   global?: StyleSheet;
@@ -100,6 +100,7 @@ interface ParsedArray extends Array<ParsedValue> {}
 type ParsedValue =
   | string
   | number
+  | boolean
   | ReturnType<typeof cv>
   | IdentifierReference
   | TemplateLiteralReference
@@ -514,6 +515,12 @@ function parseValue(input: string, index: number): [ParsedValue, number] {
 
   if (isIdentifierStart(char)) {
     const [identifier, identifierEnd] = parseIdentifier(input, index);
+    if (identifier === "true") {
+      return [true, identifierEnd];
+    }
+    if (identifier === "false") {
+      return [false, identifierEnd];
+    }
     if (identifier === "new") {
       const constructorIndex = skipWhitespace(input, identifierEnd);
       return parseThemeConstructor(input, constructorIndex);
@@ -721,7 +728,9 @@ function isFontCallReference(value: unknown): value is FontCallReference {
   );
 }
 
-function isTailwindCallReference(value: unknown): value is TailwindCallReference {
+function isTailwindCallReference(
+  value: unknown,
+): value is TailwindCallReference {
   return (
     isPlainObject(value) &&
     value.kind === "tailwind-call" &&
@@ -1081,7 +1090,11 @@ function normalizeStyleDeclaration(
   if (Array.isArray(value)) {
     let merged = createResolvedStyleDefinition();
     for (const item of value) {
-      const declaration = normalizeStyleDeclaration(item, options, allowTailwind);
+      const declaration = normalizeStyleDeclaration(
+        item,
+        options,
+        allowTailwind,
+      );
       if (!declaration) {
         return null;
       }
@@ -1127,7 +1140,10 @@ function normalizeStyleDeclaration(
       if (!declaration) {
         return null;
       }
-      mergedDeclaration = mergeStyleDeclarations(mergedDeclaration, declaration);
+      mergedDeclaration = mergeStyleDeclarations(
+        mergedDeclaration,
+        declaration,
+      );
       continue;
     }
 
@@ -1291,7 +1307,9 @@ function normalizeRootVars(
       }
       const vars: Record<string, StyleValue> = {};
       for (
-        const [name, declarationValue] of Object.entries(varsDeclaration.declaration)
+        const [name, declarationValue] of Object.entries(
+          varsDeclaration.declaration,
+        )
       ) {
         if (!isStyleLeaf(declarationValue)) {
           return null;
@@ -1312,7 +1330,9 @@ function normalizeRootVars(
       return null;
     }
     const vars: Record<string, StyleValue> = {};
-    for (const [name, declarationValue] of Object.entries(declaration.declaration)) {
+    for (
+      const [name, declarationValue] of Object.entries(declaration.declaration)
+    ) {
       if (!isStyleLeaf(declarationValue)) {
         return null;
       }
@@ -1508,12 +1528,13 @@ function normalizeVariantSelection(
 
   const selection: VariantSelection = {};
   for (const [groupName, variantName] of Object.entries(value)) {
-    if (typeof variantName !== "string") {
+    if (typeof variantName !== "string" && typeof variantName !== "boolean") {
       return null;
     }
+    const normalizedVariantName = String(variantName);
     if (variants) {
       const group = variants[groupName];
-      if (!group || !(variantName in group)) {
+      if (!group || !(normalizedVariantName in group)) {
         return null;
       }
     }

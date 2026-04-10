@@ -1641,7 +1641,7 @@ function toRuntimeCtConfigLiteral(parsed: {
   base: NormalizedStyleSheet;
   variant?: Record<string, Record<string, NormalizedStyleSheet>>;
   variantGlobal?: Record<string, Record<string, StyleSheet>>;
-  defaults?: Record<string, string>;
+  defaults?: Record<string, string | boolean>;
 }): string {
   const runtimeConfig: Record<string, unknown> = {
     base: parsed.base,
