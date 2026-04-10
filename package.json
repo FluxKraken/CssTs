@@ -1,6 +1,7 @@
 {
   "name": "@kt-tools/css-ts",
   "private": true,
+  "type": "module",
   "optionalDependencies": {
     "tailwind-merge": "^3.5.0"
   }
