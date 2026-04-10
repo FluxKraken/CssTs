@@ -15,8 +15,8 @@ import {
   toCssDeclaration,
   toCssGlobalRules,
   toCssRules,
-  tw,
   tv,
+  tw,
 } from "./src/shared.ts";
 
 (globalThis as Record<string, unknown>).__css_ts_tailwind_merge__ = twMerge;
@@ -1237,7 +1237,10 @@ Deno.test("parser accepts trailing commas in Theme() and cv() calls", () => {
       "--bg": "#123456",
     },
   ]);
-  assertEquals(styleDeclarationOf(parsed.base.hero).backgroundColor, cv("--bg"));
+  assertEquals(
+    styleDeclarationOf(parsed.base.hero).backgroundColor,
+    cv("--bg"),
+  );
   assertEquals(styleDeclarationOf(parsed.base.hero).padding, cv("--space", 8));
 });
 
@@ -4320,7 +4323,11 @@ Deno.test("runtime accessors support tw() for mixed and direct Tailwind styles",
       "@apply": tw(["px-2", "px-4", "font-mono"]),
       color: "white",
     },
-    navLink: tw(["underline-offset-2", "underline-offset-6", "hover:underline"]),
+    navLink: tw([
+      "underline-offset-2",
+      "underline-offset-6",
+      "hover:underline",
+    ]),
   };
   styles.variant = {
     size: {
@@ -4455,6 +4462,38 @@ Deno.test("vite extracts css from new ct() pattern", () => {
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("vite scopes new ct() builder transforms to each TSX component", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct from "css-ts";\n` +
+    `const Header = () => {\n` +
+    `  const styles = new ct();\n` +
+    `  styles.base = { header: { display: "grid" } };\n` +
+    `  return <header className={styles.header()}>Title</header>;\n` +
+    `};\n` +
+    `const Content = () => {\n` +
+    `  const styles = new ct();\n` +
+    `  styles.base = { main: { width: "min(100%, 64rem)" } };\n` +
+    `  return <main className={styles().main()}>Body</main>;\n` +
+    `};\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/layout.tsx");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(code.includes("<header className={styles.header()}>Title</header>"));
+  assert(code.includes("<main className={styles().main()}>Body</main>"));
+  assert(code.includes('"header":{"kind":"css-ts-style"'));
+  assert(code.includes('"main":{"kind":"css-ts-style"'));
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{width:min\(100%, 64rem\)\}/);
 });
 
 Deno.test("vite extracts bare identifier declaration values from new ct() pattern", () => {

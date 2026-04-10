@@ -20,11 +20,11 @@ import {
   type StyleSheet,
   type StyleValue,
   Theme,
-  tw,
-  toCssLayerOrderRule,
   toCssGlobalRules,
+  toCssLayerOrderRule,
   toCssRules,
   tv,
+  tw,
 } from "./shared.js";
 
 const PUBLIC_VIRTUAL_ID = "virtual:css-ts/styles.css";
@@ -207,10 +207,46 @@ type TypeScriptTranspileApi = {
   ScriptTarget: { ES2020: number };
   ModuleKind: { ESNext: number };
 };
+type TypeScriptAstApi = TypeScriptTranspileApi & {
+  createSourceFile: (
+    fileName: string,
+    sourceText: string,
+    languageVersion: number,
+    setParentNodes?: boolean,
+    scriptKind?: number,
+  ) => unknown;
+  ScriptKind: Record<string, number>;
+  SyntaxKind: Record<string, number>;
+  forEachChild: (node: unknown, cbNode: (node: unknown) => void) => void;
+};
+type AstCtCall = {
+  start: number;
+  end: number;
+  arg: string;
+};
+type AstNewCtAssignment = {
+  property: string;
+  start: number;
+  end: number;
+  valueSource: string;
+};
+type AstNewCtDeclaration = {
+  varName: string;
+  start: number;
+  initializerStart: number;
+  initializerEnd: number;
+  hasAddContainerCall: boolean;
+  assignments: AstNewCtAssignment[];
+};
+type AstTransformTargets = {
+  calls: AstCtCall[];
+  newCtDecls: AstNewCtDeclaration[];
+};
 
 let nodeFs: NodeFs | null | undefined;
 let nodePath: NodePath | null | undefined;
 let nodeRequire: NodeRequire | null | undefined;
+let typeScriptModule: TypeScriptTranspileApi | null | undefined;
 let tsTranspiler: ((source: string) => string) | null | undefined;
 
 function getBuiltinModule(id: string): unknown | null {
@@ -329,6 +365,42 @@ function loadTypeScriptModule(
   }
 
   return loadTypeScriptModuleFromDisk(requireFn);
+}
+
+function getTypeScriptModule(): TypeScriptTranspileApi | null {
+  if (typeScriptModule !== undefined) {
+    return typeScriptModule;
+  }
+
+  const requireFn = getNodeRequire();
+  if (!requireFn) {
+    typeScriptModule = null;
+    return null;
+  }
+
+  typeScriptModule = loadTypeScriptModule(requireFn);
+  return typeScriptModule;
+}
+
+function getTypeScriptAstApi(): TypeScriptAstApi | null {
+  const typescript = getTypeScriptModule();
+  if (
+    !typescript ||
+    typeof (typescript as Partial<TypeScriptAstApi>).createSourceFile !==
+      "function" ||
+    typeof (typescript as Partial<TypeScriptAstApi>).forEachChild !==
+      "function" ||
+    typeof typescript.ScriptTarget?.ES2020 !== "number" ||
+    typeof (typescript as Partial<TypeScriptAstApi>).ScriptKind?.TSX !==
+      "number" ||
+    typeof (typescript as Partial<TypeScriptAstApi>).SyntaxKind
+        ?.CallExpression !==
+      "number"
+  ) {
+    return null;
+  }
+
+  return typescript as TypeScriptAstApi;
 }
 
 function getNodeFs(): NodeFs {
@@ -2029,13 +2101,7 @@ function getTsTranspiler(): ((source: string) => string) | null {
     return tsTranspiler;
   }
 
-  const requireFn = getNodeRequire();
-  if (!requireFn) {
-    tsTranspiler = null;
-    return null;
-  }
-
-  const typescript = loadTypeScriptModule(requireFn);
+  const typescript = getTypeScriptModule();
   if (!typescript) {
     tsTranspiler = null;
     return null;
@@ -2049,6 +2115,521 @@ function getTsTranspiler(): ((source: string) => string) | null {
       },
     }).outputText;
   return tsTranspiler;
+}
+
+const CT_BUILDER_ASSIGNMENT_PROPERTIES = new Set([
+  "base",
+  "global",
+  "themes",
+  "root",
+  "rootVars",
+  "variant",
+  "defaults",
+]);
+
+type AstScopeEntry = AstNewCtDeclaration | null;
+
+function scriptKindForModule(
+  typescript: TypeScriptAstApi,
+  moduleId: string,
+): number {
+  if (moduleId.endsWith(".tsx")) {
+    return typescript.ScriptKind.TSX;
+  }
+  if (moduleId.endsWith(".jsx")) {
+    return typescript.ScriptKind.JSX;
+  }
+  if (
+    moduleId.endsWith(".ts") ||
+    moduleId.endsWith(".mts") ||
+    moduleId.endsWith(".cts")
+  ) {
+    return typescript.ScriptKind.TS;
+  }
+  return typescript.ScriptKind.JS;
+}
+
+function astNodeStart(node: unknown, sourceFile: unknown): number {
+  if (
+    node &&
+    typeof node === "object" &&
+    "getStart" in (node as Record<string, unknown>) &&
+    typeof (node as { getStart?: unknown }).getStart === "function"
+  ) {
+    return (node as { getStart: (sourceFile?: unknown) => number }).getStart(
+      sourceFile,
+    );
+  }
+
+  return (node as { pos?: number } | null)?.pos ?? 0;
+}
+
+function astNodeEnd(node: unknown): number {
+  return (node as { end?: number } | null)?.end ?? 0;
+}
+
+function astNodeText(
+  node: unknown,
+  code: string,
+  sourceFile: unknown,
+): string {
+  return code.slice(astNodeStart(node, sourceFile), astNodeEnd(node));
+}
+
+function astIdentifierText(node: unknown): string | null {
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+
+  const textValue = (node as { text?: unknown }).text;
+  if (typeof textValue === "string") {
+    return textValue;
+  }
+
+  const escapedText = (node as { escapedText?: unknown }).escapedText;
+  if (typeof escapedText === "string") {
+    return escapedText;
+  }
+
+  return null;
+}
+
+function isCtIdentifier(node: unknown): boolean {
+  return astIdentifierText(node) === "ct";
+}
+
+function isCtObjectCall(
+  node: unknown,
+  typescript: TypeScriptAstApi,
+): node is { expression: unknown; arguments: unknown[]; end: number } {
+  const syntaxKind = typescript.SyntaxKind;
+  if (
+    !node || typeof node !== "object" ||
+    (node as { kind?: number }).kind !== syntaxKind.CallExpression
+  ) {
+    return false;
+  }
+
+  const call = node as { expression?: unknown; arguments?: unknown[] };
+  return Boolean(
+    isCtIdentifier(call.expression) &&
+      Array.isArray(call.arguments) &&
+      call.arguments.length > 0 &&
+      (call.arguments[0] as { kind?: number } | undefined)?.kind ===
+        syntaxKind.ObjectLiteralExpression,
+  );
+}
+
+function isNewCtBuilder(
+  node: unknown,
+  typescript: TypeScriptAstApi,
+): node is { expression: unknown; arguments?: unknown[]; end: number } {
+  const syntaxKind = typescript.SyntaxKind;
+  if (
+    !node || typeof node !== "object" ||
+    (node as { kind?: number }).kind !== syntaxKind.NewExpression
+  ) {
+    return false;
+  }
+
+  const expression = (node as { expression?: unknown }).expression;
+  const args = (node as { arguments?: unknown[] }).arguments;
+  return isCtIdentifier(expression) && (args?.length ?? 0) === 0;
+}
+
+function addScopeBinding(
+  nameNode: unknown,
+  scope: Map<string, AstScopeEntry>,
+): void {
+  const name = astIdentifierText(nameNode);
+  if (name) {
+    scope.set(name, null);
+  }
+}
+
+function addBindingPattern(
+  nameNode: unknown,
+  scope: Map<string, AstScopeEntry>,
+  typescript: TypeScriptAstApi,
+): void {
+  if (!nameNode || typeof nameNode !== "object") {
+    return;
+  }
+
+  const syntaxKind = typescript.SyntaxKind;
+  const node = nameNode as Record<string, unknown>;
+  if (node.kind === syntaxKind.Identifier) {
+    addScopeBinding(node, scope);
+    return;
+  }
+
+  if (node.kind === syntaxKind.ObjectBindingPattern) {
+    const elements = node.elements;
+    if (Array.isArray(elements)) {
+      for (const element of elements) {
+        addBindingPattern(
+          (element as { name?: unknown } | null)?.name,
+          scope,
+          typescript,
+        );
+      }
+    }
+    return;
+  }
+
+  if (node.kind === syntaxKind.ArrayBindingPattern) {
+    const elements = node.elements;
+    if (Array.isArray(elements)) {
+      for (const element of elements) {
+        addBindingPattern(
+          (element as { name?: unknown } | null)?.name,
+          scope,
+          typescript,
+        );
+      }
+    }
+  }
+}
+
+function resolveBuilderDeclaration(
+  scopes: readonly Map<string, AstScopeEntry>[],
+  name: string,
+): AstNewCtDeclaration | null {
+  for (let index = scopes.length - 1; index >= 0; index -= 1) {
+    const scope = scopes[index];
+    if (!scope.has(name)) {
+      continue;
+    }
+    return scope.get(name) ?? null;
+  }
+
+  return null;
+}
+
+function collectAstTransformTargets(
+  code: string,
+  id: string,
+): AstTransformTargets | null {
+  const typescript = getTypeScriptAstApi();
+  if (!typescript) {
+    return null;
+  }
+
+  const ast = typescript;
+  const normalizedId = cleanId(id);
+  const sourceFile = ast.createSourceFile(
+    normalizedId,
+    code,
+    ast.ScriptTarget.ES2020,
+    true,
+    scriptKindForModule(ast, normalizedId),
+  ) as Record<string, unknown>;
+  const syntaxKind = ast.SyntaxKind;
+  const calls: AstCtCall[] = [];
+  const newCtDecls: AstNewCtDeclaration[] = [];
+
+  function recordCtCall(node: unknown): void {
+    if (isCtObjectCall(node, ast)) {
+      calls.push({
+        start: astNodeStart(node, sourceFile),
+        end: astNodeEnd(node),
+        arg: astNodeText(node.arguments[0], code, sourceFile),
+      });
+    }
+  }
+
+  function registerVariableDeclaration(
+    declaration: unknown,
+    scope: Map<string, AstScopeEntry>,
+  ): void {
+    if (!declaration || typeof declaration !== "object") {
+      return;
+    }
+
+    const declarationNode = declaration as {
+      name?: unknown;
+      initializer?: unknown;
+    };
+    const name = astIdentifierText(declarationNode.name);
+    if (!name) {
+      addBindingPattern(declarationNode.name, scope, ast);
+      return;
+    }
+
+    if (isNewCtBuilder(declarationNode.initializer, ast)) {
+      const builder: AstNewCtDeclaration = {
+        varName: name,
+        start: astNodeStart(declaration, sourceFile),
+        initializerStart: astNodeStart(declarationNode.initializer, sourceFile),
+        initializerEnd: astNodeEnd(declarationNode.initializer),
+        hasAddContainerCall: false,
+        assignments: [],
+      };
+      newCtDecls.push(builder);
+      scope.set(name, builder);
+      return;
+    }
+
+    scope.set(name, null);
+  }
+
+  function recordBuilderMutation(
+    statement: unknown,
+    scopes: readonly Map<string, AstScopeEntry>[],
+  ): void {
+    if (!statement || typeof statement !== "object") {
+      return;
+    }
+
+    const expression = (statement as { expression?: unknown }).expression;
+    if (!expression || typeof expression !== "object") {
+      return;
+    }
+
+    if (
+      (expression as { kind?: number }).kind === syntaxKind.BinaryExpression
+    ) {
+      const binary = expression as {
+        left?: unknown;
+        right?: unknown;
+        operatorToken?: { kind?: number };
+      };
+      if (binary.operatorToken?.kind !== syntaxKind.EqualsToken) {
+        return;
+      }
+
+      const left = binary.left as {
+        kind?: number;
+        expression?: unknown;
+        name?: unknown;
+      } | null;
+      if (!left || left.kind !== syntaxKind.PropertyAccessExpression) {
+        return;
+      }
+
+      const varName = astIdentifierText(left.expression);
+      const property = astIdentifierText(left.name);
+      if (
+        !varName || !property ||
+        !CT_BUILDER_ASSIGNMENT_PROPERTIES.has(property)
+      ) {
+        return;
+      }
+
+      const builder = resolveBuilderDeclaration(scopes, varName);
+      if (!builder || !binary.right) {
+        return;
+      }
+
+      builder.assignments.push({
+        property,
+        start: astNodeStart(statement, sourceFile),
+        end: astNodeEnd(statement),
+        valueSource: astNodeText(binary.right, code, sourceFile),
+      });
+      return;
+    }
+
+    if ((expression as { kind?: number }).kind !== syntaxKind.CallExpression) {
+      return;
+    }
+
+    const call = expression as {
+      expression?: unknown;
+      arguments?: unknown[];
+    };
+    const access = call.expression as {
+      kind?: number;
+      expression?: unknown;
+      name?: unknown;
+    } | null;
+    if (!access || access.kind !== syntaxKind.PropertyAccessExpression) {
+      return;
+    }
+
+    if (astIdentifierText(access.name) !== "import") {
+      if (astIdentifierText(access.name) !== "addContainer") {
+        return;
+      }
+
+      const varName = astIdentifierText(access.expression);
+      const builder = varName
+        ? resolveBuilderDeclaration(scopes, varName)
+        : null;
+      if (builder) {
+        builder.hasAddContainerCall = true;
+      }
+      return;
+    }
+
+    const varName = astIdentifierText(access.expression);
+    const builder = varName ? resolveBuilderDeclaration(scopes, varName) : null;
+    if (
+      !builder || !Array.isArray(call.arguments) || call.arguments.length === 0
+    ) {
+      return;
+    }
+
+    const firstArg = call.arguments[0];
+    const lastArg = call.arguments[call.arguments.length - 1];
+    builder.assignments.push({
+      property: "import",
+      start: astNodeStart(statement, sourceFile),
+      end: astNodeEnd(statement),
+      valueSource: code.slice(
+        astNodeStart(firstArg, sourceFile),
+        astNodeEnd(lastArg),
+      ),
+    });
+  }
+
+  function visitFunctionLike(node: unknown): void {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    const functionNode = node as {
+      name?: unknown;
+      parameters?: unknown[];
+      body?: unknown;
+    };
+    const scope = new Map<string, AstScopeEntry>();
+    addScopeBinding(functionNode.name, scope);
+    if (Array.isArray(functionNode.parameters)) {
+      for (const parameter of functionNode.parameters) {
+        addBindingPattern(
+          (parameter as { name?: unknown } | null)?.name,
+          scope,
+          ast,
+        );
+      }
+    }
+    visitScopedNode(functionNode.body, [scope]);
+  }
+
+  function visitStatementList(
+    statements: unknown[] | undefined,
+    parentScopes: readonly Map<string, AstScopeEntry>[],
+  ): void {
+    if (!Array.isArray(statements)) {
+      return;
+    }
+
+    const scope = new Map<string, AstScopeEntry>();
+    const scopes = [...parentScopes, scope];
+
+    for (const statement of statements) {
+      visitScopedNode(statement, scopes);
+    }
+  }
+
+  function visitScopedNode(
+    node: unknown,
+    scopes: readonly Map<string, AstScopeEntry>[],
+  ): void {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    recordCtCall(node);
+
+    const kind = (node as { kind?: number }).kind;
+    if (kind === syntaxKind.SourceFile) {
+      visitStatementList(
+        (node as { statements?: unknown[] }).statements,
+        [],
+      );
+      return;
+    }
+
+    if (
+      kind === syntaxKind.FunctionDeclaration ||
+      kind === syntaxKind.FunctionExpression ||
+      kind === syntaxKind.ArrowFunction ||
+      kind === syntaxKind.MethodDeclaration ||
+      kind === syntaxKind.GetAccessor ||
+      kind === syntaxKind.SetAccessor ||
+      kind === syntaxKind.Constructor
+    ) {
+      if (kind === syntaxKind.FunctionDeclaration && scopes.length > 0) {
+        addScopeBinding(
+          (node as { name?: unknown }).name,
+          scopes[scopes.length - 1],
+        );
+      }
+      visitFunctionLike(node);
+      return;
+    }
+
+    if (
+      kind === syntaxKind.Block ||
+      kind === syntaxKind.ModuleBlock ||
+      kind === syntaxKind.CaseClause ||
+      kind === syntaxKind.DefaultClause
+    ) {
+      visitStatementList(
+        (node as { statements?: unknown[] }).statements,
+        scopes,
+      );
+      return;
+    }
+
+    if (kind === syntaxKind.CatchClause) {
+      const scope = new Map<string, AstScopeEntry>();
+      addBindingPattern(
+        (node as { variableDeclaration?: { name?: unknown } })
+          .variableDeclaration
+          ?.name,
+        scope,
+        ast,
+      );
+      visitScopedNode((node as { block?: unknown }).block, [...scopes, scope]);
+      return;
+    }
+
+    if (kind === syntaxKind.ClassDeclaration && scopes.length > 0) {
+      addScopeBinding(
+        (node as { name?: unknown }).name,
+        scopes[scopes.length - 1],
+      );
+    }
+
+    if (kind === syntaxKind.VariableStatement && scopes.length > 0) {
+      const declarations =
+        (node as { declarationList?: { declarations?: unknown[] } })
+          .declarationList?.declarations;
+      if (Array.isArray(declarations)) {
+        for (const declaration of declarations) {
+          registerVariableDeclaration(declaration, scopes[scopes.length - 1]);
+        }
+      }
+    }
+
+    if (kind === syntaxKind.ExpressionStatement) {
+      recordBuilderMutation(node, scopes);
+    }
+
+    ast.forEachChild(node, (child) => visitScopedNode(child, scopes));
+  }
+
+  visitScopedNode(sourceFile, []);
+
+  const builderRanges = newCtDecls.flatMap((decl) => [
+    { start: decl.initializerStart, end: decl.initializerEnd },
+    ...decl.assignments.map((assignment) => ({
+      start: assignment.start,
+      end: assignment.end,
+    })),
+  ]);
+
+  return {
+    calls: calls.filter((call) =>
+      !builderRanges.some((range) =>
+        call.start >= range.start && call.end <= range.end
+      )
+    ),
+    newCtDecls,
+  };
 }
 
 function splitTopLevelSegments(
@@ -3566,8 +4147,31 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         return null;
       }
 
-      const calls = findCtCalls(nextCode);
-      const newCtDecls = findNewCtDeclarations(nextCode);
+      const astTargets = !isSvelte && !isAstro
+        ? collectAstTransformTargets(nextCode, normalizedId)
+        : null;
+      const calls = astTargets?.calls ?? findCtCalls(nextCode);
+      const newCtDecls: AstNewCtDeclaration[] = astTargets?.newCtDecls ??
+        findNewCtDeclarations(nextCode).map((decl) => {
+          const declarationSource = nextCode.slice(decl.start, decl.end);
+          const initializerMatch = /new\s+ct\s*\(\s*\)/.exec(declarationSource);
+          const initializerStart = initializerMatch
+            ? decl.start + initializerMatch.index
+            : decl.start;
+          const initializerEnd = initializerMatch
+            ? initializerStart + initializerMatch[0].length
+            : decl.end;
+          return {
+            varName: decl.varName,
+            start: decl.start,
+            initializerStart,
+            initializerEnd,
+            hasAddContainerCall: new RegExp(
+              `\\b${decl.varName}\\.addContainer\\s*\\(`,
+            ).test(nextCode),
+            assignments: decl.assignments,
+          };
+        });
       if (calls.length === 0 && newCtDecls.length === 0) {
         if (!isSvelte && !isAstro) {
           return null;
@@ -3635,14 +4239,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         console.log(`[css-ts][static] ${normalizedId} ${message}`);
       }
 
-      function withRuntimeOptionsInNewCtDeclaration(
-        declarationSource: string,
-      ): string {
-        const replaced = declarationSource.replace(
-          /new\s+ct\s*\(\s*\)/,
-          `new ct(undefined, undefined, ${runtimeOptionsLiteral})`,
-        );
-        return replaced;
+      function withRuntimeOptionsInNewCtInitializer(): string {
+        return `new ct(undefined, undefined, ${runtimeOptionsLiteral})`;
       }
 
       function readMemberPath(
@@ -4028,14 +4626,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             ) {
               const variantMap: Partial<Record<string, string>> = {};
               for (const [key, style] of Object.entries(declarations)) {
-                const generatedClassName = hasStyleDeclarations(style.declaration) ||
+                const generatedClassName =
+                  hasStyleDeclarations(style.declaration) ||
                     !hasTailwindClassNames(style)
-                  ? createClassName(
-                    `${group}:${variantName}:${key}`,
-                    style.declaration,
-                    normalizedId,
-                  )
-                  : undefined;
+                    ? createClassName(
+                      `${group}:${variantName}:${key}`,
+                      style.declaration,
+                      normalizedId,
+                    )
+                    : undefined;
                 const classValue = resolveStyleClassValue(
                   generatedClassName,
                   style,
@@ -4100,24 +4699,18 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const decl of newCtDecls) {
-        const declarationSource = nextCode.slice(decl.start, decl.end);
-        const runtimeDeclaration = withRuntimeOptionsInNewCtDeclaration(
-          declarationSource,
-        );
+        const runtimeDeclaration = withRuntimeOptionsInNewCtInitializer();
 
         if (resolution === "dynamic") {
           replacements.push({
-            start: decl.start,
-            end: decl.end,
+            start: decl.initializerStart,
+            end: decl.initializerEnd,
             text: runtimeDeclaration,
           });
           continue;
         }
 
-        const addContainerMatcher = new RegExp(
-          `\\b${decl.varName}\\.addContainer\\s*\\(`,
-        );
-        if (addContainerMatcher.test(nextCode)) {
+        if (decl.hasAddContainerCall) {
           if (resolution === "static") {
             throw staticResolutionError(
               `resolution="static" cannot statically resolve ${decl.varName}.addContainer(...)`,
@@ -4125,8 +4718,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             );
           }
           replacements.push({
-            start: decl.start,
-            end: decl.end,
+            start: decl.initializerStart,
+            end: decl.initializerEnd,
             text: runtimeDeclaration,
           });
           continue;
@@ -4324,8 +4917,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             );
           }
           replacements.push({
-            start: decl.start,
-            end: decl.end,
+            start: decl.initializerStart,
+            end: decl.initializerEnd,
             text: runtimeDeclaration,
           });
           continue;
@@ -4343,8 +4936,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             );
           }
           replacements.push({
-            start: decl.start,
-            end: decl.end,
+            start: decl.initializerStart,
+            end: decl.initializerEnd,
             text: runtimeDeclaration,
           });
           continue;
@@ -4433,14 +5026,15 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             ) {
               const variantMap: Partial<Record<string, string>> = {};
               for (const [key, style] of Object.entries(declarations)) {
-                const generatedClassName = hasStyleDeclarations(style.declaration) ||
+                const generatedClassName =
+                  hasStyleDeclarations(style.declaration) ||
                     !hasTailwindClassNames(style)
-                  ? createClassName(
-                    `${group}:${variantName}:${key}`,
-                    style.declaration,
-                    normalizedId,
-                  )
-                  : undefined;
+                    ? createClassName(
+                      `${group}:${variantName}:${key}`,
+                      style.declaration,
+                      normalizedId,
+                    )
+                    : undefined;
                 const classValue = resolveStyleClassValue(
                   generatedClassName,
                   style,
@@ -4498,9 +5092,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           JSON.stringify(compiledConfig)
         }, ${runtimeOptionsLiteral})`;
         replacements.push({
-          start: decl.start,
-          end: decl.end,
-          text: `const ${decl.varName} = ${ctCall}`,
+          start: decl.initializerStart,
+          end: decl.initializerEnd,
+          text: ctCall,
         });
 
         for (const assignment of decl.assignments) {
@@ -4525,7 +5119,8 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       nextCode = stripUnusedStaticHelperConsts(nextCode);
-      const needsTailwindRuntimeImport = nextCode.includes('"tailwindClassNames"') ||
+      const needsTailwindRuntimeImport =
+        nextCode.includes('"tailwindClassNames"') ||
         /\btw\s*\(/.test(nextCode);
       managedModules.add(normalizedId);
       updateModuleStaticDependencies(normalizedId, staticDependencies);
