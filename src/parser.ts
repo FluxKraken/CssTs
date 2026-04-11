@@ -31,6 +31,7 @@ type VariantSheet = Record<string, Record<string, NormalizedStyleSheet>>;
 type VariantGlobalSheet = Record<string, Record<string, StyleSheet>>;
 type VariantSelection = Record<string, string | boolean>;
 type CtConfig = {
+  simple?: boolean;
   imports?: string[];
   global?: StyleSheet;
   root?: Array<
@@ -94,6 +95,7 @@ interface ParsedObject {
 
 const QUOTED_KEYS = Symbol("ct-parser-quoted-keys");
 const RESOLVED_STYLE_KIND = "css-ts-style";
+const SIMPLE_STYLE_KEY = "__css_ts_simple__";
 
 interface ParsedArray extends Array<ParsedValue> {}
 
@@ -1432,6 +1434,62 @@ function normalizeImportedThemes(
   return { root, global };
 }
 
+function normalizeSimpleStyleSheet(
+  value: unknown,
+  options: ParseCtOptions,
+): NormalizedStyleSheet | null {
+  const normalized = normalizeStyleDeclaration(value, options, true);
+  if (!normalized) {
+    return null;
+  }
+
+  return {
+    [SIMPLE_STYLE_KEY]: normalized,
+  };
+}
+
+function normalizeSimpleVariantSheet(
+  value: unknown,
+  options: ParseCtOptions,
+): { variant?: VariantSheet; variantGlobal?: VariantGlobalSheet } | null {
+  if (isIdentifierReference(value)) {
+    return null;
+  }
+
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const variantSheet: VariantSheet = {};
+
+  for (const [groupName, group] of Object.entries(value)) {
+    if (!isPlainObject(group)) {
+      return null;
+    }
+
+    const normalizedGroup: Record<string, NormalizedStyleSheet> = {};
+    for (const [variantName, declaration] of Object.entries(group)) {
+      const normalizedVariant = normalizeSimpleStyleSheet(
+        declaration,
+        options,
+      );
+      if (!normalizedVariant) {
+        return null;
+      }
+      normalizedGroup[variantName] = normalizedVariant;
+    }
+
+    if (Object.keys(normalizedGroup).length > 0) {
+      variantSheet[groupName] = normalizedGroup;
+    }
+  }
+
+  return {
+    variant: Object.keys(variantSheet).length > 0 ? variantSheet : undefined,
+    variantGlobal: undefined,
+  };
+}
+
 function normalizeVariantSheet(
   value: unknown,
   base: NormalizedStyleSheet,
@@ -1546,7 +1604,8 @@ function normalizeVariantSelection(
 
 /**
  * Validate and normalize a parsed config object into a {@link CtConfig}.
- * Allowed top-level keys: `global`, `themes`, `root`, `rootVars`, `base`, `variant`, `defaults`.
+ * Allowed top-level keys: `simple`, `global`, `themes`, `root`, `rootVars`,
+ * `base`, `variant`, `defaults`.
  * Returns `null` when the input cannot be validated.
  */
 export function parseCtConfig(
@@ -1554,6 +1613,7 @@ export function parseCtConfig(
   options: ParseCtOptions = {},
 ): CtConfig | null {
   const allowed = new Set([
+    "simple",
     "global",
     "themes",
     "root",
@@ -1573,6 +1633,11 @@ export function parseCtConfig(
     ...options,
     imports,
   };
+
+  const simple = value.simple === true;
+  if ("simple" in value && typeof value.simple !== "boolean") {
+    return null;
+  }
 
   let global: StyleSheet | undefined;
   let root: RootVarEntry[] | undefined;
@@ -1628,7 +1693,9 @@ export function parseCtConfig(
   }
 
   if ("base" in value) {
-    const normalized = normalizeStyleSheet(value.base, parseOptions, true);
+    const normalized = simple
+      ? normalizeSimpleStyleSheet(value.base, parseOptions)
+      : normalizeStyleSheet(value.base, parseOptions, true);
     if (!normalized) {
       return null;
     }
@@ -1636,7 +1703,9 @@ export function parseCtConfig(
   }
 
   if ("variant" in value) {
-    const normalized = normalizeVariantSheet(value.variant, base, parseOptions);
+    const normalized = simple
+      ? normalizeSimpleVariantSheet(value.variant, parseOptions)
+      : normalizeVariantSheet(value.variant, base, parseOptions);
     if (!normalized) {
       return null;
     }
@@ -1657,6 +1726,7 @@ export function parseCtConfig(
   }
 
   return {
+    simple,
     imports: imports.size > 0 ? Array.from(imports) : undefined,
     global,
     root,
@@ -1666,6 +1736,30 @@ export function parseCtConfig(
     variantGlobal,
     defaults,
   };
+}
+
+export function parseCtBuilderOptions(
+  value: unknown,
+): { simple: boolean } | null {
+  if (value === undefined) {
+    return { simple: false };
+  }
+
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (key !== "simple") {
+      return null;
+    }
+  }
+
+  if ("simple" in value && typeof value.simple !== "boolean") {
+    return null;
+  }
+
+  return { simple: value.simple === true };
 }
 
 const UNRESOLVED = Symbol("ct-parser-unresolved");
@@ -2174,19 +2268,44 @@ type NewCtAssignment = {
 type NewCtDeclaration = {
   varName: string;
   start: number;
-  end: number;
+  initializerStart: number;
+  initializerEnd: number;
+  optionsSource?: string;
+  hasStaticOptions: boolean;
+  simple: boolean;
   assignments: NewCtAssignment[];
 };
 
+function findClosingParenIndex(input: string, openParenIndex: number): number {
+  let parenDepth = 0;
+
+  for (let i = openParenIndex; i < input.length; i += 1) {
+    const char = input[i];
+    if (char === "(") {
+      parenDepth += 1;
+      continue;
+    }
+    if (char === ")") {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
 /**
- * Find `const x = new ct()` declarations and their subsequent property assignments
- * (`x.base = ...`, `x.global = ...`, `x.root = ...`, etc.) for static extraction.
+ * Find `const x = new ct(...)` declarations and their subsequent property
+ * assignments (`x.base = ...`, `x.global = ...`, `x.root = ...`, etc.) for
+ * static extraction.
  */
 export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
   const declarations: NewCtDeclaration[] = [];
   const searchable = maskStringsAndComments(code);
   const matcher =
-    /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(\s*\)/g;
+    /\b(const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*new\s+ct\s*\(/g;
 
   for (
     let match = matcher.exec(searchable);
@@ -2195,7 +2314,21 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
   ) {
     const varName = match[2];
     const declStart = match.index;
-    const declEnd = matcher.lastIndex;
+    const initializerStart = searchable.indexOf("new", declStart);
+    const openParenIndex = matcher.lastIndex - 1;
+    const closeParenIndex = findClosingParenIndex(searchable, openParenIndex);
+    if (initializerStart < 0 || closeParenIndex < 0) {
+      continue;
+    }
+    const declEnd = closeParenIndex + 1;
+    const optionsSource = code.slice(openParenIndex + 1, closeParenIndex)
+      .trim();
+    const staticOptionsValue = optionsSource.length > 0
+      ? parseStaticExpression(optionsSource)
+      : undefined;
+    const parsedOptions = parseCtBuilderOptions(staticOptionsValue) ?? {
+      simple: false,
+    };
 
     const assignments: NewCtAssignment[] = [];
     const assignmentMatcher = new RegExp(
@@ -2258,7 +2391,16 @@ export function findNewCtDeclarations(code: string): NewCtDeclaration[] {
       importMatcher.lastIndex = end;
     }
 
-    declarations.push({ varName, start: declStart, end: declEnd, assignments });
+    declarations.push({
+      varName,
+      start: declStart,
+      initializerStart,
+      initializerEnd: declEnd,
+      optionsSource: optionsSource.length > 0 ? optionsSource : undefined,
+      hasStaticOptions: optionsSource.length === 0 || staticOptionsValue !== null,
+      simple: parsedOptions.simple,
+      assignments,
+    });
   }
 
   return declarations;

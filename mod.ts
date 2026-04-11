@@ -20,6 +20,16 @@ export { tv } from "./src/index.ts";
 export type { CssTsPluginOptions } from "./src/index.ts";
 /** Style object for a single class name. */
 export type { StyleDeclaration } from "./src/index.ts";
+/** Builder type for incremental multi-slot styles. */
+export type { CtBuilder } from "./src/index.ts";
+/** Builder constructor options. */
+export type { CtBuilderOptions } from "./src/index.ts";
+/** Builder type for single-slot shorthand styles. */
+export type { CtSimpleBuilder } from "./src/index.ts";
+/** Config shape for single-slot shorthand styles. */
+export type { CtSimpleConfig } from "./src/index.ts";
+/** Accessor type returned by shorthand styles. */
+export type { CtSimpleStyleAccessor } from "./src/index.ts";
 /** Map of class keys to their style declarations. */
 export type { StyleSheet } from "./src/index.ts";
 /** CSS value accepted by style declarations. */

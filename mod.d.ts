@@ -57,6 +57,21 @@ type CtConfig<
   variant?: V;
   defaults?: VariantSelection<V>;
 };
+type SimpleVariantSheet = Record<string, Record<string, StyleDeclarationInput>>;
+type SimpleVariantSelection<V extends SimpleVariantSheet | undefined> = V extends
+  SimpleVariantSheet ? { [G in keyof V]?: VariantSelectionValue<keyof V[G]> }
+  : Record<string, string | boolean>;
+type CtSimpleConfig<V extends SimpleVariantSheet | undefined> = {
+  simple: true;
+  global?: StyleSheetInput;
+  themes?: ImportedThemesInput;
+  root?: readonly RootVarInput[];
+  /** @deprecated Use `root` instead. */
+  rootVars?: readonly RootVarInput[];
+  base?: StyleDeclarationInput;
+  variant?: V;
+  defaults?: SimpleVariantSelection<V>;
+};
 type CtRuntimeOptions = {
   breakpoints?: Record<string, string>;
   containers?: Record<string, { type?: string; rule: string }>;
@@ -91,6 +106,15 @@ type StyleAccessor<V extends VariantSheet<any> | undefined> =
     class: (variants?: VariantSelection<V>) => string;
     style: (variants?: VariantSelection<V>) => string;
   };
+type CtSimpleStyleAccessor<V extends SimpleVariantSheet | undefined> =
+  & ((variants?: SimpleVariantSelection<V>) => string)
+  & {
+    class: (variants?: SimpleVariantSelection<V>) => string;
+    style: (variants?: SimpleVariantSelection<V>) => string;
+  };
+type CtBuilderOptions = {
+  simple?: boolean;
+};
 type CtBuilder<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
@@ -117,11 +141,43 @@ type CtBuilder<
       inputs: import("./dist/shared.d.ts").ImportInput,
     ) => CtBuilder<T, V>;
   };
+type CtSimpleBuilder<V extends SimpleVariantSheet | undefined> =
+  & CtSimpleStyleAccessor<V>
+  & {
+    base: StyleDeclarationInput | undefined;
+    global: StyleSheetInput | undefined;
+    themes: ImportedThemesInput | undefined;
+    root: readonly RootVarInput[] | undefined;
+    /** @deprecated Use `root` instead. */
+    rootVars: readonly RootVarInput[] | undefined;
+    variant: V | undefined;
+    defaults: SimpleVariantSelection<V> | undefined;
+    addContainer: (
+      container: {
+        name: string;
+        type?: string;
+        rule: string;
+      },
+    ) => CtSimpleBuilder<V>;
+    import: (
+      inputs: import("./dist/shared.d.ts").ImportInput,
+    ) => CtSimpleBuilder<V>;
+  };
 
 /** Re-exported Vite plugin options. */
 export type { CssTsPluginOptions };
 /** Re-exported style declaration type. */
 export type { StyleDeclaration };
+/** Re-exported multi-slot builder type. */
+export type { CtBuilder };
+/** Re-exported builder options type. */
+export type { CtBuilderOptions };
+/** Re-exported shorthand builder type. */
+export type { CtSimpleBuilder };
+/** Re-exported shorthand config type. */
+export type { CtSimpleConfig };
+/** Re-exported shorthand accessor type. */
+export type { CtSimpleStyleAccessor };
 /** Re-exported style sheet type. */
 export type { StyleSheet };
 /** Re-exported style value type. */
@@ -155,10 +211,18 @@ export interface Ct {
     compiled?: CompiledConfig<T>,
     runtimeOptions?: CtRuntimeOptions,
   ): () => Accessor<T, V>;
+  <
+    V extends SimpleVariantSheet | undefined = SimpleVariantSheet | undefined,
+  >(
+    config: CtSimpleConfig<V>,
+    compiled?: CompiledConfig<Record<string, StyleDeclarationInput>>,
+    runtimeOptions?: CtRuntimeOptions,
+  ): CtSimpleStyleAccessor<V>;
   new <
     T extends StyleSheetInput = StyleSheetInput,
     V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
   >(): CtBuilder<T, V>;
+  new(options: CtBuilderOptions & { simple: true }): CtSimpleBuilder<any>;
   /** Vite plugin entry point. */
   vite: (options?: CssTsPluginOptions) => any;
   /** Create a CSS variable reference. */

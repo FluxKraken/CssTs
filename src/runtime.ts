@@ -62,6 +62,10 @@ type VariantSelectionValue<K> = K extends string
 type VariantSelection<V extends VariantSheet<any> | undefined> = V extends
   VariantSheet<any> ? { [G in keyof V]?: VariantSelectionValue<keyof V[G]> }
   : Record<string, string | boolean>;
+type SimpleVariantSheet = Record<string, Record<string, StyleDeclarationInput>>;
+type SimpleVariantSelection<V extends SimpleVariantSheet | undefined> = V extends
+  SimpleVariantSheet ? { [G in keyof V]?: VariantSelectionValue<keyof V[G]> }
+  : Record<string, string | boolean>;
 
 /** Configuration object accepted by `ct()`. */
 type CtConfig<
@@ -84,6 +88,24 @@ type CtConfig<
   variantGlobal?: VariantGlobalSheet;
   /** Default variant selections. */
   defaults?: VariantSelection<V>;
+};
+type CtSimpleConfig<V extends SimpleVariantSheet | undefined> = {
+  /** Enable the single-slot shorthand mode. */
+  simple: true;
+  /** Global stylesheet rules applied without class names. */
+  global?: StyleSheetInput;
+  /** Theme definitions expanded into root vars and scoped global rules. */
+  themes?: ImportedThemesInput;
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  root?: readonly RootVarInput[];
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  rootVars?: readonly RootVarInput[];
+  /** Direct style declaration used as the component's only slot. */
+  base?: StyleDeclarationInput;
+  /** Variant groups that conditionally override the shorthand base styles. */
+  variant?: V;
+  /** Default variant selections. */
+  defaults?: SimpleVariantSelection<V>;
 };
 /** Build-time precompiled config passed as the second argument to `ct()`. */
 type CompiledConfig<T extends StyleSheetInput> = {
@@ -130,6 +152,14 @@ type Accessor<
 > = {
   [K in keyof T]: StyleAccessor<V>;
 };
+type CtSimpleStyleAccessor<V extends SimpleVariantSheet | undefined> =
+  & ((variants?: SimpleVariantSelection<V>) => string)
+  & {
+    /** Return the CSS class name(s) for the shorthand style. */
+    class: (variants?: SimpleVariantSelection<V>) => string;
+    /** Return an inline style string for the shorthand style. */
+    style: (variants?: SimpleVariantSelection<V>) => string;
+  };
 /** Callable accessor for a single style key that returns class names or inline styles. */
 type StyleAccessor<V extends VariantSheet<any> | undefined> =
   & ((variants?: VariantSelection<V>) => string)
@@ -160,10 +190,64 @@ type DocumentLike = {
   head: { appendChild(node: unknown): void };
 };
 
+type CtBuilderOptions = {
+  /** Enable the single-slot shorthand builder mode. */
+  simple?: boolean;
+};
+
+const SIMPLE_STYLE_KEY = "__css_ts_simple__";
+
 function hasVariantSelectionValue(
   value: unknown,
 ): value is string | number | symbol | boolean {
   return value !== undefined && value !== null;
+}
+
+function normalizeCtBuilderOptions(value: unknown): CtBuilderOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return { simple: (value as { simple?: unknown }).simple === true };
+}
+
+function wrapSimpleBaseInput(
+  value: StyleDeclarationInput | undefined,
+): StyleSheetInput | undefined {
+  return value === undefined ? undefined : { [SIMPLE_STYLE_KEY]: value };
+}
+
+function wrapSimpleVariantInput(
+  variants: SimpleVariantSheet | undefined,
+): VariantSheet<Record<string, StyleDeclarationInput>> | undefined {
+  if (!variants) {
+    return undefined;
+  }
+
+  const wrapped: VariantSheet<Record<string, StyleDeclarationInput>> = {};
+  for (const [group, groupVariants] of Object.entries(variants)) {
+    const wrappedGroup: Record<
+      string,
+      Partial<Record<string, StyleDeclarationInput>>
+    > = {};
+    for (const [variantName, declaration] of Object.entries(groupVariants)) {
+      wrappedGroup[variantName] = {
+        [SIMPLE_STYLE_KEY]: declaration,
+      };
+    }
+    wrapped[group] = wrappedGroup;
+  }
+
+  return wrapped;
+}
+
+function createEmptySimpleStyleAccessor<
+  V extends SimpleVariantSheet | undefined,
+>(): CtSimpleStyleAccessor<V> {
+  const accessor = (() => "") as CtSimpleStyleAccessor<V>;
+  accessor.class = () => "";
+  accessor.style = () => "";
+  return accessor;
 }
 
 function injectRule(rule: string): void {
@@ -819,7 +903,7 @@ function normalizeVariantGlobalSheetInput(
   return normalized;
 }
 
-function compileConfig<
+function compileAccessorFactory<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
 >(
@@ -1215,6 +1299,71 @@ function compileConfig<
   }) as unknown as () => Accessor<T, V>;
 }
 
+function compileSimpleConfig<V extends SimpleVariantSheet | undefined>(
+  config: CtSimpleConfig<V>,
+  compiled?: CompiledConfig<Record<string, StyleDeclarationInput>>,
+  runtimeOptions: CtRuntimeOptions = {},
+  managedTagIds: { variantGlobal: string } = {
+    variantGlobal:
+      `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
+  },
+): CtSimpleStyleAccessor<V> {
+  const wrappedConfig: CtConfig<
+    Record<string, StyleDeclarationInput>,
+    VariantSheet<Record<string, StyleDeclarationInput>> | undefined
+  > = {
+    global: config.global,
+    themes: config.themes,
+    root: config.root,
+    rootVars: config.rootVars,
+    base: wrapSimpleBaseInput(config.base),
+    variant: wrapSimpleVariantInput(config.variant),
+    defaults: config.defaults as VariantSelection<
+      VariantSheet<Record<string, StyleDeclarationInput>> | undefined
+    >,
+  };
+  const factory = compileAccessorFactory(
+    wrappedConfig,
+    compiled,
+    runtimeOptions,
+    managedTagIds,
+  );
+  const accessor = (factory() as Record<string, CtSimpleStyleAccessor<V>>)[
+    SIMPLE_STYLE_KEY
+  ] ?? createEmptySimpleStyleAccessor<V>();
+  return accessor;
+}
+
+function compileConfig<
+  T extends StyleSheetInput,
+  V extends VariantSheet<T> | undefined,
+>(
+  config: CtConfig<T, V> | CtSimpleConfig<any>,
+  compiled?: CompiledConfig<T>,
+  runtimeOptions: CtRuntimeOptions = {},
+  managedTagIds: { variantGlobal: string } = {
+    variantGlobal:
+      `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
+  },
+): (() => Accessor<T, V>) | CtSimpleStyleAccessor<any> {
+  if ((config as { simple?: boolean } | undefined)?.simple === true) {
+    return compileSimpleConfig(
+      config as CtSimpleConfig<any>,
+      compiled as CompiledConfig<Record<string, StyleDeclarationInput>>
+        | undefined,
+      runtimeOptions,
+      managedTagIds,
+    );
+  }
+
+  return compileAccessorFactory(
+    config as CtConfig<T, V>,
+    compiled,
+    runtimeOptions,
+    managedTagIds,
+  );
+}
+
 const CONFIG_KEYS = new Set([
   "base",
   "global",
@@ -1266,6 +1415,29 @@ type CtBuilder<
   import(inputs: import("./shared.js").ImportInput): CtBuilder<T, V>;
 } & Accessor<T, V>;
 
+type CtSimpleBuilder<
+  V extends SimpleVariantSheet | undefined = SimpleVariantSheet | undefined,
+> = {
+  /** Direct style declaration used as the component's only slot. */
+  base: StyleDeclarationInput | undefined;
+  /** Global stylesheet rules (selectors and at-rules applied without class names). */
+  global: StyleSheetInput | undefined;
+  /** Theme definitions expanded into root vars and scoped global rules. */
+  themes: ImportedThemesInput | undefined;
+  /** CSS custom properties to emit on `:root` (optionally under a layer). */
+  root: readonly RootVarInput[] | undefined;
+  /** @deprecated Use `root` instead. */
+  rootVars: readonly RootVarInput[] | undefined;
+  /** Variant groups that conditionally override the shorthand base styles. */
+  variant: V | undefined;
+  /** Default variant selections applied when no explicit selection is given. */
+  defaults: SimpleVariantSelection<V> | undefined;
+  /** Register a container preset for `@set` and `@<name>` shorthand at runtime. */
+  addContainer(container: ContainerDefinitionInput): CtSimpleBuilder<V>;
+  /** Add styles or external CSS files to the global stylesheet. */
+  import(inputs: import("./shared.js").ImportInput): CtSimpleBuilder<V>;
+} & CtSimpleStyleAccessor<V>;
+
 function createCtBuilder<
   T extends StyleSheetInput,
   V extends VariantSheet<T> | undefined,
@@ -1287,7 +1459,7 @@ function createCtBuilder<
 
   function ensureCompiled(): () => Accessor<T, V> {
     if (!cachedFactory) {
-      cachedFactory = compileConfig(
+      cachedFactory = compileAccessorFactory(
         config as CtConfig<T, V>,
         compiled,
         effectiveRuntimeOptions,
@@ -1421,11 +1593,168 @@ function createCtBuilder<
   return proxy;
 }
 
+function createCtSimpleBuilder<
+  V extends SimpleVariantSheet | undefined,
+>(
+  compiled?: CompiledConfig<Record<string, StyleDeclarationInput>>,
+  runtimeOptions: CtRuntimeOptions = {},
+): CtSimpleBuilder<V> {
+  const config: Partial<CtSimpleConfig<V>> = {
+    simple: true,
+  };
+  const mutableContainers = { ...(runtimeOptions.containers ?? {}) };
+  const managedTagIds = {
+    variantGlobal:
+      `__css_ts_runtime_variant_global_${runtimeManagedTagCounter += 1}`,
+  };
+  const effectiveRuntimeOptions: CtRuntimeOptions = {
+    ...runtimeOptions,
+    containers: mutableContainers,
+  };
+  let cachedAccessor: CtSimpleStyleAccessor<V> | null = null;
+
+  function ensureCompiled(): CtSimpleStyleAccessor<V> {
+    if (!cachedAccessor) {
+      cachedAccessor = compileSimpleConfig(
+        config as CtSimpleConfig<V>,
+        compiled,
+        effectiveRuntimeOptions,
+        managedTagIds,
+      );
+    }
+    return cachedAccessor;
+  }
+
+  const builder = function (selection?: SimpleVariantSelection<V>) {
+    return ensureCompiled()(selection);
+  };
+  const proxy = new Proxy(builder, {
+    apply(_target, _thisArg, args) {
+      return ensureCompiled()(args[0] as SimpleVariantSelection<V> | undefined);
+    },
+    set(_target, prop, value) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        (config as Record<string, unknown>)[normalizeConfigKey(prop)] = value;
+        cachedAccessor = null;
+        return true;
+      }
+      return Reflect.set(_target, prop, value);
+    },
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        return (config as Record<string, unknown>)[normalizeConfigKey(prop)];
+      }
+      if (typeof prop === "string" && !Reflect.has(target, prop)) {
+        const accessor = ensureCompiled();
+        if (prop in accessor) {
+          return (accessor as unknown as Record<string, unknown>)[prop];
+        }
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) {
+      if (typeof prop === "string" && CONFIG_KEYS.has(prop)) {
+        return true;
+      }
+      if (typeof prop === "string" && !Reflect.has(target, prop)) {
+        const accessor = ensureCompiled();
+        if (prop in accessor) {
+          return true;
+        }
+      }
+      return Reflect.has(target, prop);
+    },
+    ownKeys(target) {
+      const accessor = ensureCompiled();
+      return Array.from(
+        new Set([
+          ...Reflect.ownKeys(target),
+          ...CONFIG_KEYS,
+          ...Object.keys(accessor),
+        ]),
+      );
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (
+        typeof prop === "string" &&
+        (CONFIG_KEYS.has(prop) || prop in ensureCompiled())
+      ) {
+        return {
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
+  }) as unknown as CtSimpleBuilder<V>;
+
+  proxy.addContainer = (container: ContainerDefinitionInput) => {
+    if (
+      typeof container?.name !== "string" || container.name.length === 0 ||
+      typeof container.rule !== "string"
+    ) {
+      throw new Error(
+        "addContainer() expects { name: string, rule: string, type?: string }",
+      );
+    }
+
+    mutableContainers[container.name] = {
+      type: typeof container.type === "string" ? container.type : "inline-size",
+      rule: container.rule,
+    };
+    cachedAccessor = null;
+    return proxy;
+  };
+
+  proxy.import = (inputs: import("./shared.js").ImportInput) => {
+    const entries = Array.isArray(inputs) ? inputs : [inputs];
+    config.global = config.global ?? {};
+    const currentGlobal = config.global;
+
+    for (const entry of entries) {
+      if (
+        typeof entry === "string" ||
+        (typeof entry === "object" && entry !== null && "path" in entry)
+      ) {
+        currentGlobal["@import"] = currentGlobal["@import"] ?? [];
+        if (Array.isArray(currentGlobal["@import"])) {
+          (currentGlobal["@import"] as unknown as string[]).push(
+            entry as string,
+          );
+        } else {
+          currentGlobal["@import"] = [
+            currentGlobal["@import"],
+            entry as string,
+          ] as unknown as import("./shared.js").StyleDeclaration;
+        }
+      } else if (typeof entry === "object" && entry !== null) {
+        if ("rules" in entry) {
+          const ruleObj = entry as import("./shared.js").ImportRuleObject;
+          if (ruleObj.layer && typeof ruleObj.layer === "string") {
+            currentGlobal[`@layer ${ruleObj.layer}`] = ruleObj.rules;
+          } else {
+            Object.assign(currentGlobal, ruleObj.rules);
+          }
+        } else {
+          Object.assign(currentGlobal, entry);
+        }
+      }
+    }
+
+    cachedAccessor = null;
+    return proxy;
+  };
+
+  return proxy;
+}
+
 /**
  * Runtime stylesheet helper that generates class names and injects CSS rules.
  *
  * Call as `ct({ base, global, variant, defaults })` to compile styles immediately,
- * or as `new ct()` to create a builder where properties can be set incrementally.
+ * call as `ct({ simple: true, ... })` for the single-slot shorthand accessor,
+ * or use `new ct()`/`new ct({ simple: true })` to create an incremental builder.
  */
 export default function ct<
   T extends StyleSheetInput = StyleSheetInput,
@@ -1433,16 +1762,49 @@ export default function ct<
 >(
   config?: CtConfig<T, V>,
   compiled?: CompiledConfig<T>,
+  runtimeOptions?: CtRuntimeOptions,
+): () => Accessor<T, V>;
+export default function ct<
+  V extends SimpleVariantSheet | undefined = SimpleVariantSheet | undefined,
+>(
+  config: CtSimpleConfig<V>,
+  compiled?: CompiledConfig<Record<string, StyleDeclarationInput>>,
+  runtimeOptions?: CtRuntimeOptions,
+): CtSimpleStyleAccessor<V>;
+export default function ct<
+  T extends StyleSheetInput = StyleSheetInput,
+  V extends VariantSheet<T> | undefined = VariantSheet<T> | undefined,
+>(
+  config?: CtConfig<T, V> | CtSimpleConfig<any> | CtBuilderOptions,
+  compiled?: CompiledConfig<T>,
   runtimeOptions: CtRuntimeOptions = {},
-): (() => Accessor<T, V>) | CtBuilder<T, V> {
+):
+  | (() => Accessor<T, V>)
+  | CtSimpleStyleAccessor<any>
+  | CtBuilder<T, V>
+  | CtSimpleBuilder<any> {
   if (new.target) {
+    const builderOptions = normalizeCtBuilderOptions(config);
+    if (builderOptions.simple) {
+      return createCtSimpleBuilder(
+        compiled as CompiledConfig<Record<string, StyleDeclarationInput>>
+          | undefined,
+        runtimeOptions,
+      ) as CtSimpleBuilder<any>;
+    }
     return createCtBuilder<T, V>(compiled, runtimeOptions);
   }
-  return compileConfig(config!, compiled, runtimeOptions);
+  return compileConfig(config as CtConfig<T, V> | CtSimpleConfig<any>, compiled, runtimeOptions);
 }
 
 /** Re-exported builder type. */
-export type { CtBuilder };
+export type {
+  CtBuilder,
+  CtBuilderOptions,
+  CtSimpleBuilder,
+  CtSimpleConfig,
+  CtSimpleStyleAccessor,
+};
 
 /** Re-exported style types for convenience. */
 export type { StyleDeclaration, StyleSheet, StyleValue } from "./shared.js";

@@ -3,12 +3,17 @@
  * @module
  */
 import runtimeCt from "./runtime.js";
-import type { CtBuilder } from "./runtime.js";
+import type {
+  CtBuilder,
+  CtBuilderOptions,
+  CtSimpleBuilder,
+} from "./runtime.js";
 import { cssTsPlugin } from "./vite.js";
 import { cv, font, Theme, tw, tv } from "./shared.js";
 
 type Ct = typeof runtimeCt & {
   new(): CtBuilder;
+  new(options: CtBuilderOptions & { simple: true }): CtSimpleBuilder;
   vite: typeof cssTsPlugin;
   cv: typeof cv;
   font: typeof font;
@@ -50,7 +55,13 @@ export { tv };
 /** Re-exported Vite plugin options. */
 export type { CssTsPluginOptions } from "./vite.js";
 /** Re-exported builder type. */
-export type { CtBuilder } from "./runtime.js";
+export type {
+  CtBuilder,
+  CtBuilderOptions,
+  CtSimpleBuilder,
+  CtSimpleConfig,
+  CtSimpleStyleAccessor,
+} from "./runtime.js";
 /** Style object for a single class name. */
 export type { StyleDeclaration } from "./shared.js";
 /** Map of class keys to their style declarations. */

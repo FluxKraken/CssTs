@@ -4668,6 +4668,51 @@ Deno.test("new ct() runtime with variants and defaults", () => {
   );
 });
 
+Deno.test("new ct({ simple: true }) runtime exposes shorthand accessor", () => {
+  const content = new (ct as any)({ simple: true });
+  content.base = {
+    display: "grid",
+    gap: "1rem",
+  };
+  content.variant = {
+    prose: {
+      true: {
+        color: "rebeccapurple",
+      },
+    },
+  };
+
+  const baseClass = content();
+  const proseClass = content({ prose: true });
+  assertMatch(baseClass, /^ct_[a-z0-9]+$/);
+  assert(baseClass !== proseClass);
+  assertEquals(content.style(), "display:grid;gap:1rem");
+  assertEquals(
+    content.style({ prose: true }),
+    "display:grid;gap:1rem;color:rebeccapurple",
+  );
+});
+
+Deno.test("ct({ simple: true }) runtime returns shorthand accessor", () => {
+  const content = (ct as any)({
+    simple: true,
+    base: {
+      padding: "1rem",
+    },
+    variant: {
+      tone: {
+        loud: {
+          color: "crimson",
+        },
+      },
+    },
+  });
+
+  assertMatch(content(), /^ct_[a-z0-9]+$/);
+  assert(content({ tone: "loud" }).includes("ct_"));
+  assertEquals(content.style({ tone: "loud" }), "padding:1rem;color:crimson");
+});
+
 Deno.test("new ct() runtime supports addContainer with @set and @container shorthand", () => {
   const styles = new (ct as any)();
   styles.addContainer({
@@ -4707,6 +4752,20 @@ styles.global = { html: { margin: 0 } };`;
   assertEquals(decls[0].assignments[2].property, "global");
 });
 
+Deno.test("parser findNewCtDeclarations detects simple builder options", () => {
+  const code = `import ct from "css-ts";
+const content = new ct({ simple: true });
+content.base = { display: "grid" };
+content.variant = { prose: { true: { color: "red" } } };`;
+
+  const decls = findNewCtDeclarations(code);
+  assertEquals(decls.length, 1);
+  assertEquals(decls[0].varName, "content");
+  assertEquals(decls[0].simple, true);
+  assertEquals(decls[0].optionsSource, "{ simple: true }");
+  assertEquals(decls[0].assignments.length, 2);
+});
+
 Deno.test("parser findNewCtDeclarations ignores commented assignments", () => {
   const code = `import ct from "css-ts";
 const styles = new ct();
@@ -4738,6 +4797,29 @@ Deno.test("vite extracts css from new ct() pattern", () => {
 
   const css = load(VIRTUAL_ID) as string;
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+});
+
+Deno.test("vite extracts css from new ct({ simple: true }) pattern", () => {
+  const plugin = cssTsPlugin();
+  const transform = asHook(plugin.transform);
+  const load = asHook(plugin.load);
+
+  const moduleCode = `import ct from "css-ts";\n` +
+    `const content = new ct({ simple: true });\n` +
+    `content.base = { display: "grid", gap: "1rem" };\n` +
+    `content.variant = { prose: { true: { color: "red" } } };\n`;
+  const transformed = transform(moduleCode, "/app/src/lib/new-ct-simple.ts");
+  assert(
+    transformed && typeof transformed === "object" && "code" in transformed,
+  );
+
+  const code = transformed.code as string;
+  assert(!code.includes("new ct({ simple: true })"));
+  assert(code.includes('"simple":true'));
+
+  const css = load(VIRTUAL_ID) as string;
+  assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
+  assertMatch(css, /\.ct_[a-z0-9]+\{color:red\}/);
 });
 
 Deno.test("vite scopes new ct() builder transforms to each TSX component", () => {

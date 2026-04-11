@@ -2,6 +2,7 @@ import {
   findCtCalls,
   findExpressionTerminator,
   findNewCtDeclarations,
+  parseCtBuilderOptions,
   parseCtCallArguments,
   parseCtCallArgumentsWithResolver,
   parseCtConfig,
@@ -32,6 +33,7 @@ const RESOLVED_VIRTUAL_ID = "\0virtual:css-ts/styles.css";
 const PUBLIC_TAILWIND_RUNTIME_ID = "virtual:css-ts/tailwind-merge";
 const RESOLVED_TAILWIND_RUNTIME_ID = "\0virtual:css-ts/tailwind-merge";
 const MODULE_VIRTUAL_QUERY_KEY = "css-ts-module";
+const SIMPLE_STYLE_KEY = "__css_ts_simple__";
 const STATIC_STYLE_EXTENSIONS = [
   ".ts",
   ".tsx",
@@ -235,6 +237,9 @@ type AstNewCtDeclaration = {
   start: number;
   initializerStart: number;
   initializerEnd: number;
+  optionsSource?: string;
+  hasStaticOptions: boolean;
+  simple: boolean;
   hasAddContainerCall: boolean;
   assignments: AstNewCtAssignment[];
 };
@@ -1625,6 +1630,7 @@ function resolveStyleClassValue(
 }
 
 function toRuntimeCtConfigLiteral(parsed: {
+  simple?: boolean;
   global?: StyleSheet;
   root?: Array<
     Record<string, StyleValue> | {
@@ -1643,9 +1649,14 @@ function toRuntimeCtConfigLiteral(parsed: {
   variantGlobal?: Record<string, Record<string, StyleSheet>>;
   defaults?: Record<string, string | boolean>;
 }): string {
-  const runtimeConfig: Record<string, unknown> = {
-    base: parsed.base,
-  };
+  const runtimeConfig: Record<string, unknown> = {};
+
+  if (parsed.simple) {
+    runtimeConfig.simple = true;
+    runtimeConfig.base = parsed.base[SIMPLE_STYLE_KEY];
+  } else {
+    runtimeConfig.base = parsed.base;
+  }
 
   if (parsed.global && Object.keys(parsed.global).length > 0) {
     runtimeConfig.global = parsed.global;
@@ -1656,7 +1667,22 @@ function toRuntimeCtConfigLiteral(parsed: {
     runtimeConfig.root = parsed.rootVars;
   }
   if (parsed.variant && Object.keys(parsed.variant).length > 0) {
-    runtimeConfig.variant = parsed.variant;
+    if (parsed.simple) {
+      const simpleVariantConfig: Record<
+        string,
+        Record<string, unknown>
+      > = {};
+      for (const [group, variants] of Object.entries(parsed.variant)) {
+        const runtimeVariants: Record<string, unknown> = {};
+        for (const [variantName, declarations] of Object.entries(variants)) {
+          runtimeVariants[variantName] = declarations[SIMPLE_STYLE_KEY];
+        }
+        simpleVariantConfig[group] = runtimeVariants;
+      }
+      runtimeConfig.variant = simpleVariantConfig;
+    } else {
+      runtimeConfig.variant = parsed.variant;
+    }
   }
   if (parsed.variantGlobal && Object.keys(parsed.variantGlobal).length > 0) {
     runtimeConfig.variantGlobal = parsed.variantGlobal;
@@ -2234,7 +2260,7 @@ function isNewCtBuilder(
 
   const expression = (node as { expression?: unknown }).expression;
   const args = (node as { arguments?: unknown[] }).arguments;
-  return isCtIdentifier(expression) && (args?.length ?? 0) === 0;
+  return isCtIdentifier(expression) && (args?.length ?? 0) <= 1;
 }
 
 function addScopeBinding(
@@ -2357,11 +2383,22 @@ function collectAstTransformTargets(
     }
 
     if (isNewCtBuilder(declarationNode.initializer, ast)) {
+      const initializerArgs = declarationNode.initializer.arguments ?? [];
+      const optionsSource = initializerArgs.length > 0
+        ? astNodeText(initializerArgs[0], code, sourceFile)
+        : undefined;
+      const parsedBuilderOptions = parseCtBuilderOptions(
+        optionsSource ? parseStaticExpression(optionsSource) : undefined,
+      ) ?? { simple: false };
       const builder: AstNewCtDeclaration = {
         varName: name,
         start: astNodeStart(declaration, sourceFile),
         initializerStart: astNodeStart(declarationNode.initializer, sourceFile),
         initializerEnd: astNodeEnd(declarationNode.initializer),
+        optionsSource,
+        hasStaticOptions: !optionsSource ||
+          parseStaticExpression(optionsSource) !== null,
+        simple: parsedBuilderOptions.simple,
         hasAddContainerCall: false,
         assignments: [],
       };
@@ -4153,19 +4190,14 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const calls = astTargets?.calls ?? findCtCalls(nextCode);
       const newCtDecls: AstNewCtDeclaration[] = astTargets?.newCtDecls ??
         findNewCtDeclarations(nextCode).map((decl) => {
-          const declarationSource = nextCode.slice(decl.start, decl.end);
-          const initializerMatch = /new\s+ct\s*\(\s*\)/.exec(declarationSource);
-          const initializerStart = initializerMatch
-            ? decl.start + initializerMatch.index
-            : decl.start;
-          const initializerEnd = initializerMatch
-            ? initializerStart + initializerMatch[0].length
-            : decl.end;
           return {
             varName: decl.varName,
             start: decl.start,
-            initializerStart,
-            initializerEnd,
+            initializerStart: decl.initializerStart,
+            initializerEnd: decl.initializerEnd,
+            optionsSource: decl.optionsSource,
+            hasStaticOptions: decl.hasStaticOptions,
+            simple: decl.simple,
             hasAddContainerCall: new RegExp(
               `\\b${decl.varName}\\.addContainer\\s*\\(`,
             ).test(nextCode),
@@ -4239,8 +4271,10 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         console.log(`[css-ts][static] ${normalizedId} ${message}`);
       }
 
-      function withRuntimeOptionsInNewCtInitializer(): string {
-        return `new ct(undefined, undefined, ${runtimeOptionsLiteral})`;
+      function withRuntimeOptionsInNewCtInitializer(
+        optionsSource?: string,
+      ): string {
+        return `new ct(${optionsSource ?? "undefined"}, undefined, ${runtimeOptionsLiteral})`;
       }
 
       function readMemberPath(
@@ -4699,7 +4733,22 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       }
 
       for (const decl of newCtDecls) {
-        const runtimeDeclaration = withRuntimeOptionsInNewCtInitializer();
+        const resolvedBuilderOptionsValue = decl.optionsSource
+          ? parseStaticExpression(
+            decl.optionsSource,
+            (identifierPath) =>
+              resolveIdentifierInModule(identifierPath, normalizedId) ??
+                undefined,
+          ) ?? parseStaticExpression(decl.optionsSource)
+          : undefined;
+        const hasStaticBuilderOptions = decl.optionsSource === undefined ||
+          resolvedBuilderOptionsValue !== null;
+        const resolvedBuilderOptions = parseCtBuilderOptions(
+          resolvedBuilderOptionsValue,
+        ) ?? { simple: decl.simple };
+        const runtimeDeclaration = withRuntimeOptionsInNewCtInitializer(
+          decl.optionsSource,
+        );
 
         if (resolution === "dynamic") {
           replacements.push({
@@ -4725,7 +4774,24 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           continue;
         }
 
-        const configParts: Record<string, unknown> = {};
+        if (!hasStaticBuilderOptions) {
+          if (resolution === "static") {
+            throw staticResolutionError(
+              `resolution="static" could not statically resolve options for ${decl.varName}`,
+              decl.start,
+            );
+          }
+          replacements.push({
+            start: decl.initializerStart,
+            end: decl.initializerEnd,
+            text: runtimeDeclaration,
+          });
+          continue;
+        }
+
+        const configParts: Record<string, unknown> = resolvedBuilderOptions.simple
+          ? { simple: true }
+          : {};
         const importParts: unknown[] = [];
         let allParsed = true;
 
@@ -4793,7 +4859,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
               assignment.property === "defaults"
             ) {
               const partialParsed = parseCtCallArgumentsWithResolver(
-                `{ ${assignment.property}: ${assignment.valueSource} }`,
+                `{ ${
+                  resolvedBuilderOptions.simple ? "simple: true, " : ""
+                }${assignment.property}: ${assignment.valueSource} }`,
                 (identifierPath) =>
                   resolveIdentifierInModule(identifierPath, normalizedId) ??
                     undefined,
@@ -4802,7 +4870,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                   containers: cssConfig.containers,
                 },
               ) ?? parseCtCallArguments(
-                `{ ${assignment.property}: ${assignment.valueSource} }`,
+                `{ ${
+                  resolvedBuilderOptions.simple ? "simple: true, " : ""
+                }${assignment.property}: ${assignment.valueSource} }`,
                 {
                   utilities: cssConfig.utilities,
                   containers: cssConfig.containers,

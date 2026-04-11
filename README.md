@@ -152,6 +152,30 @@ styles().global();
 The reserved names are `base`, `global`, `themes`, `root`, `variant`, and
 `defaults`.
 
+For single-slot components, shorthand mode removes the extra style key:
+
+```ts
+const content = new ct({ simple: true });
+
+content.base = {
+  width: "min(100%, 64rem)",
+  marginInline: "auto",
+  padding: "1rem",
+};
+
+content.variant = {
+  prose: {
+    true: {
+      lineHeight: 1.7,
+    },
+  },
+};
+```
+
+```tsx
+<main className={content({ prose: true })}>...</main>
+```
+
 ## Core features
 
 ### Variants and defaults
