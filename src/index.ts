@@ -57,12 +57,20 @@ export type { StyleDeclaration } from "./shared.js";
 export type { StyleSheet } from "./shared.js";
 /** CSS value accepted by style declarations. */
 export type { StyleValue } from "./shared.js";
+/** Input accepted by the `@apply` directive. */
+export type { ApplyInput } from "./shared.js";
+/** Input accepted by the `@set` directive. */
+export type { SetInput } from "./shared.js";
 /** Valid input for importing external styles or global style objects. */
 export type { ImportInput } from "./shared.js";
 /** Tailwind class marker returned by `tw(...)`. */
 export type { TailwindClassValue } from "./shared.js";
 /** Input accepted by `tw(...)`. */
 export type { TailwindClassInput } from "./shared.js";
+/** Layered `@apply` helper object. */
+export type { LayeredApplyInput } from "./shared.js";
+/** Object form accepted by the `@set` directive. */
+export type { ContainerSetInput } from "./shared.js";
 /** Theme token map accepted by `new Theme(...)`. */
 export type { ThemeTokenInput } from "./shared.js";
 /** Theme map accepted by `themes`. */

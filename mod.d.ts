@@ -1,8 +1,12 @@
 import {
+  ApplyInput,
+  ContainerSetInput,
   CssVarRef,
   font,
   ImportedThemesInput,
+  LayeredApplyInput,
   PrimitiveStyleValue,
+  SetInput,
   StyleDeclaration,
   StyleSheet,
   StyleValue,
@@ -122,10 +126,18 @@ export type { StyleDeclaration };
 export type { StyleSheet };
 /** Re-exported style value type. */
 export type { StyleValue };
+/** Input accepted by the `@apply` directive. */
+export type { ApplyInput };
+/** Input accepted by the `@set` directive. */
+export type { SetInput };
 /** Tailwind class marker returned by `tw(...)`. */
 export type { TailwindClassValue };
 /** Input accepted by `tw(...)`. */
 export type { TailwindClassInput };
+/** Layered `@apply` helper object. */
+export type { LayeredApplyInput };
+/** Object form accepted by the `@set` directive. */
+export type { ContainerSetInput };
 /** Re-exported theme token input type. */
 export type { ThemeTokenInput };
 /** Re-exported imported theme map type. */

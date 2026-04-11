@@ -62,6 +62,32 @@ export interface TailwindClassValue {
   /** Raw class list segments passed to `tailwind-merge`. */
   classNames: readonly string[];
 }
+/** Object form accepted by the `@set` directive. */
+export interface ContainerSetInput {
+  /** Container name used in `@set`. */
+  name: string;
+  /** Optional CSS container type (defaults to `"inline-size"` at runtime). */
+  type?: string;
+}
+/** Input accepted by the `@set` directive. */
+export type SetInput =
+  | string
+  | ContainerSetInput
+  | readonly SetInput[];
+/** Layered `@apply` payload that nests merged rules under a CSS layer. */
+export interface LayeredApplyInput {
+  /** Rules merged by `@apply`. */
+  rules: ApplyInput;
+  /** Optional CSS layer name. */
+  layer?: string;
+}
+/** Input accepted by the `@apply` directive. */
+export type ApplyInput =
+  | string
+  | TailwindClassValue
+  | NestedStyleDeclaration
+  | LayeredApplyInput
+  | readonly ApplyInput[];
 /** CSS custom properties emitted on `:root` (optionally within a layer). */
 export type RootVarInput =
   | Record<string, StyleValue>
@@ -79,7 +105,11 @@ export type ImportedThemesInput = Record<string, ThemeInput>;
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
 export interface NestedStyleDeclaration {
-  [key: string]: StyleValue | NestedStyleDeclaration;
+  [key: string]:
+    | StyleValue
+    | NestedStyleDeclaration
+    | ApplyInput
+    | SetInput;
 }
 /** Style object for a single class name. */
 export type StyleDeclaration = NestedStyleDeclaration;
@@ -692,7 +722,7 @@ const PSEUDO_CLASS_KEYS = new Set([
 ]);
 
 function isNestedStyleDeclaration(
-  value: StyleValue | NestedStyleDeclaration,
+  value: unknown,
 ): value is NestedStyleDeclaration {
   return (
     typeof value === "object" &&
@@ -921,12 +951,14 @@ function collectCssRules(
   const nested: Array<[string, NestedStyleDeclaration]> = [];
 
   for (const [name, value] of Object.entries(declaration)) {
-    if (!isNestedStyleDeclaration(value)) {
-      base[name] = value;
+    if (isNestedStyleDeclaration(value)) {
+      nested.push([name, value]);
       continue;
     }
 
-    nested.push([name, value]);
+    if (isThemeStyleValue(value)) {
+      base[name] = value;
+    }
   }
 
   if (Object.keys(base).length > 0) {
@@ -1007,12 +1039,14 @@ function collectGlobalCssRules(
     const nestedDeclarations: PseudoStyleDeclaration = {};
 
     for (const [name, value] of Object.entries(declaration)) {
-      if (!isNestedStyleDeclaration(value)) {
-        nestedDeclarations[name] = value;
+      if (isNestedStyleDeclaration(value)) {
+        collectGlobalCssRules(name, value, nestedAtRules, rules, options);
         continue;
       }
 
-      collectGlobalCssRules(name, value, nestedAtRules, rules, options);
+      if (isThemeStyleValue(value)) {
+        nestedDeclarations[name] = value;
+      }
     }
 
     if (Object.keys(nestedDeclarations).length > 0) {

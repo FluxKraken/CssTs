@@ -24,10 +24,18 @@ export type { StyleDeclaration } from "./src/index.ts";
 export type { StyleSheet } from "./src/index.ts";
 /** CSS value accepted by style declarations. */
 export type { StyleValue } from "./src/index.ts";
+/** Input accepted by the `@apply` directive. */
+export type { ApplyInput } from "./src/index.ts";
+/** Input accepted by the `@set` directive. */
+export type { SetInput } from "./src/index.ts";
 /** Tailwind class marker returned by `tw(...)`. */
 export type { TailwindClassValue } from "./src/index.ts";
 /** Input accepted by `tw(...)`. */
 export type { TailwindClassInput } from "./src/index.ts";
+/** Layered `@apply` helper object. */
+export type { LayeredApplyInput } from "./src/index.ts";
+/** Object form accepted by the `@set` directive. */
+export type { ContainerSetInput } from "./src/index.ts";
 /** Theme token map accepted by `new Theme(...)`. */
 export type { ThemeTokenInput } from "./src/index.ts";
 /** Theme map accepted by `themes`. */
