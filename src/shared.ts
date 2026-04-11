@@ -97,6 +97,8 @@ export type RootVarInput =
   };
 /** Friendly token map accepted by {@link Theme}. */
 export type ThemeTokenInput = Record<string, StyleValue>;
+/** Theme expansion strategy used for imported themes. */
+export type ThemeMode = "scope" | "color-scheme";
 /** Theme-like value accepted by `themes`. */
 export type ThemeInput = Theme | ThemeTokenInput;
 /** Map of imported theme names/selectors to theme definitions. */
@@ -279,9 +281,21 @@ function toThemeScopeSelector(scope: string): string | null {
   return `.${trimmed}`;
 }
 
-/** Expand `themes` into `root` vars and scoped global rules. */
+function toColorSchemeThemeName(scope: string): "default" | "dark" | null {
+  const trimmed = scope.trim();
+  if (
+    trimmed.length === 0 || trimmed === "default" || trimmed === "root" ||
+    trimmed === ":root"
+  ) {
+    return "default";
+  }
+  return trimmed === "dark" ? "dark" : null;
+}
+
+/** Expand `themes` into `root` vars and mode-specific global rules. */
 export function themesToConfig(
   themes: ImportedThemesInput | undefined,
+  themeMode: ThemeMode = "scope",
 ): {
   root: RootVarInput[];
   global: StyleSheet;
@@ -295,6 +309,32 @@ export function themesToConfig(
 
   for (const [scope, theme] of Object.entries(themes)) {
     const vars = resolveImportedThemeVars(theme);
+
+    if (themeMode === "color-scheme") {
+      const themeName = toColorSchemeThemeName(scope);
+      if (themeName === null) {
+        throw new Error(
+          `themeMode "color-scheme" only supports "default", "root", ":root", and "dark" theme keys. Received "${scope}".`,
+        );
+      }
+
+      if (themeName === "default") {
+        root.push(vars);
+        continue;
+      }
+
+      const mediaKey = "@media (prefers-color-scheme: dark)";
+      const currentRule = (global[mediaKey] as
+        | Record<string, StyleValue | StyleDeclaration>
+        | undefined) ??
+        {};
+      const currentRoot =
+        (currentRule[":root"] as Record<string, StyleValue> | undefined) ?? {};
+      currentRule[":root"] = { ...currentRoot, ...vars };
+      global[mediaKey] = currentRule as StyleDeclaration;
+      continue;
+    }
+
     const selector = toThemeScopeSelector(scope);
 
     if (selector === null) {

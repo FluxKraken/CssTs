@@ -20,6 +20,7 @@ import {
   type StyleDeclaration,
   type StyleSheet,
   type StyleValue,
+  type ThemeMode,
   Theme,
   toCssGlobalRules,
   toCssLayerOrderRule,
@@ -153,6 +154,7 @@ type LoadedCssConfig = {
   path: string | null;
   dependencies: string[];
   imports: string[];
+  themeMode: ThemeMode;
   resolution: "static" | "dynamic" | "hybrid";
   hasExplicitResolution: boolean;
   debug: {
@@ -173,6 +175,7 @@ type LoadedCssConfig = {
     layers?: string[];
     defaultUnit?: string;
     utilities?: NormalizedStyleSheet;
+    themeMode?: ThemeMode;
     resolution?: "static" | "dynamic" | "hybrid";
     debug?: {
       enabled?: boolean;
@@ -1334,6 +1337,12 @@ function normalizeResolution(value: unknown): "static" | "dynamic" | "hybrid" {
   return "hybrid";
 }
 
+function normalizeThemeMode(value: unknown): ThemeMode {
+  return value === "scope" || value === "color-scheme"
+    ? value
+    : "color-scheme";
+}
+
 function normalizeDebugOptions(
   value: unknown,
 ): { logDynamic: boolean; logStatic: boolean } {
@@ -1709,6 +1718,7 @@ function loadCssConfig(
       path: null,
       dependencies: [],
       imports: [],
+      themeMode: "color-scheme",
       resolution: "hybrid",
       hasExplicitResolution: false,
       debug: {
@@ -1723,7 +1733,9 @@ function loadCssConfig(
       utilities: {},
       configCss: "",
       utilityCss: "",
-      runtimeOptions: {},
+      runtimeOptions: {
+        themeMode: "color-scheme",
+      },
     };
   }
 
@@ -2019,6 +2031,7 @@ function loadCssConfig(
     "resolution",
   );
   const resolution = normalizeResolution(configObject.resolution);
+  const themeMode = normalizeThemeMode(configObject.themeMode);
   const debug = normalizeDebugOptions(configObject.debug);
   const breakpoints = normalizeBreakpoints(configObject.breakpoints);
   const containers = normalizeContainers(configObject.containers);
@@ -2029,7 +2042,10 @@ function loadCssConfig(
       configObject,
       "themes",
     )
-    ? parseCtConfig({ themes: configObject.themes }, { containers })
+    ? parseCtConfig(
+      { themes: configObject.themes },
+      { containers, themeMode },
+    )
     : null;
   const parsedUtilities = isRecord(configObject.utilities)
     ? parseCtConfig({ base: configObject.utilities }, { containers })
@@ -2101,12 +2117,14 @@ function loadCssConfig(
   if (Object.keys(utilitiesParsed).length > 0) {
     runtimeOptions.utilities = utilitiesParsed;
   }
+  runtimeOptions.themeMode = themeMode;
   runtimeOptions.resolution = resolution;
 
   return {
     path: configPath,
     dependencies: Array.from(dependencies),
     imports: allImports,
+    themeMode,
     resolution,
     hasExplicitResolution,
     debug,
@@ -3844,6 +3862,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     path: null,
     dependencies: [],
     imports: [],
+    themeMode: "color-scheme",
     resolution: "hybrid",
     hasExplicitResolution: false,
     debug: {
@@ -3858,7 +3877,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
     utilities: {},
     configCss: "",
     utilityCss: "",
-    runtimeOptions: {},
+    runtimeOptions: {
+      themeMode: "color-scheme",
+    },
   };
   let resolverInitialized = false;
 
@@ -4556,11 +4577,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
           {
             utilities: cssConfig.utilities,
             containers: cssConfig.containers,
+            themeMode: cssConfig.themeMode,
           },
         ) ??
           parseCtCallArguments(call.arg, {
             utilities: cssConfig.utilities,
             containers: cssConfig.containers,
+            themeMode: cssConfig.themeMode,
           });
         if (!parsed) {
           if (resolution === "static") {
@@ -4868,6 +4891,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 {
                   utilities: cssConfig.utilities,
                   containers: cssConfig.containers,
+                  themeMode: cssConfig.themeMode,
                 },
               ) ?? parseCtCallArguments(
                 `{ ${
@@ -4876,6 +4900,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
                 {
                   utilities: cssConfig.utilities,
                   containers: cssConfig.containers,
+                  themeMode: cssConfig.themeMode,
                 },
               );
 
@@ -4997,6 +5022,7 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
         const parsed = parseCtConfig(configParts, {
           utilities: cssConfig.utilities,
           containers: cssConfig.containers,
+          themeMode: cssConfig.themeMode,
         });
         if (!parsed) {
           if (resolution === "static") {

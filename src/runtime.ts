@@ -12,6 +12,7 @@ import {
   StyleSheet,
   StyleValue,
   TailwindClassValue,
+  type ThemeMode,
   themesToConfig,
   toCssDeclaration,
   toCssGlobalRules,
@@ -124,6 +125,8 @@ type CompiledConfig<T extends StyleSheetInput> = {
 type CtRuntimeOptions = CssSerializationOptions & {
   /** Utility declarations available for `@apply` references. */
   utilities?: StyleSheetInput;
+  /** Theme expansion mode used for `themes`. */
+  themeMode?: ThemeMode;
   /** Style resolution mode from `css.config.ts`. */
   resolution?: "static" | "dynamic" | "hybrid";
   /** Dev-only debug logging settings injected by the Vite plugin. */
@@ -948,7 +951,10 @@ function compileAccessorFactory<
     defaultUnit: runtimeOptions.defaultUnit,
   };
 
-  const importedThemes = themesToConfig(config.themes);
+  const importedThemes = themesToConfig(
+    config.themes,
+    runtimeOptions.themeMode,
+  );
   const rootVarStyles = rootVarsToGlobalRules([
     ...importedThemes.root,
     ...(config.root ?? config.rootVars ?? []),

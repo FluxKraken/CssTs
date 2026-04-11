@@ -282,6 +282,10 @@ Keys in `themes` behave like this:
 - bare names like `dark` become scoped selectors such as `.dark`
 - explicit selectors like `".contrast"` are used as-is
 
+With `themeMode: "color-scheme"` in `css.config.ts`, only `default`/`root`/
+`:root` and `dark` are used. `default` stays on `:root`, and `dark` is emitted
+inside `@media (prefers-color-scheme: dark)`.
+
 ### React theme helper
 
 If you want a small React wrapper for TanStack Start or other React apps, import
@@ -342,6 +346,9 @@ The provider manages `document.documentElement.classList`, so root-like themes
 This helper is intentionally limited to root/default themes and class-backed
 theme keys. If you define a complex selector such as `[data-theme="dark"]`,
 manage that selector yourself instead of using the helper.
+
+`ThemeProvider` toggles classes on `document.documentElement`, so use
+`themeMode: "scope"` when you want runtime theme switching.
 
 ### Tailwind classes via `tw(...)` and `tailwind-merge`
 
@@ -511,6 +518,7 @@ export default {
   imports: ["./src/theme.css"],
   layers: ["reset", "theme", "components", "utilities"],
   defaultUnit: "rem",
+  themeMode: "color-scheme",
   resolution: "hybrid",
   breakpoints: {
     sm: "40rem",
@@ -531,6 +539,11 @@ export default {
   },
 };
 ```
+
+`themeMode: "color-scheme"` uses `themes.default` as the light/root theme and
+`themes.dark` inside `@media (prefers-color-scheme: dark)`. Use
+`themeMode: "scope"` to keep the existing class/selector-based `@scope`
+switching.
 
 Then consume those aliases in your builder:
 

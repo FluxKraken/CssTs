@@ -19,6 +19,7 @@ export default {
   include: ["./packages/ui"],
   layers: ["reset", "theme", "components", "utilities"],
   defaultUnit: "rem",
+  themeMode: "color-scheme",
   resolution: "hybrid",
   breakpoints: {
     sm: "40rem",

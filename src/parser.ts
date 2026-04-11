@@ -10,6 +10,7 @@ import {
   type StyleSheet,
   type StyleValue,
   type TailwindClassValue,
+  type ThemeMode,
   Theme,
   toTailwindVariantForNestedKey,
   toThemeVarName,
@@ -62,6 +63,7 @@ type ParseCtOptions = {
   imports?: Set<string>;
   utilities?: NormalizedStyleSheet;
   containers?: Record<string, { type?: string; rule: string }>;
+  themeMode?: ThemeMode;
 };
 
 type IdentifierReference = {
@@ -1365,6 +1367,17 @@ function toThemeScopeSelector(scope: string): string | null {
   return `.${trimmed}`;
 }
 
+function toColorSchemeThemeName(scope: string): "default" | "dark" | null {
+  const trimmed = scope.trim();
+  if (
+    trimmed.length === 0 || trimmed === "default" || trimmed === "root" ||
+    trimmed === ":root"
+  ) {
+    return "default";
+  }
+  return trimmed === "dark" ? "dark" : null;
+}
+
 function normalizeThemeVarsRecord(
   value: unknown,
   options: ParseCtOptions,
@@ -1412,6 +1425,29 @@ function normalizeImportedThemes(
 
     if (!vars) {
       return null;
+    }
+
+    if (options.themeMode === "color-scheme") {
+      const themeName = toColorSchemeThemeName(scope);
+      if (themeName === null) {
+        return null;
+      }
+
+      if (themeName === "default") {
+        root.push(vars);
+        continue;
+      }
+
+      const mediaKey = "@media (prefers-color-scheme: dark)";
+      const mediaRule = (global[mediaKey] as
+        | Record<string, StyleDeclaration | StyleValue>
+        | undefined) ??
+        {};
+      const currentRoot =
+        (mediaRule[":root"] as Record<string, StyleValue> | undefined) ?? {};
+      mediaRule[":root"] = { ...currentRoot, ...vars };
+      global[mediaKey] = mediaRule as StyleDeclaration;
+      continue;
     }
 
     const selector = toThemeScopeSelector(scope);
