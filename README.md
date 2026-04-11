@@ -258,6 +258,67 @@ Keys in `themes` behave like this:
 - bare names like `dark` become scoped selectors such as `.dark`
 - explicit selectors like `".contrast"` are used as-is
 
+### React theme helper
+
+If you want a small React wrapper for TanStack Start or other React apps, import
+the provider from `@kt-tools/css-ts/react`.
+
+```ts
+import ct, { Theme } from "@kt-tools/css-ts";
+
+export const styles = new ct();
+
+styles.themes = {
+  default: new Theme({
+    surface: "#ffffff",
+    text: "#111827",
+  }),
+  dark: new Theme({
+    surface: "#111827",
+    text: "#f9fafb",
+  }),
+  blue: new Theme({
+    surface: "#eff6ff",
+    text: "#1e3a8a",
+  }),
+};
+```
+
+```tsx
+import { ThemeProvider, useTheme } from "@kt-tools/css-ts/react";
+import { styles } from "./styles";
+
+function ThemeToggle() {
+  const { theme, setTheme, toggleTheme, themes } = useTheme();
+
+  return (
+    <div>
+      <button onClick={toggleTheme}>Next theme ({theme})</button>
+      <button onClick={() => setTheme("blue")}>Use blue</button>
+      <span>{themes.join(", ")}</span>
+    </div>
+  );
+}
+
+export function App() {
+  return (
+    <ThemeProvider styles={styles} hotkey="mod+shift+t">
+      <ThemeToggle />
+    </ThemeProvider>
+  );
+}
+```
+
+`ThemeProvider` reads `styles.themes` in declaration order. With the example
+above, `toggleTheme()` rotates through `default` -> `dark` -> `blue` -> `default`.
+The provider manages `document.documentElement.classList`, so root-like themes
+(`default`, `root`, `:root`) apply no class, while `dark` applies `dark` and
+`.blue` applies `blue`.
+
+This helper is intentionally limited to root/default themes and class-backed
+theme keys. If you define a complex selector such as `[data-theme="dark"]`,
+manage that selector yourself instead of using the helper.
+
 ### Tailwind classes via `tw(...)` and `tailwind-merge`
 
 This is the most important integration point for mixed css-ts and Tailwind

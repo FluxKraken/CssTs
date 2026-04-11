@@ -7,6 +7,10 @@ import {
 import { dirname, join, toFileUrl } from "jsr:@std/path";
 import { twMerge } from "npm:tailwind-merge";
 import { cssTsPlugin } from "./src/vite.ts";
+import {
+  getNextThemeName,
+  resolveManagedThemeEntries,
+} from "./src/react.ts";
 import ct from "./src/runtime.ts";
 import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
 import {
@@ -62,6 +66,14 @@ function assertTypeCheckSucceeds(files: Record<string, string>): void {
   const repoRoot = Deno.cwd();
 
   try {
+    const packageJsonPath = join(repoRoot, "package.json");
+    try {
+      const packageJson = Deno.readTextFileSync(packageJsonPath);
+      Deno.writeTextFileSync(join(tempDir, "package.json"), packageJson);
+    } catch {
+      // Tests that do not rely on npm resolution do not need a copied package.json.
+    }
+
     const filePaths: string[] = [];
     for (const [relativePath, source] of Object.entries(files)) {
       const filePath = join(tempDir, relativePath);
@@ -548,6 +560,44 @@ Deno.test("Theme and tv map friendly theme tokens to css custom properties", () 
   assertEquals(
     tv.eval("linear-gradient(147deg, {headerBG}, {headerFG})"),
     "linear-gradient(147deg, var(--header-bg), var(--header-fg))",
+  );
+});
+
+Deno.test("ThemeProvider theme resolution maps root and class-backed scopes", () => {
+  assertEquals(
+    resolveManagedThemeEntries({
+      default: new Theme({ surface: "#fff" }),
+      dark: new Theme({ surface: "#111" }),
+      ".blue": new Theme({ surface: "#00f" }),
+    }),
+    [
+      { name: "default", className: null },
+      { name: "dark", className: "dark" },
+      { name: ".blue", className: "blue" },
+    ],
+  );
+  assertEquals(
+    getNextThemeName(
+      resolveManagedThemeEntries({
+        default: new Theme({ surface: "#fff" }),
+        dark: new Theme({ surface: "#111" }),
+        blue: new Theme({ surface: "#00f" }),
+      }),
+      "dark",
+    ),
+    "blue",
+  );
+});
+
+Deno.test("ThemeProvider rejects complex theme selectors it cannot manage", () => {
+  assertThrows(
+    () =>
+      resolveManagedThemeEntries({
+        default: new Theme({ surface: "#fff" }),
+        '[data-theme="dark"]': new Theme({ surface: "#111" }),
+      }),
+    Error,
+    "ThemeProvider can only manage default/root themes and class-backed theme scopes.",
   );
 });
 
@@ -1167,6 +1217,36 @@ Deno.test("type checking accepts boolean variant selections in route-like module
     "component.tsx": source,
     "src/routes/+page.ts": source,
     "src/pages/index.ts": source,
+  });
+});
+
+Deno.test("type checking accepts ThemeProvider and useTheme from the react entrypoint", () => {
+  const runtimeSpecifier = toFileUrl(join(Deno.cwd(), "src", "index.ts"))
+    .href;
+  const reactSpecifier = toFileUrl(join(Deno.cwd(), "react.ts")).href;
+  const source = `import { createElement } from "npm:react";\n` +
+    `import ct from ${JSON.stringify(runtimeSpecifier)};\n` +
+    `import { ThemeProvider, useTheme } from ${JSON.stringify(reactSpecifier)};\n` +
+    `const styles = new ct();\n` +
+    `styles.themes = {\n` +
+    `  default: new ct.Theme({ surface: "#fff" }),\n` +
+    `  dark: new ct.Theme({ surface: "#111" }),\n` +
+    `  blue: new ct.Theme({ surface: "#00f" }),\n` +
+    `};\n` +
+    `function Child() {\n` +
+    `  const { theme, themes, setTheme, toggleTheme } = useTheme();\n` +
+    `  setTheme("blue");\n` +
+    `  toggleTheme();\n` +
+    `  return createElement("div", null, theme, themes.join(","));\n` +
+    `}\n` +
+    `export const app = createElement(\n` +
+    `  ThemeProvider,\n` +
+    `  { styles, defaultTheme: "default", hotkey: "mod+shift+t" },\n` +
+    `  createElement(Child),\n` +
+    `);\n`;
+
+  assertTypeCheckSucceeds({
+    "src/routes/__root.tsx": source,
   });
 });
 
