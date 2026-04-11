@@ -1438,7 +1438,10 @@ function normalizeSimpleStyleSheet(
   value: unknown,
   options: ParseCtOptions,
 ): NormalizedStyleSheet | null {
-  const normalized = normalizeStyleDeclaration(value, options, true);
+  const wrappedValue = isPlainObject(value) && SIMPLE_STYLE_KEY in value
+    ? (value as Record<string, unknown>)[SIMPLE_STYLE_KEY]
+    : value;
+  const normalized = normalizeStyleDeclaration(wrappedValue, options, true);
   if (!normalized) {
     return null;
   }

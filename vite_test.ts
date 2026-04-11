@@ -12,7 +12,11 @@ import {
   resolveManagedThemeEntries,
 } from "./src/react.ts";
 import ct from "./src/runtime.ts";
-import { findNewCtDeclarations, parseCtCallArguments } from "./src/parser.ts";
+import {
+  findNewCtDeclarations,
+  parseCtCallArguments,
+  parseCtConfig,
+} from "./src/parser.ts";
 import {
   cv,
   font,
@@ -4766,6 +4770,42 @@ content.variant = { prose: { true: { color: "red" } } };`;
   assertEquals(decls[0].assignments.length, 2);
 });
 
+Deno.test("parser accepts pre-normalized simple config fragments", () => {
+  const partialBase = parseCtCallArguments(`{
+    simple: true,
+    base: {
+      background: tv.contentBackground,
+      color: tv.contentText,
+      "@apply": tw("w-full lg:w-5xl mx-auto"),
+      "@lg": { borderRadius: 0.5 },
+      "@xs": { textAlign: "justify" }
+    }
+  }`);
+  const partialVariant = parseCtCallArguments(`{
+    simple: true,
+    variant: {
+      prose: {
+        true: tw("prose max-w-none")
+      }
+    }
+  }`);
+
+  assert(partialBase !== null);
+  assert(partialVariant !== null);
+
+  const reparsed = parseCtConfig({
+    simple: true,
+    base: partialBase.base,
+    variant: partialVariant.variant,
+  });
+
+  assert(reparsed !== null);
+  assertEquals(
+    styleDeclarationOf(reparsed.base.__css_ts_simple__).background,
+    cv("--content-background"),
+  );
+});
+
 Deno.test("parser findNewCtDeclarations ignores commented assignments", () => {
   const code = `import ct from "css-ts";
 const styles = new ct();
@@ -4821,6 +4861,63 @@ Deno.test("vite extracts css from new ct({ simple: true }) pattern", () => {
   assertMatch(css, /\.ct_[a-z0-9]+\{display:grid;gap:1rem\}/);
   assertMatch(css, /\.ct_[a-z0-9]+\{color:red\}/);
 });
+
+Deno.test(
+  "vite statically extracts simple builder configs with tv references",
+  () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      const plugin = cssTsPlugin();
+      const configResolved = asHook(plugin.configResolved);
+      const transform = asHook(plugin.transform);
+      const load = asHook(plugin.load);
+      const id = `${root}/src/layout.tsx`;
+
+      Deno.mkdirSync(`${root}/src`, { recursive: true });
+      Deno.writeTextFileSync(
+        `${root}/css.config.js`,
+        `export default { resolution: "static" };\n`,
+      );
+
+      configResolved({ root, resolve: { alias: [] } });
+
+      const moduleCode = `import ct, { tw, tv } from "css-ts";\n` +
+        `export const Content = ({ children, prose }) => {\n` +
+        `  const content = new ct({ simple: true });\n` +
+        `  content.base = {\n` +
+        `    background: tv.contentBackground,\n` +
+        `    color: tv.contentText,\n` +
+        `    "@apply": tw("w-full lg:w-5xl mx-auto"),\n` +
+        `    "@lg": { borderRadius: 0.5 },\n` +
+        `    "@xs": { textAlign: "justify" },\n` +
+        `  };\n` +
+        `  content.variant = {\n` +
+        `    prose: {\n` +
+        `      true: tw("prose max-w-none"),\n` +
+        `    },\n` +
+        `  };\n` +
+        `  return <main className={content({ prose })}>{children ?? null}</main>;\n` +
+        `};\n`;
+
+      const transformed = transform(moduleCode, id);
+      assert(
+        transformed && typeof transformed === "object" && "code" in transformed,
+      );
+
+      const code = transformed.code as string;
+      assert(!code.includes(`new ct({ simple: true })`));
+      assert(code.includes(`"simple":true`));
+      assert(code.includes(`"--content-background"`));
+      assert(code.includes(`"--content-text"`));
+
+      const css = load(VIRTUAL_ID) as string;
+      assert(css.includes(`background:var(--content-background)`));
+      assert(css.includes(`color:var(--content-text)`));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  },
+);
 
 Deno.test("vite scopes new ct() builder transforms to each TSX component", () => {
   const plugin = cssTsPlugin();
