@@ -1,6 +1,4 @@
-/// <reference lib="dom" />
-
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   createContext,
   createElement,
@@ -14,6 +12,49 @@ import type { ImportedThemesInput } from "./shared.js";
 const DEFAULT_THEME_STORAGE_KEY = "css-ts:theme";
 
 const ROOT_THEME_NAMES = new Set(["", "default", "root", ":root"]);
+
+type StorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+
+type WindowLike = {
+  localStorage: StorageLike;
+  sessionStorage: StorageLike;
+  addEventListener(
+    type: "keydown",
+    listener: (event: KeyboardEventLike) => void,
+  ): void;
+  removeEventListener(
+    type: "keydown",
+    listener: (event: KeyboardEventLike) => void,
+  ): void;
+};
+
+type DocumentLike = {
+  documentElement: {
+    classList: {
+      add(...tokens: string[]): void;
+      remove(...tokens: string[]): void;
+    };
+  };
+};
+
+type NavigatorLike = {
+  platform?: string;
+  userAgentData?: {
+    platform?: string;
+  };
+};
+
+type KeyboardEventLike = {
+  key: string;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  preventDefault(): void;
+};
 
 /**
  * Runtime shape accepted by {@link ThemeProvider} for automatic theme discovery.
@@ -127,15 +168,16 @@ function resolveDefaultThemeName(
 
 function resolveStorage(
   storageMode: ThemeStorageMode,
-): Storage | null {
-  if (storageMode === false || typeof window === "undefined") {
+): StorageLike | null {
+  const browserWindow = (globalThis as { window?: WindowLike }).window;
+  if (storageMode === false || !browserWindow) {
     return null;
   }
 
   try {
     return storageMode === "local"
-      ? window.localStorage
-      : window.sessionStorage;
+      ? browserWindow.localStorage
+      : browserWindow.sessionStorage;
   } catch {
     return null;
   }
@@ -178,11 +220,12 @@ function applyThemeClassNames(
   entries: readonly ManagedThemeEntry[],
   activeTheme: string,
 ): void {
-  if (typeof document === "undefined") {
+  const doc = (globalThis as { document?: DocumentLike }).document;
+  if (!doc) {
     return;
   }
 
-  const root = document.documentElement;
+  const root = doc.documentElement;
   const managedClassNames = entries
     .map((entry) => entry.className)
     .filter((className): className is string => className !== null);
@@ -240,14 +283,14 @@ function normalizeHotkeyKey(key: string): string {
 }
 
 function isApplePlatform(): boolean {
-  if (typeof navigator === "undefined") {
+  const browserNavigator = (globalThis as { navigator?: NavigatorLike })
+    .navigator;
+  if (!browserNavigator) {
     return false;
   }
 
   const platform =
-    (navigator as Navigator & { userAgentData?: { platform?: string } })
-      .userAgentData?.platform ??
-    navigator.platform;
+    browserNavigator.userAgentData?.platform ?? browserNavigator.platform ?? "";
   return /mac|iphone|ipad|ipod/i.test(platform);
 }
 
@@ -307,7 +350,7 @@ function parseHotkey(hotkey: string): HotkeyConfig | null {
   return hotkeyConfig;
 }
 
-function matchesHotkey(event: KeyboardEvent, hotkey: HotkeyConfig): boolean {
+function matchesHotkey(event: KeyboardEventLike, hotkey: HotkeyConfig): boolean {
   return (
     event.key.toLowerCase() === hotkey.key &&
     event.altKey === hotkey.alt &&
@@ -328,7 +371,7 @@ export function ThemeProvider({
   hotkey,
   storage = "session",
   storageKey = DEFAULT_THEME_STORAGE_KEY,
-}: ThemeProviderProps) {
+}: ThemeProviderProps): ReactElement {
   const managedThemes = useMemo(
     () => resolveManagedThemeEntries(themes ?? styles?.themes),
     [styles?.themes, themes],
@@ -370,7 +413,8 @@ export function ThemeProvider({
   }, [hasLoadedStoredTheme, managedThemes, storage, storageKey, theme]);
 
   useEffect(() => {
-    if (!hotkey || typeof window === "undefined") {
+    const browserWindow = (globalThis as { window?: WindowLike }).window;
+    if (!hotkey || !browserWindow) {
       return;
     }
 
@@ -380,7 +424,7 @@ export function ThemeProvider({
     }
     const hotkeyConfig = parsedHotkey;
 
-    function onKeyDown(event: KeyboardEvent): void {
+    function onKeyDown(event: KeyboardEventLike): void {
       if (!matchesHotkey(event, hotkeyConfig)) {
         return;
       }
@@ -389,8 +433,8 @@ export function ThemeProvider({
       setThemeState((currentTheme) => getNextThemeName(managedThemes, currentTheme));
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    browserWindow.addEventListener("keydown", onKeyDown);
+    return () => browserWindow.removeEventListener("keydown", onKeyDown);
   }, [hotkey, managedThemes]);
 
   function setTheme(nextTheme: string): void {
