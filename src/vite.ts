@@ -4224,18 +4224,13 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             assignments: decl.assignments,
           };
         });
-      const builderRanges = newCtDecls.flatMap((decl) => [
-        { start: decl.initializerStart, end: decl.initializerEnd },
-        ...decl.assignments.map((assignment) => ({
-          start: assignment.start,
-          end: assignment.end,
-        })),
-      ]);
-      const calls = (astTargets?.calls ?? findCtCalls(nextCode)).filter((call) =>
-        !builderRanges.some((range) =>
-          call.start >= range.start && call.end <= range.end
-        )
-      );
+      const calls = astTargets?.calls ??
+        findCtCalls(nextCode).filter((call) =>
+          !newCtDecls.some((decl) =>
+            call.start >= decl.initializerStart &&
+            call.end <= decl.initializerEnd
+          )
+        );
       if (calls.length === 0 && newCtDecls.length === 0) {
         if (!isSvelte && !isAstro) {
           return null;
