@@ -4208,7 +4208,6 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const astTargets = !isSvelte && !isAstro
         ? collectAstTransformTargets(nextCode, normalizedId)
         : null;
-      const calls = astTargets?.calls ?? findCtCalls(nextCode);
       const newCtDecls: AstNewCtDeclaration[] = astTargets?.newCtDecls ??
         findNewCtDeclarations(nextCode).map((decl) => {
           return {
@@ -4225,6 +4224,18 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
             assignments: decl.assignments,
           };
         });
+      const builderRanges = newCtDecls.flatMap((decl) => [
+        { start: decl.initializerStart, end: decl.initializerEnd },
+        ...decl.assignments.map((assignment) => ({
+          start: assignment.start,
+          end: assignment.end,
+        })),
+      ]);
+      const calls = (astTargets?.calls ?? findCtCalls(nextCode)).filter((call) =>
+        !builderRanges.some((range) =>
+          call.start >= range.start && call.end <= range.end
+        )
+      );
       if (calls.length === 0 && newCtDecls.length === 0) {
         if (!isSvelte && !isAstro) {
           return null;

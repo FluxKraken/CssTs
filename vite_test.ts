@@ -5026,6 +5026,37 @@ Deno.test("vite extracts css from new ct({ simple: true }) pattern", () => {
 });
 
 Deno.test(
+  "vite does not double-transform ct() inside new ct({ simple: true }) in svelte",
+  () => {
+    const plugin = cssTsPlugin();
+    const transform = asHook(plugin.transform);
+    const source = `<script lang="ts">\n` +
+      `import ct from "css-ts";\n` +
+      `let { children } = $props();\n` +
+      `const wrapper = new ct({ simple: true });\n` +
+      `wrapper.base = {\n` +
+      `  display: "grid",\n` +
+      `  gridTemplateRows: ["auto", "1fr", "auto"],\n` +
+      `  "@page": { gap: 1 },\n` +
+      `  minHeight: "100svh",\n` +
+      `};\n` +
+      `</script>\n` +
+      `<div class={wrapper()}>{@render children?.()}</div>\n`;
+
+    const transformed = transform(source, "/app/src/lib/Container.svelte");
+    assert(
+      transformed && typeof transformed === "object" && "code" in transformed,
+    );
+
+    const code = transformed.code as string;
+    assert(!code.includes("new ct("));
+    assert(!code.includes("ct({ simple: true })"));
+    assertEquals(code.match(/\bct\(/g)?.length ?? 0, 1);
+    assert(code.includes(`"simple":true`));
+  },
+);
+
+Deno.test(
   "vite statically extracts simple builder configs with tv references",
   () => {
     const root = Deno.makeTempDirSync();
