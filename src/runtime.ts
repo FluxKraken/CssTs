@@ -179,6 +179,7 @@ const RESOLVED_STYLE_KIND = "css-ts-style";
 let runtimeManagedTagCounter = 0;
 const injectedRules = new Set<string>();
 const injectedImportRules = new Set<string>();
+let lastInjectionDocument: DocumentLike | null = null;
 
 type StyleTag = {
   id: string;
@@ -255,7 +256,15 @@ function createEmptySimpleStyleAccessor<
 
 function injectRule(rule: string): void {
   const doc = (globalThis as unknown as { document?: DocumentLike }).document;
-  if (!doc || injectedRules.has(rule)) {
+  if (!doc) {
+    return;
+  }
+  if (doc !== lastInjectionDocument) {
+    injectedRules.clear();
+    injectedImportRules.clear();
+    lastInjectionDocument = doc;
+  }
+  if (injectedRules.has(rule)) {
     return;
   }
 
@@ -272,7 +281,15 @@ function injectRule(rule: string): void {
 
 function injectImportRule(rule: string): void {
   const doc = (globalThis as unknown as { document?: DocumentLike }).document;
-  if (!doc || injectedImportRules.has(rule)) {
+  if (!doc) {
+    return;
+  }
+  if (doc !== lastInjectionDocument) {
+    injectedRules.clear();
+    injectedImportRules.clear();
+    lastInjectionDocument = doc;
+  }
+  if (injectedImportRules.has(rule)) {
     return;
   }
 

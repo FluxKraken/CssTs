@@ -4260,6 +4260,9 @@ export function cssTsPlugin(options: CssTsPluginOptions = {}): any {
       const runtimeOptionsForRuntime: LoadedCssConfig["runtimeOptions"] = {
         ...cssConfig.runtimeOptions,
       };
+      if (runtimeOptionsForRuntime.themeMode === "color-scheme") {
+        delete runtimeOptionsForRuntime.themeMode;
+      }
       runtimeOptionsForRuntime.resolution = resolution;
       if (server && (cssConfig.debug.logDynamic || cssConfig.debug.logStatic)) {
         runtimeOptionsForRuntime.debug = {

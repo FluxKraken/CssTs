@@ -1793,6 +1793,66 @@ Deno.test("runtime injects themes root vars and prefers-color-scheme rules", () 
   }
 });
 
+Deno.test("runtime reinjects deduped rules when document instance changes", () => {
+  type FakeStyleTag = {
+    id: string;
+    textContent: string;
+    appendChild: (node: unknown) => void;
+  };
+  type FakeDocument = {
+    getElementById: (id: string) => FakeStyleTag | null;
+    createElement: (_tag: "style") => FakeStyleTag;
+    createTextNode: (text: string) => string;
+    head: { appendChild: (node: unknown) => void };
+  };
+
+  function createFakeDocument(tags: Map<string, FakeStyleTag>): FakeDocument {
+    return {
+      getElementById(id: string) {
+        return tags.get(id) ?? null;
+      },
+      createElement(_tag: "style"): FakeStyleTag {
+        return {
+          id: "",
+          textContent: "",
+          appendChild(node: unknown) {
+            this.textContent += String(node);
+          },
+        };
+      },
+      createTextNode(text: string) {
+        return text;
+      },
+      head: {
+        appendChild(node: unknown) {
+          const tag = node as FakeStyleTag;
+          tags.set(tag.id, tag);
+        },
+      },
+    };
+  }
+
+  const globals = globalThis as Record<string, unknown>;
+  const originalDocument = globals.document;
+
+  try {
+    const firstTags = new Map<string, FakeStyleTag>();
+    globals.document = createFakeDocument(firstTags);
+    ct({ base: { header: { color: "red" } } })();
+    const firstCss = firstTags.get("__css_ts_runtime_styles")?.textContent ?? "";
+    assert(firstCss.includes("color:red"));
+
+    const secondTags = new Map<string, FakeStyleTag>();
+    globals.document = createFakeDocument(secondTags);
+    ct({ base: { header: { color: "red" } } })();
+    const secondCss =
+      secondTags.get("__css_ts_runtime_styles")?.textContent ?? "";
+    assert(secondCss.includes("color:red"));
+  } finally {
+    globals.document = originalDocument;
+  }
+});
+
 Deno.test("parser requires unquoted variant keys to be declared in base", () => {
   const parsed = parseCtCallArguments(`{
     base: {
