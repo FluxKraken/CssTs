@@ -1191,6 +1191,74 @@ Deno.test("parser accepts boolean defaults variant selections", () => {
   assertEquals(parsed.defaults, { prose: false });
 });
 
+Deno.test("TypeScript completions include camelCase CSS properties in style declarations", async () => {
+  const ts = await import("npm:typescript");
+  const cwd = Deno.cwd();
+  const fileName = join(cwd, "completion-test.ts");
+  const source = `import ct from "./mod.ts";
+
+const styles = new ct();
+styles.base = {
+  nav: {
+    text
+  },
+  navLink: {
+    hover: {
+      text
+    },
+  },
+};
+`;
+  const files = new Map<string, string>([[fileName, source]]);
+  const compilerOptions = {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    allowImportingTsExtensions: true,
+    strict: true,
+    skipLibCheck: true,
+  };
+  const host = {
+    getScriptFileNames: () => [fileName],
+    getScriptVersion: () => "0",
+    getScriptSnapshot: (name: string) => {
+      const text = files.get(name) ?? ts.sys.readFile(name);
+      return text === undefined
+        ? undefined
+        : ts.ScriptSnapshot.fromString(text);
+    },
+    getCurrentDirectory: () => cwd,
+    getCompilationSettings: () => compilerOptions,
+    getDefaultLibFileName: (options: typeof compilerOptions) =>
+      ts.getDefaultLibFilePath(options),
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    realpath: ts.sys.realpath,
+  };
+  const service = ts.createLanguageService(host);
+  const positions = [...source.matchAll(/text/g)].map((match) =>
+    (match.index ?? 0) + "text".length
+  );
+
+  for (const position of positions) {
+    const completions = service.getCompletionsAtPosition(
+      fileName,
+      position,
+      {},
+    );
+    const names = new Set(
+      completions?.entries.map((entry: { name: string }) => entry.name) ?? [],
+    );
+
+    assert(names.has("textAlign"));
+    assert(names.has("textDecoration"));
+    assert(names.has("textUnderlineOffset"));
+  }
+});
+
 Deno.test("type checking accepts boolean variant selections in route-like modules", () => {
   const runtimeSpecifier = toFileUrl(join(Deno.cwd(), "src", "index.ts"))
     .href;

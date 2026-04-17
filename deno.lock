@@ -6,6 +6,7 @@
     "jsr:@std/path@*": "1.1.4",
     "npm:@types/node@^22.10.2": "22.19.11",
     "npm:@types/react@^19.2.2": "19.2.14",
+    "npm:csstype@^3.2.3": "3.2.3",
     "npm:react@*": "19.2.4",
     "npm:react@^19.2.0": "19.2.4",
     "npm:tailwind-merge@*": "3.5.0",
@@ -59,9 +60,13 @@
     }
   },
   "workspace": {
+    "dependencies": [
+      "npm:csstype@^3.2.3"
+    ],
     "packageJson": {
       "dependencies": [
         "npm:@types/react@^19.2.2",
+        "npm:csstype@^3.2.3",
         "npm:react@^19.2.0"
       ]
     }

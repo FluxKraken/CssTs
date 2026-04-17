@@ -1,3 +1,5 @@
+import type * as CSS from "csstype";
+
 /** Primitive CSS value before unit formatting. */
 export type PrimitiveStyleValue = string | number;
 
@@ -88,6 +90,11 @@ export type ApplyInput =
   | NestedStyleDeclaration
   | LayeredApplyInput
   | readonly ApplyInput[];
+type CssPropertyName = keyof CSS.Properties;
+/** Known camelCase CSS property names surfaced for TypeScript completions. */
+type CssPropertyDeclaration = {
+  [Property in CssPropertyName]?: StyleValue;
+};
 /** CSS custom properties emitted on `:root` (optionally within a layer). */
 export type RootVarInput =
   | Record<string, StyleValue>
@@ -106,13 +113,13 @@ export type ImportedThemesInput = Record<string, ThemeInput>;
 /** Flat style object with only CSS declarations. */
 export type PseudoStyleDeclaration = Record<string, StyleValue>;
 /** Recursive style object supporting nested selectors and at-rules. */
-export interface NestedStyleDeclaration {
+export type NestedStyleDeclaration = CssPropertyDeclaration & {
   [key: string]:
     | StyleValue
     | NestedStyleDeclaration
     | ApplyInput
     | SetInput;
-}
+};
 /** Style object for a single class name. */
 export type StyleDeclaration = NestedStyleDeclaration;
 /** Map of class keys to their style declarations. */

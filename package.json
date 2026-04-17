@@ -6,6 +6,9 @@
     "@types/react": "^19.2.2",
     "react": "^19.2.0"
   },
+  "dependencies": {
+    "csstype": "^3.2.3"
+  },
   "optionalDependencies": {
     "tailwind-merge": "^3.5.0"
   },
